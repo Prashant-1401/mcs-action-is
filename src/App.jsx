@@ -81,36 +81,38 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   const [meetings,   setMeetingsRaw]= useState(defaultMeetings);
   const [projects,   setProjectsRaw]= useState(defaultProjects);
 
+  const fetchData = useCallback(async () => {
+    if (!SHEET_ENABLED) { setDbReady(true); return; }
+    try {
+      const [u, p, d, a, m, pr] = await Promise.all([
+        sheetGet("Users"),
+        sheetGet("Plants"),
+        sheetGet("Departments"),
+        sheetGet("Actions"),
+        sheetGet("Meetings"),
+        sheetGet("Projects"),
+      ]);
+      const sanitize=(arr,prefix)=>arr
+        .filter(x => x && (x.id || x.text || x.name || x.label || x.sn))
+        .map((x,i)=>({...x,id: (x.id && String(x.id).trim()) ? x.id : `${prefix}-${i}`}));
+      if (u.length)  setUsersRaw(sanitize(u, "u"));
+      if (p.length)  setPlantsRaw(sanitize(p, "p"));
+      if (d.length)  setDeptsRaw(sanitize(d, "d"));
+      if (a.length)  setActionsRaw(sanitize(a, "a"));
+      if (m.length)  setMeetingsRaw(sanitize(m, "m"));
+      if (pr.length) setProjectsRaw(sanitize(pr,"pr"));
+      setDbReady(true);
+    } catch (e) {
+      console.warn("Sheet load failed, using seeds:", e.message);
+      setDbError(e.message);
+      setDbReady(true);
+    }
+  }, []);
+
   // ── initial load ──
   useEffect(() => {
-    if (!SHEET_ENABLED) { setDbReady(true); return; }
-    (async () => {
-      try {
-        const [u, p, d, a, m, pr] = await Promise.all([
-          sheetGet("Users"),
-          sheetGet("Plants"),
-          sheetGet("Departments"),
-          sheetGet("Actions"),
-          sheetGet("Meetings"),
-          sheetGet("Projects"),
-        ]);
-        const sanitize=(arr,prefix)=>arr
-          .filter(x => x && (x.id || x.text || x.name || x.label || x.sn))
-          .map((x,i)=>({...x,id: (x.id && String(x.id).trim()) ? x.id : `${prefix}-${i}`}));
-        if (u.length)  setUsersRaw(sanitize(u, "u"));
-        if (p.length)  setPlantsRaw(sanitize(p, "p"));
-        if (d.length)  setDeptsRaw(sanitize(d, "d"));
-        if (a.length)  setActionsRaw(sanitize(a, "a"));
-        if (m.length)  setMeetingsRaw(sanitize(m, "m"));
-        if (pr.length) setProjectsRaw(sanitize(pr,"pr"));
-        setDbReady(true);
-      } catch (e) {
-        console.warn("Sheet load failed, using seeds:", e.message);
-        setDbError(e.message);
-        setDbReady(true);
-      }
-    })();
-  }, []);
+    fetchData();
+  }, [fetchData]);
 
   // ── write wrappers ──
   const setUsers = useCallback((fn) => {
@@ -162,7 +164,7 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   }, []);
 
   return {
-    dbReady, dbError,
+    dbReady, dbError, fetchData,
     users, setUsers,
     plants, setPlants,
     depts, setDepts,
@@ -1423,7 +1425,7 @@ function HomePage({actions,setActions,user,setPage,users,meetings,setGlobalActiv
 function ProjectCharterModal({pr,onClose,actions,meetings,user,onProjectUpdate,onActionSelect,users:allUsers}){
   useEscClose(onClose);
   const [editMode,setEditMode]=useState(false);
-  const [draft,setDraft]=useState({...pr,milestones:[...pr.milestones.map(m=>({...m}))],team:[...(pr.team||[])],risks:pr.risks||""});
+  const [draft,setDraft]=useState({...pr,milestones:[...(Array.isArray(pr.milestones)?pr.milestones:[]).map(m=>({...m}))],team:[...(pr.team||[])],risks:pr.risks||""});
   const canEdit=user?.role==="Admin"||(user?.name===pr.owner)||(user?.name===pr.sponsor);
   const pActions=actions.filter(a=>a.project===pr.name);
   const projectMeetings=(meetings||[]).filter(m=>m.project===pr.name);
@@ -1751,7 +1753,7 @@ function WorkPage({plants,depts,users,onCommitFinal,actions,user,onProjectUpdate
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             {visibleProjects.map((pr,idx)=>{
               const start=new Date(pr.start),end=new Date(pr.end),now2=new Date();
-              const ms=pr.milestones||[];
+              const ms=Array.isArray(pr.milestones)?pr.milestones:[];
               const done=ms.filter(m=>m.done).length;
               const total=ms.length;
               const milestonePct=total>0?Math.round(done/total*100):0;
@@ -2053,12 +2055,20 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
   const [analyzingPara,setAnalyzingPara]=useState(false);
    const [sttLang,setSttLang]=useState("hi-IN"); // "en-IN" or "hi-IN" — hi-IN works better for Hinglish/Indian accents
   const [translating,setTranslating]=useState(false);
+  // Track consecutive API failures to back off when backend unavailable
+  const apiFailCountRef=useRef(0);
+  const API_FAIL_LIMIT=3;
 
   const txRef=useRef(null);
   const insightsRef=useRef(null);
   const recognitionRef=useRef(null);
   const paraBufferRef=useRef(""); // accumulates words between silences
   const silenceTimerRef=useRef(null);
+  // 2-minute batch analysis refs
+  const batchTimerRef=useRef(null);
+  const lastAnalyzedIdxRef=useRef(0); // tracks which txLines were already analyzed
+  const [batchCountdown,setBatchCountdown]=useState(120); // seconds until next analysis
+  const batchCountdownRef=useRef(null);
   const instructions=MTG_INSTRUCTIONS[mtg.type]||["Follow meeting agenda","Capture all action points","Assign clear owners and due dates","Confirm previous actions before closing"];
   const attendees=ATTENDEE_MAP[mtg.type]||[];
 
@@ -2081,6 +2091,11 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
        return rawTxt.trim();
      }
      
+     // Back off if backend repeatedly unavailable
+     if(apiFailCountRef.current>=API_FAIL_LIMIT){
+       return rawTxt.trim();
+     }
+     
      try {
        setTranslating(true);
        const res=await fetch(`${API_BASE_URL}/api/translate`,{
@@ -2090,14 +2105,19 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
        });
        const data=await res.json();
        setTranslating(false);
+       apiFailCountRef.current=0; // reset on success
        return data.translated||rawTxt;
-     } catch(e){console.warn("Translation failed:",e);setTranslating(false);return rawTxt;}
+     } catch(e){console.warn("Translation failed:",e);setTranslating(false);apiFailCountRef.current++;return rawTxt;}
     },[/* no deps */]);
 
    // ── Analyze a paragraph via backend Gemini ───────────────────────────────
    // Auto-detects if text contains Hindi (Devanagari) to set source_lang appropriately
    const analyzeParagraph=useCallback(async(para)=>{
      if(!para||para.trim().length<20) return;
+     // Back off if backend repeatedly unavailable
+     if(apiFailCountRef.current>=API_FAIL_LIMIT){
+       return;
+     }
      setAnalyzingPara(true);
      try {
        // Detect script: if Devanagari present → Hindi, else English/Hinglish Roman
@@ -2114,6 +2134,7 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
          })
        });
        const parsed=await res.json();
+       apiFailCountRef.current=0; // reset on success
        const insight={
          id:Date.now(),
          para:para.trim(),
@@ -2135,7 +2156,7 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
          }
          return p;
        });
-     } catch(e){console.warn("Insight analysis failed:",e);}
+     } catch(e){console.warn("Insight analysis failed:",e);apiFailCountRef.current++;}
      setAnalyzingPara(false);
    },[mtg.type,setInsights]);
 
@@ -2180,29 +2201,18 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
            return displayTxt;
          };
          
-         // Process text through smart translation
+         // Process text through smart translation — display only, no per-paragraph analysis
          const rawPara=finalTxt.trim();
          processTxt(rawPara).then(processed=>{
            setTxLines(p=>{
              const last=p[p.length-1]||"";
              const combined=last+(last?" ":"")+processed;
              if(combined.length>150||/[.!?।]\s*$/.test(processed)){
-               const para=combined.trim();
-               setTimeout(()=>analyzeParagraph(para),100);
                return [...p.slice(0,-1),combined.trim(),""];
              }
              return p.length===0?[processed]:[...p.slice(0,-1),combined.trim()];
            });
          });
-         
-         // Silence timer — analyze buffer after 4s of no speech
-         clearTimeout(silenceTimerRef.current);
-         silenceTimerRef.current=setTimeout(()=>{
-           if(paraBufferRef.current.trim().length>20){
-             analyzeParagraph(paraBufferRef.current);
-             paraBufferRef.current="";
-           }
-         },4000);
        }
      };
 
@@ -2220,12 +2230,72 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
     }
     setSttStatus("idle");
     setSttInterim("");
-    // Analyze any remaining buffer
+    // Analyze any remaining buffer on stop
     if(paraBufferRef.current.trim().length>10){
-      analyzeParagraph(paraBufferRef.current);
       paraBufferRef.current="";
     }
-  },[analyzeParagraph]);
+  },[]);
+
+
+
+  // Latest txLines ref for interval access
+  const txLinesRef=useRef(txLines);
+  useEffect(()=>{txLinesRef.current=txLines;},[txLines]);
+
+  useEffect(()=>{
+    if(!running) {
+      // Stop batch timer when meeting paused
+      clearInterval(batchTimerRef.current);
+      clearInterval(batchCountdownRef.current);
+      return;
+    }
+    // Reset countdown
+    setBatchCountdown(120);
+    lastAnalyzedIdxRef.current=0;
+
+    // Countdown every second
+    batchCountdownRef.current=setInterval(()=>{
+      setBatchCountdown(c=>{
+        if(c<=1) return 120; // reset after triggering
+        return c-1;
+      });
+    },1000);
+
+    // Main 2-minute analysis interval
+    batchTimerRef.current=setInterval(()=>{
+      const lines=txLinesRef.current||[];
+      const startIdx=lastAnalyzedIdxRef.current;
+      const newLines=lines.slice(startIdx).filter(l=>l.trim());
+      if(newLines.length>0){
+        const batchText=newLines.join(" ").trim();
+        if(batchText.length>=20){
+          analyzeParagraph(batchText);
+        }
+        lastAnalyzedIdxRef.current=lines.length;
+      }
+      setBatchCountdown(120); // reset countdown
+    },120000); // 2 minutes
+
+    return()=>{
+      clearInterval(batchTimerRef.current);
+      clearInterval(batchCountdownRef.current);
+    };
+  },[running,analyzeParagraph]);
+
+  // When meeting stops, do one final analysis of remaining unanalyzed transcript
+  useEffect(()=>{
+    if(!running && txLines.length>0){
+      const startIdx=lastAnalyzedIdxRef.current;
+      const newLines=txLines.slice(startIdx).filter(l=>l.trim());
+      if(newLines.length>0){
+        const batchText=newLines.join(" ").trim();
+        if(batchText.length>=20){
+          analyzeParagraph(batchText);
+          lastAnalyzedIdxRef.current=txLines.length;
+        }
+      }
+    }
+  },[running]);// eslint-disable-line
 
   // Start/stop STT with meeting running state
   useEffect(()=>{
@@ -2484,17 +2554,39 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
               {analyzingPara&&<span style={{width:12,height:12,border:"2px solid #E69903",borderTopColor:"transparent",borderRadius:"50%",display:"inline-block",animation:"spin .7s linear infinite"}}/>}
             </div>
           </div>
+          {/* 2-min countdown bar */}
+          {running&&(
+            <div style={{background:T.bg,borderRadius:8,padding:"8px 12px",border:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:10}}>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                  <span style={{fontSize:10,fontWeight:700,color:T.text2,textTransform:"uppercase",letterSpacing:.5}}>Next AI Analysis</span>
+                  <span style={{fontSize:11,fontWeight:800,fontFamily:"monospace",color:batchCountdown<=10?T.red:batchCountdown<=30?T.amber:T.navy}}>
+                    {Math.floor(batchCountdown/60)}:{String(batchCountdown%60).padStart(2,"0")}
+                  </span>
+                </div>
+                <div style={{background:T.border,borderRadius:4,height:4,overflow:"hidden"}}>
+                  <div style={{height:"100%",borderRadius:4,background:batchCountdown<=10?T.red:batchCountdown<=30?T.amber:`linear-gradient(90deg,${T.navy},${T.amber})`,width:`${((120-batchCountdown)/120)*100}%`,transition:"width 1s linear"}}/>
+                </div>
+              </div>
+              <div style={{width:28,height:28,borderRadius:"50%",background:batchCountdown<=10?T.red+"15":T.navy+"10",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0,animation:batchCountdown<=10?"blink 1s infinite":"none"}}>
+                🧠
+              </div>
+            </div>
+          )}
           <div ref={insightsRef} style={{flex:1,minHeight:240,maxHeight:360,overflowY:"auto",display:"flex",flexDirection:"column",gap:10}}>
             {insights.length===0
               ?<div style={{textAlign:"center",padding:"32px 12px",color:T.text2}}>
                 <div style={{fontSize:28,marginBottom:8}}>🧠</div>
                 <div style={{fontSize:12,fontWeight:600}}>AI insights appear here</div>
-                <div style={{fontSize:11,marginTop:4}}>As you speak, each paragraph is analyzed for action items, decisions, and risks.</div>
+                <div style={{fontSize:11,marginTop:4}}>Transcript is analyzed every <b>2 minutes</b> for action items, decisions, and risks.</div>
               </div>
               :insights.map(ins=>(
-                <div key={ins.id} style={{background:T.bg,borderRadius:10,padding:12,border:`1px solid ${T.border}`}}>
-                  <div style={{fontSize:10,color:T.text2,marginBottom:6,fontWeight:600}}>🕐 {ins.ts}</div>
-                  <div style={{fontSize:11,color:"#555",fontStyle:"italic",marginBottom:8,lineHeight:1.5,borderLeft:`2px solid ${T.amber}`,paddingLeft:8}}>"{ins.para.slice(0,120)}{ins.para.length>120?"…":""}"</div>
+                <div key={ins.id} style={{background:T.bg,borderRadius:10,padding:12,border:`1px solid ${T.border}`,animation:"fadeIn .4s ease"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                    <div style={{fontSize:10,color:T.text2,fontWeight:600}}>🕐 {ins.ts}</div>
+                    <span style={{fontSize:9,background:T.navy+"15",color:T.navy,padding:"1px 7px",borderRadius:10,fontWeight:700}}>2-min batch</span>
+                  </div>
+                  <div style={{fontSize:11,color:"#555",fontStyle:"italic",marginBottom:8,lineHeight:1.5,borderLeft:`2px solid ${T.amber}`,paddingLeft:8}}>"{ins.para.slice(0,200)}{ins.para.length>200?"…":""}"</div>
                   {ins.actions.length>0&&(
                     <div style={{marginBottom:6}}>
                       <div style={{fontSize:10,fontWeight:700,color:T.navy,marginBottom:4,textTransform:"uppercase",letterSpacing:.5}}>Actions</div>
@@ -2536,7 +2628,7 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
             }
           </div>
           <div style={{fontSize:10,color:T.text2,textAlign:"center"}}>
-            {insights.length} paragraphs analyzed · {insights.reduce((n,i)=>n+i.actions.length,0)} actions found
+            {insights.length} batch{insights.length!==1?"es":""} analyzed · {insights.reduce((n,i)=>n+i.actions.length,0)} actions found
           </div>
         </div>
 
@@ -2646,6 +2738,17 @@ function StagingArea({staged,mtg,plants,depts,users,txLines,onCommit,onCloseMeet
     });
     onCommit(all);
   };
+  const exportTranscript=()=>{
+    if(!txLines||txLines.length===0)return;
+    const text=txLines.map((l,i)=>`${i+1}. ${l}`).join("\n\n");
+    const blob=new Blob([`Meeting: ${mtg.type}\nLocation: ${mtg.plant}\nDate: ${new Date().toLocaleDateString()}\n\n--- TRANSCRIPT ---\n\n${text}`],{type:"text/plain"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;
+    a.download=`Transcript_${mtg.type.replace(/\s+/g,'_')}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
   const hms=s=>`${String(Math.floor(s/3600)).padStart(2,"0")}:${String(Math.floor(s%3600/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
   return(
     <div className="fade-in">
@@ -2656,6 +2759,9 @@ function StagingArea({staged,mtg,plants,depts,users,txLines,onCommit,onCloseMeet
           <div style={{fontSize:12,color:T.text2}}>{mtg.type} · Duration: {hms(elapsedSecs||0)} · <b style={{color:T.green}}>{valid.length} ready</b> · {draft.length-valid.length} incomplete (will be saved as Unassigned)</div>
         </div>
         <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
+          <button className="btn btn-ghost" onClick={exportTranscript} disabled={!txLines||txLines.length===0} style={{border:`1px solid ${T.border}`}}>
+            📥 Export Transcript
+          </button>
           <button className="btn btn-green" onClick={commitAll} disabled={draft.filter(r=>r.text?.trim()).length===0}>
             ✓ Commit {draft.filter(r=>r.text?.trim()).length} Action{draft.filter(r=>r.text?.trim()).length!==1?"s":""}
           </button>
@@ -3314,7 +3420,7 @@ function TimelineView({fa}){
 }
 
 /* ===================== DASHBOARD ===================== */
-function DashboardPage({actions,plants,depts,users,audit,user,meetings,onViewEscalations}){
+function DashboardPage({actions,plants,depts,users,audit,user,meetings,onViewEscalations,refreshData}){
   const [drill,setDrill]=useState(null);
   const [deptDrill,setDeptDrill]=useState(null);
   const [mtgDrill,setMtgDrill]=useState(false);
@@ -3346,6 +3452,7 @@ function DashboardPage({actions,plants,depts,users,audit,user,meetings,onViewEsc
     <div className="fade-in">
       <PageHeader title="Dashboard" sub="Live accountability snapshot">
         <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+          {refreshData&&<button className="btn btn-ghost" onClick={refreshData} style={{border:`1px solid ${T.border}`,background:"#fff",fontSize:13,padding:"6px 14px"}}>🔄 Refresh Data</button>}
           <div style={{display:"flex",flexDirection:"column",gap:2}}>
             <span style={{fontSize:10,fontWeight:700,color:T.text2,textTransform:"uppercase",letterSpacing:.4}}>Plant</span>
             <select value={plantF} onChange={e=>setPlantF(e.target.value)} style={{padding:"6px 10px"}}>
@@ -3562,7 +3669,7 @@ function DashboardPage({actions,plants,depts,users,audit,user,meetings,onViewEsc
                           </div>
                           <div style={{display:"flex",gap:8,fontSize:11,color:T.text2}}>
                             {drill==="revisions"&&<span style={{fontWeight:700,color:T.amber}}>{a.revisions} revision{a.revisions!==1?"s":""}</span>}
-                            {drill==="escalated"&&<span style={{fontWeight:700,color:T.red}}>L{Math.max(...(audit.filter(e=>e.sn===a.sn).map(e=>e.level||1)))} escalated</span>}
+                            {drill==="escalated"&&<span style={{fontWeight:700,color:T.red}>L{Math.max(...(audit.filter(e=>e.sn===a.sn).map(e=>e.level||1)))} escalated</span>}
                             <span style={{color:isOverdue(a)?T.red:T.text2,fontWeight:isOverdue(a)?700:400}}>{isOverdue(a)?`${daysOver(a)}d overdue`:fmt(a.due)}</span>
                           </div>
                         </div>
@@ -4186,7 +4293,7 @@ export default function App(){
 
   // ── Google Sheet live database ──
   const {
-    dbReady, dbError,
+    dbReady, dbError, fetchData,
     users,    setUsers,
     plants,   setPlants,
     depts,    setDepts,
@@ -4297,7 +4404,7 @@ export default function App(){
         {page===0&&<HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} setGlobalActiveMtg={m=>{setGlobalActiveMtg(m);setMtgRunning(true);}}/>}
         {page===1&&<WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows=>{commitFinal(rows);clearMeetingState();}} actions={actions} user={user} onProjectUpdate={updated=>setProjects(p=>p.map(x=>x.id===updated.id?updated:x))} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} permissions={permissions} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m=>{setGlobalActiveMtg(m);if(m)setMtgRunning(true);}} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState}/>}
         {page===2&&<ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects}/>}
-        {page===3&&<DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={()=>setPage(4)}/>}
+        {page===3&&<DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={()=>setPage(4)} refreshData={fetchData}/>}
         {page===4&&<EscalationsPage actions={actions} audit={audit} user={user} setPage={setPage} users={users}/>}
         {page===99&&user?.role==="Admin"&&<MasterPage plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} permissions={permissions} setPermissions={setPermissions} escMatrix={escMatrix} setEscMatrix={setEscMatrix}/>}
       </Shell>

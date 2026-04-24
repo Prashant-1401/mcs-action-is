@@ -8,6 +8,7 @@ import smtplib
 from email.message import EmailMessage
 from typing import List, Dict, Any
 from dotenv import load_dotenv
+import requests
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,7 +19,7 @@ app = FastAPI()
 # 2. Add CORS Middleware so React can talk to this API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # This is Vite's default React port
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -61,6 +62,24 @@ class InsightsShareReq(BaseModel):
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "gemini_configured": bool(GEMINI_API_KEY)}
+
+# OLLAMA FALLBACK SETUP
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3")
+
+def call_ollama_fallback(prompt: str) -> str:
+    print(f"--- FALLBACK Triggered: Routing to local Ollama ({OLLAMA_MODEL}) ---")
+    try:
+        response = requests.post("http://localhost:11434/api/generate", json={
+            "model": OLLAMA_MODEL,
+            "prompt": prompt,
+            "stream": False
+        }, timeout=45)
+        response.raise_for_status()
+        return response.json().get("response", "")
+    except Exception as e:
+        print(f"Ollama fallback failed: {e}")
+        return ""
+
 
 # EMAIL ENGINE SETUP
 SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
@@ -145,10 +164,17 @@ async def extract_insights(req: MeetingReviewReq):
     """
     
     try:
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
-        
-        clean_json = response.text.strip()
+        text_resp = response.text
+    except Exception as e:
+        print(f"Gemini API failed in extract_insights: {e}")
+        text_resp = call_ollama_fallback(prompt)
+        if not text_resp:
+            return {"error": "Failed to parse AI response", "actions": []}
+            
+    try:
+        clean_json = text_resp.strip()
         if clean_json.startswith("```json"):
             clean_json = clean_json[7:]
         if clean_json.endswith("```"):
@@ -158,7 +184,7 @@ async def extract_insights(req: MeetingReviewReq):
         return {"actions": actions_list}
         
     except Exception as e:
-        print(f"Failed to parse Gemini output: {e}")
+        print(f"Failed to parse LLM output: {e}")
         return {"error": "Failed to parse AI response", "actions": []}
 
 # 7. Real-time paragraph analysis (called by frontend during live meeting)
@@ -191,10 +217,17 @@ async def analyze_paragraph(req: ParagraphAnalysisReq):
     """
 
     try:
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
+        text_resp = response.text
+    except Exception as e:
+        print(f"Gemini API failed in analyze_paragraph: {e}")
+        text_resp = call_ollama_fallback(prompt)
+        if not text_resp:
+            return {"actions": [], "decisions": [], "risks": [], "keyPoints": []}
 
-        clean_json = response.text.strip()
+    try:
+        clean_json = text_resp.strip()
         if clean_json.startswith("```json"):
             clean_json = clean_json[7:]
         if clean_json.endswith("```"):
@@ -204,7 +237,7 @@ async def analyze_paragraph(req: ParagraphAnalysisReq):
         return parsed
 
     except Exception as e:
-        print(f"Paragraph analysis failed: {e}")
+        print(f"Paragraph analysis parsing failed: {e}")
         return {"actions": [], "decisions": [], "risks": [], "keyPoints": []}
 
 # 8. Hindi to English translation (real-time during meeting)
@@ -225,10 +258,13 @@ Preserve all proper nouns (person names, place names, company names) as-is.
 Text: {req.text}"""
     
     try:
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
         translated = response.text.strip()
         return {"translated": translated, "original": req.text}
     except Exception as e:
-        print(f"Translation failed: {e}")
+        print(f"Gemini Translation failed: {e}")
+        text_resp = call_ollama_fallback(prompt)
+        if text_resp:
+            return {"translated": text_resp.strip(), "original": req.text}
         return {"translated": req.text, "original": req.text, "error": str(e)}
