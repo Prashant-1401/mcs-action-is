@@ -1,0 +1,234 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import google.generativeai as genai
+import os
+import json
+import smtplib
+from email.message import EmailMessage
+from typing import List, Dict, Any
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# 1. Initialize the FastAPI App
+app = FastAPI()
+
+# 2. Add CORS Middleware so React can talk to this API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # This is Vite's default React port
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 3. Configure Gemini AI
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+if not GEMINI_API_KEY:
+    print("WARNING: GEMINI_API_KEY not found in environment variables.")
+genai.configure(api_key=GEMINI_API_KEY)
+
+# 4. Define what data the Frontend will send us
+class MeetingReviewReq(BaseModel):
+    transcript: str
+    meeting_type: str
+    plant: str = ""
+
+class ParagraphAnalysisReq(BaseModel):
+    paragraph: str
+    meeting_type: str
+    source_lang: str = "en"  # "en" or "hi"
+
+class TranslateReq(BaseModel):
+    text: str
+    source: str = "hi"  # source language
+    target: str = "en"  # target language
+
+class EmailEscalateReq(BaseModel):
+    actions: List[Dict[str, Any]]
+    level: int
+    target: str
+
+class InsightsShareReq(BaseModel):
+    insights: List[Dict[str, Any]]
+    meeting_type: str
+    plant: str
+    recipients: List[str]
+
+# 5. Health check
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "gemini_configured": bool(GEMINI_API_KEY)}
+
+# EMAIL ENGINE SETUP
+SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASS = os.environ.get("SMTP_PASS", "")
+
+def send_email(to_emails: List[str], subject: str, html_content: str):
+    if not SMTP_USER or not SMTP_PASS:
+        print("--- DEMO EMAIL ENGINE (NO SMTP CREDS) ---")
+        print(f"TO: {to_emails}")
+        print(f"SUBJECT: {subject}")
+        print(f"BODY:\n{html_content}")
+        print("-----------------------------------------")
+        return True
+    try:
+        msg = EmailMessage()
+        msg['Subject'] = subject
+        msg['From'] = SMTP_USER
+        msg['To'] = ", ".join(to_emails)
+        msg.set_content("Please enable HTML viewing.", subtype='html')
+        msg.add_alternative(html_content, subtype='html')
+        
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.send_message(msg)
+        return True
+    except Exception as e:
+        print(f"Failed to send email: {e}")
+        return False
+
+@app.post("/api/email/escalate")
+async def email_escalate(req: EmailEscalateReq):
+    subject = f"🚨 Escalation Alert Level {req.level} for {req.target}"
+    body = f"<h2>Escalated Actions Level {req.level}</h2><ul>"
+    for a in req.actions:
+        body += f"<li><b>{a.get('sn')}</b>: {a.get('text')} - Overdue! (Priority: {a.get('priority')})</li>"
+    body += "</ul>"
+    
+    recipient = "admin@adroit.in"
+    send_email([recipient], subject, body)
+    return {"status": "ok"}
+
+@app.post("/api/email/share-insights")
+async def email_share_insights(req: InsightsShareReq):
+    subject = f"📊 Real-time Insights (5m) - {req.meeting_type} @ {req.plant}"
+    body = f"<h2>Meeting Insights</h2>"
+    for ins in req.insights:
+        body += f"<h3>[Paragraph at {ins.get('ts')}]</h3><ul>"
+        for act in ins.get('actions', []):
+            body += f"<li><b>Action:</b> {act.get('text')} (Resp: {act.get('responsible')})</li>"
+        for dec in ins.get('decisions', []):
+            body += f"<li><b>Decision:</b> {dec}</li>"
+        for rsk in ins.get('risks', []):
+            body += f"<li><b>Risk:</b> {rsk}</li>"
+        body += "</ul>"
+        
+    send_email(req.recipients if req.recipients else ["team@adroit.in"], subject, body)
+    return {"status": "ok"}
+
+# 6. Full transcript extraction (existing route)
+@app.post("/api/meetings/extract-insights")
+async def extract_insights(req: MeetingReviewReq):
+    prompt = f"""
+    You are an industrial management assistant. Analyze this meeting transcript and extract actionable tasks.
+    Return ONLY a valid JSON array of objects. Do not wrap it in markdown blockquotes.
+    
+    Each object must match this schema EXACTLY:
+    [
+      {{
+        "text": "The action description",
+        "responsible": "Name of the person assigned (or empty string if unassigned)",
+        "due": "YYYY-MM-DD (or empty string if no date mentioned)",
+        "section": "Production, Maintenance, Quality, Safety, Electrical, Mechanical, Instrumentation, Stores & Logistics, or General",
+        "priority": "CRITICAL, WARNING, or NORMAL"
+      }}
+    ]
+    
+    Context: {req.meeting_type} at {req.plant}
+    Transcript: {req.transcript}
+    """
+    
+    try:
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        response = model.generate_content(prompt)
+        
+        clean_json = response.text.strip()
+        if clean_json.startswith("```json"):
+            clean_json = clean_json[7:]
+        if clean_json.endswith("```"):
+            clean_json = clean_json[:-3]
+            
+        actions_list = json.loads(clean_json.strip())
+        return {"actions": actions_list}
+        
+    except Exception as e:
+        print(f"Failed to parse Gemini output: {e}")
+        return {"error": "Failed to parse AI response", "actions": []}
+
+# 7. Real-time paragraph analysis (called by frontend during live meeting)
+@app.post("/api/meetings/analyze-paragraph")
+async def analyze_paragraph(req: ParagraphAnalysisReq):
+    # If Hindi input, instruct Gemini to handle Hindi-English mix (Hinglish)
+    # Note: With smart frontend, source=hi means text may contain Devanagari OR Hinglish Roman
+    lang_note = ""
+    if req.source_lang == "hi":
+        lang_note = "\nIMPORTANT: The paragraph may be in Hindi (Devanagari) OR Hinglish (Hindi words written in Roman/English letters). Understand the meaning fully and return ALL extracted insights in English only."
+    
+    prompt = f"""
+    You are an expert meeting analyst. Extract structured insights from this meeting transcript paragraph.
+    Return ONLY a JSON object with this exact shape — no markdown, no preamble:
+    {{
+      "actions": [{{"text":"...","responsible":"...","priority":"CRITICAL|WARNING|NORMAL","section":"..."}}],
+      "decisions": ["..."],
+      "risks": ["..."],
+      "keyPoints": ["..."]
+    }}
+    - actions: concrete tasks assigned to someone (responsible can be empty string if unclear)
+    - decisions: things decided/agreed upon
+    - risks: concerns, blockers, issues raised
+    - keyPoints: important facts or observations
+    Keep each item concise (under 15 words). Return empty arrays if nothing found.{lang_note}
+
+    Meeting type: {req.meeting_type}
+    Transcript paragraph:
+    "{req.paragraph}"
+    """
+
+    try:
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        response = model.generate_content(prompt)
+
+        clean_json = response.text.strip()
+        if clean_json.startswith("```json"):
+            clean_json = clean_json[7:]
+        if clean_json.endswith("```"):
+            clean_json = clean_json[:-3]
+
+        parsed = json.loads(clean_json.strip())
+        return parsed
+
+    except Exception as e:
+        print(f"Paragraph analysis failed: {e}")
+        return {"actions": [], "decisions": [], "risks": [], "keyPoints": []}
+
+# 8. Hindi to English translation (real-time during meeting)
+@app.post("/api/translate")
+async def translate_text(req: TranslateReq):
+    if not req.text or len(req.text.strip()) < 2:
+        return {"translated": req.text, "original": req.text}
+    
+    lang_names = {"hi": "Hindi", "en": "English", "mr": "Marathi", "gu": "Gujarati", "cg": "Chhattisgarhi"}
+    src_name = lang_names.get(req.source, req.source)
+    tgt_name = lang_names.get(req.target, req.target)
+    
+    prompt = f"""Translate the following {src_name} text to {tgt_name}.
+Return ONLY the translated text, nothing else. No quotes, no explanation.
+If the text is already in {tgt_name} or contains mixed languages, translate only the non-{tgt_name} parts.
+Preserve all proper nouns (person names, place names, company names) as-is.
+
+Text: {req.text}"""
+    
+    try:
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        response = model.generate_content(prompt)
+        translated = response.text.strip()
+        return {"translated": translated, "original": req.text}
+    except Exception as e:
+        print(f"Translation failed: {e}")
+        return {"translated": req.text, "original": req.text, "error": str(e)}
