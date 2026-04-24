@@ -92,7 +92,7 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
         sheetGet("Meetings"),
         sheetGet("Projects"),
       ]);
-      const sanitize=(arr,prefix)=>arr
+      const sanitize=(arr,prefix)=>(Array.isArray(arr)?arr:[])
         .filter(x => x && (x.id || x.text || x.name || x.label || x.sn))
         .map((x,i)=>({...x,id: (x.id && String(x.id).trim()) ? x.id : `${prefix}-${i}`}));
       if (u.length)  setUsersRaw(sanitize(u, "u"));
@@ -231,32 +231,7 @@ const MTG_INSTRUCTIONS = {
   "Weekly Plant Head":       ["MD-level review of all three plants","Compare plant performance using dashboard data","Close completed strategic actions, escalate long-running ones","Confirm priorities for the coming week"],
   "Safety Review":           ["Start with near-miss and incident recap","PPE compliance check results","Assign corrective actions for each unsafe condition observed","Set next review date before closing"],
 };
-const SEED_PROJECTS = [
-  { id:"PR1", name:"PPE Compliance Drive",   plant:"Adroit 3", owner:"Amit Tiwari",  start:"2025-06-01", end:"2025-07-15", status:"IN PROCESS",  priority:"CRITICAL",
-    objective:"Ensure 100% PPE compliance across all furnace and press operations",
-    scope:"All operators in Adroit 3 — shift-wise audits, corrective action tracking",
-    budget:"INR 2,50,000", sponsor:"Deepak Verma", team:["Amit Tiwari","Priya Singh","Rekha Nair"],
-    milestones:[{name:"Baseline audit complete",due:"2025-06-10",done:true},{name:"Training sessions done",due:"2025-06-25",done:false},{name:"Final audit",due:"2025-07-10",done:false}],
-    risks:"Shift rotation makes scheduling hard; supply chain delays for PPE kits" },
-  { id:"PR2", name:"Q2 OEE Improvement",     plant:"All",      owner:"Rajiv Sharma", start:"2025-05-01", end:"2025-06-30", status:"IN PROCESS",  priority:"WARNING",
-    objective:"Improve Overall Equipment Effectiveness from 72% to 80% across all plants",
-    scope:"All three plants — focus on downtime reduction and speed loss",
-    budget:"INR 8,00,000", sponsor:"Rajiv Sharma", team:["Anil Kumar","Suresh Patel","Deepak Verma","Ravi Gupta"],
-    milestones:[{name:"Baseline OEE measured",due:"2025-05-10",done:true},{name:"Loss analysis complete",due:"2025-05-25",done:true},{name:"Improvement actions implemented",due:"2025-06-15",done:false},{name:"Final OEE measurement",due:"2025-06-28",done:false}],
-    risks:"Planned maintenance outages may affect OEE readings; operator training bandwidth" },
-  { id:"PR3", name:"LED Bay Upgrade",        plant:"Adroit 1", owner:"Neha Yadav",   start:"2025-06-10", end:"2025-07-10", status:"NOT STARTED", priority:"NORMAL",
-    objective:"Replace all sodium vapor bay lights with energy-efficient LED fixtures",
-    scope:"Bays 5-12 in Adroit 1 production floor",
-    budget:"INR 4,20,000", sponsor:"Anil Kumar", team:["Neha Yadav","Sanjay Mishra"],
-    milestones:[{name:"Vendor finalization",due:"2025-06-15",done:false},{name:"Material procurement",due:"2025-06-25",done:false},{name:"Installation complete",due:"2025-07-05",done:false}],
-    risks:"Production downtime required during installation; vendor availability" },
-  { id:"PR4", name:"Furnace Maintenance PM", plant:"Adroit 2", owner:"Ravi Gupta",   start:"2025-06-05", end:"2025-06-20", status:"COMPLETED",   priority:"NORMAL",
-    objective:"Complete scheduled preventive maintenance on all 4 furnaces in Adroit 2",
-    scope:"Furnaces F1-F4, ladle transfer cars, and supporting electrical systems",
-    budget:"INR 6,50,000", sponsor:"Suresh Patel", team:["Ravi Gupta","Kavita Rawat","Neha Yadav"],
-    milestones:[{name:"F1 PM done",due:"2025-06-08",done:true},{name:"F2 & F3 PM done",due:"2025-06-14",done:true},{name:"F4 PM done",due:"2025-06-18",done:true},{name:"Final inspection",due:"2025-06-20",done:true}],
-    risks:"None remaining — completed on schedule" },
-];
+const SEED_PROJECTS = [];
 const SEED_MEETINGS = [
   { id:"M1", type:"Furnace Daily Review",    plant:"Adroit 1", time:"08:00", dur:45, facilitator:"Anil Kumar",   recurring:true,  project:"Q2 OEE Improvement",  completedSessions:[{date:"2025-06-04",duration:42},{date:"2025-06-05",duration:45}] },
   { id:"M2", type:"Daily Problem-Solving",   plant:"Adroit 2", time:"09:30", dur:30, facilitator:"Suresh Patel", recurring:true,  project:"Q2 OEE Improvement",  completedSessions:[{date:"2025-06-04",duration:28}] },
@@ -1425,7 +1400,7 @@ function HomePage({actions,setActions,user,setPage,users,meetings,setGlobalActiv
 function ProjectCharterModal({pr,onClose,actions,meetings,user,onProjectUpdate,onActionSelect,users:allUsers}){
   useEscClose(onClose);
   const [editMode,setEditMode]=useState(false);
-  const [draft,setDraft]=useState({...pr,milestones:[...(Array.isArray(pr.milestones)?pr.milestones:[]).map(m=>({...m}))],team:[...(pr.team||[])],risks:pr.risks||""});
+  const [draft,setDraft]=useState({...pr,milestones:[...(Array.isArray(pr.milestones)?pr.milestones:[]).map(m=>({...m}))],team:[...((Array.isArray(pr.team)?pr.team:(typeof pr.team==="string"?[pr.team]:[]))||[])],risks:pr.risks||""});
   const canEdit=user?.role==="Admin"||(user?.name===pr.owner)||(user?.name===pr.sponsor);
   const pActions=actions.filter(a=>a.project===pr.name);
   const projectMeetings=(meetings||[]).filter(m=>m.project===pr.name);
@@ -1736,7 +1711,7 @@ function WorkPage({plants,depts,users,onCommitFinal,actions,user,onProjectUpdate
                   </div>
                 </div>
               ))}
-              {meetings.flatMap(m => (m.completedSessions||[])).length === 0 && <div style={{fontSize:12,color:T.text2,fontStyle:"italic"}}>No completed meetings</div>}
+              {(allMeetings||[]).flatMap(m => (Array.isArray(m.completedSessions)?m.completedSessions:[])).length === 0 && <div style={{fontSize:12,color:T.text2,fontStyle:"italic"}}>No completed meetings</div>}
             </div>
           </div>
 
@@ -1759,7 +1734,7 @@ function WorkPage({plants,depts,users,onCommitFinal,actions,user,onProjectUpdate
               const milestonePct=total>0?Math.round(done/total*100):0;
               const isOverdueProject=now2>end&&pr.status!=="COMPLETED";
               const barColor=pr.status==="COMPLETED"?T.green:isOverdueProject?T.red:milestonePct>=66?T.green:milestonePct>=33?T.amber:T.red;
-              const projMeetings=meetings.filter(m=>m.project===pr.name);
+              const projMeetings=(allMeetings||[]).filter(m=>m.project===pr.name);
               return(
                 <div key={pr.id || `proj-${idx}`} className="card card-hover" style={{padding:18,borderLeft:`4px solid ${pr.priority==="CRITICAL"?T.red:pr.priority==="WARNING"?T.amber:T.navy}`,cursor:"pointer"}} onClick={()=>setCharter(pr)}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
@@ -3445,7 +3420,7 @@ function DashboardPage({actions,plants,depts,users,audit,user,meetings,onViewEsc
   },0)/comp):0;
   const visibleDepts=deptF!=="All"?depts.filter(d=>d.name===deptF):depts;
 
-  const allSessions=meetings.flatMap(m=>(m.completedSessions||[]).map(s=>({...s,type:m.type,plant:m.plant})));
+  const allSessions=(meetings||[]).flatMap(m=>(Array.isArray(m.completedSessions)?m.completedSessions:[]).map(s=>({...s,type:m.type,plant:m.plant})));
   const totalMtgMins=allSessions.reduce((s,x)=>s+(x.duration||0),0);
 
   return(
@@ -3669,7 +3644,7 @@ function DashboardPage({actions,plants,depts,users,audit,user,meetings,onViewEsc
                           </div>
                           <div style={{display:"flex",gap:8,fontSize:11,color:T.text2}}>
                             {drill==="revisions"&&<span style={{fontWeight:700,color:T.amber}}>{a.revisions} revision{a.revisions!==1?"s":""}</span>}
-                            {drill==="escalated"&&<span style={{fontWeight:700,color:T.red}>L{Math.max(...(audit.filter(e=>e.sn===a.sn).map(e=>e.level||1)))} escalated</span>}
+                            {drill==="escalated"&&<span style={{fontWeight:700,color:T.red}}>L{Math.max(...(audit.filter(e=>e.sn===a.sn).map(e=>e.level||1)))} escalated</span>}
                             <span style={{color:isOverdue(a)?T.red:T.text2,fontWeight:isOverdue(a)?700:400}}>{isOverdue(a)?`${daysOver(a)}d overdue`:fmt(a.due)}</span>
                           </div>
                         </div>
