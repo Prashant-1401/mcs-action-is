@@ -2673,20 +2673,8 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
           {/* ── Exit Meeting Section ── */}
           <div style={{borderTop:`1.5px solid ${T.red}30`,marginTop:16,paddingTop:14}}>
             <div style={{fontWeight:700,fontSize:11,color:T.red,marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>🚪 Exit Meeting</div>
-            {!exitConfirm
-              ?<>
-                <div style={{fontSize:11,color:T.text2,marginBottom:10,lineHeight:1.5}}>Leave this meeting without saving any actions. Use <b>Stop & Review</b> above to save your work first.</div>
-                <button onClick={()=>setExitConfirm(true)} className="btn btn-ghost btn-sm" style={{width:"100%",justifyContent:"center",color:T.red,borderColor:T.red+"50"}}>Exit Meeting</button>
-              </>
-              :<div style={{background:T.redL,border:`1.5px solid ${T.red}40`,borderRadius:10,padding:14,animation:"fadeIn .2s ease"}}>
-                <div style={{fontSize:12,fontWeight:700,color:T.red,marginBottom:6}}>⚠ Are you sure?</div>
-                <div style={{fontSize:11,color:T.text,marginBottom:10,lineHeight:1.5}}>All transcript data, AI insights, and fast-logged actions from this session will be <b>permanently lost</b>.</div>
-                <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>setExitConfirm(false)} className="btn btn-ghost btn-sm" style={{flex:1,justifyContent:"center"}}>Cancel</button>
-                  <button onClick={()=>{stopSTT();onCloseMeeting();}} className="btn btn-red btn-sm" style={{flex:1,justifyContent:"center"}}>Yes, Exit</button>
-                </div>
-              </div>
-            }
+            <div style={{fontSize:11,color:T.text2,marginBottom:10,lineHeight:1.5}}>Leave this meeting without saving any actions. Use <b>Stop & Review</b> above to save your work first.</div>
+            <button onClick={()=>{stopSTT(); onCloseMeeting();}} className="btn btn-ghost btn-sm" style={{width:"100%",justifyContent:"center",color:T.red,borderColor:T.red+"50"}}>Exit Meeting</button>
           </div>
         </div>
       </div>
