@@ -2296,6 +2296,18 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
     }
   };
 
+  const exportTranscript=()=>{
+    if(!txLines||txLines.length===0)return;
+    const text=txLines.map((l,i)=>`${i+1}. ${l}`).join("\n\n");
+    const blob=new Blob([`Meeting: ${mtg.type}\nLocation: ${mtg.plant}\nDate: ${new Date().toLocaleDateString()}\n\n--- TRANSCRIPT ---\n\n${text}`],{type:"text/plain"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;
+    a.download=`Transcript_${mtg.type.replace(/\s+/g,'_')}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const stopAndStage=()=>{
     stopSTT();
     setRunning(false);
@@ -2507,6 +2519,12 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontWeight:700,fontSize:13,color:T.navy}}>🎙 Live Transcript</div>
             <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <button className="btn btn-ghost" 
+                onClick={exportTranscript} 
+                disabled={!txLines || txLines.length===0}
+                style={{padding:"2px 8px",fontSize:10,height:22,borderColor:T.border}}>
+                📥 Export
+              </button>
               {analyzingPara&&<span style={{fontSize:10,color:T.amber,fontWeight:600,animation:"blink 1s infinite"}}>⚡ Analyzing…</span>}
               {running&&sttStatus==="listening"&&<span style={{fontSize:10,color:T.green,fontWeight:600}}>● REC</span>}
             </div>
