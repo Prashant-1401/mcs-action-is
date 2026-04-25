@@ -59,6 +59,10 @@ class InsightsShareReq(BaseModel):
     recipients: List[str]
 
 # 5. Health check
+@app.get("/")
+async def root():
+    return {"message": "MCS Backend API is running", "docs": "/docs", "health": "/api/health"}
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "gemini_configured": bool(GEMINI_API_KEY)}
