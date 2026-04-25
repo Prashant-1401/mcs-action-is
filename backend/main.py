@@ -94,6 +94,8 @@ SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASS = os.environ.get("SMTP_PASS", "")
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@adroit.in")
+TEAM_EMAIL = os.environ.get("TEAM_EMAIL", "team@adroit.in")
 
 def clean_json_response(text: str) -> str:
     """Extracts JSON from an LLM response robustly."""
@@ -165,8 +167,7 @@ async def email_escalate(req: EmailEscalateReq):
         body += f"<li><b>{a.get('sn')}</b>: {a.get('text')} - Overdue! (Priority: {a.get('priority')})</li>"
     body += "</ul>"
     
-    recipient = "admin@adroit.in"
-    send_email([recipient], subject, body)
+    send_email([ADMIN_EMAIL], subject, body)
     return {"status": "ok"}
 
 @app.post("/api/email/share-insights")
@@ -183,7 +184,7 @@ async def email_share_insights(req: InsightsShareReq):
             body += f"<li><b>Risk:</b> {rsk}</li>"
         body += "</ul>"
         
-    send_email(req.recipients if req.recipients else ["team@adroit.in"], subject, body)
+    send_email(req.recipients if req.recipients else [TEAM_EMAIL], subject, body)
     return {"status": "ok"}
 
 # 6. Full transcript extraction (existing route)

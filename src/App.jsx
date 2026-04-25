@@ -5,7 +5,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 // 2. Paste the deployment URL below
 const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbzkxOs7ZMiioyG_gJiG_Vfyv0sJCLG_PZHZZm90G8lfqETVqPoPX5LrNvGLa3OxB7PHzA/exec";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://mcs-action.onrender.com";
-const SHEET_ID         = "1OR4J17WrhQg9rqFV3uIhLCDG9UDCoQ5lc9-8ZXoNSOo";
+const SHEET_ID         = import.meta.env.VITE_SHEET_ID || "1OR4J17WrhQg9rqFV3uIhLCDG9UDCoQ5lc9-8ZXoNSOo";
 const SHEET_ENABLED    = SHEET_SCRIPT_URL !== "YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
 
 // CSV read URL (no auth needed for publicly shared sheets)
@@ -71,7 +71,7 @@ function parseCsvRow(line) {
 // Replaces all hardcoded seeds with live Sheet data.
 // Falls back to seeds if Sheet is unavailable.
 function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
-                      defaultActions, defaultMeetings, defaultProjects }) {
+                      defaultActions, defaultMeetings, defaultProjects, defaultEscMatrix, defaultPermissions, defaultPresets }) {
   const [dbReady,    setDbReady]    = useState(false);
   const [dbError,    setDbError]    = useState(null);
   const [users,      setUsersRaw]   = useState(defaultUsers);
@@ -80,17 +80,23 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   const [actions,    setActionsRaw] = useState(defaultActions);
   const [meetings,   setMeetingsRaw]= useState(defaultMeetings);
   const [projects,   setProjectsRaw]= useState(defaultProjects);
+  const [escMatrix,  setEscRaw]     = useState(defaultEscMatrix);
+  const [permissions,setPermsRaw]   = useState(defaultPermissions);
+  const [mtgPresets, setPresetsRaw] = useState(defaultPresets);
 
   const fetchData = useCallback(async () => {
     if (!SHEET_ENABLED) { setDbReady(true); return; }
     try {
-      const [u, p, d, a, m, pr] = await Promise.all([
+      const [u, p, d, a, m, pr, em, pm, ps] = await Promise.all([
         sheetGet("Users"),
         sheetGet("Plants"),
         sheetGet("Departments"),
         sheetGet("Actions"),
         sheetGet("Meetings"),
         sheetGet("Projects"),
+        sheetGet("EscalationMatrix"),
+        sheetGet("Permissions"),
+        sheetGet("MeetingPresets"),
       ]);
       const sanitize=(arr,prefix)=>(Array.isArray(arr)?arr:[])
         .filter(x => x && (x.id || x.text || x.name || x.label || x.sn))
@@ -101,6 +107,22 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
       if (a.length)  setActionsRaw(sanitize(a, "a"));
       if (m.length)  setMeetingsRaw(sanitize(m, "m"));
       if (pr.length) setProjectsRaw(sanitize(pr,"pr"));
+      if (em.length) setEscRaw(sanitize(em, "e"));
+      if (pm.length) {
+        const pObj = {};
+        pm.forEach(row => { if(row.id) pObj[row.id] = row; });
+        setPermsRaw(pObj);
+      }
+      if (ps.length) {
+        const pMap = { attendeeMap: {}, instructions: {} };
+        ps.forEach(row => {
+          if(row.type) {
+            pMap.attendeeMap[row.type] = row.attendees || [];
+            pMap.instructions[row.type] = row.instructions || [];
+          }
+        });
+        setPresetsRaw(pMap);
+      }
       setDbReady(true);
     } catch (e) {
       console.warn("Sheet load failed, using seeds:", e.message);
@@ -163,6 +185,44 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
     });
   }, []);
 
+  const setEscMatrix = useCallback((fn) => {
+    setEscRaw(prev => {
+      const next = typeof fn === "function" ? fn(prev) : fn;
+      if (SHEET_ENABLED) sheetPost("replace_all", "EscalationMatrix", { rows: next });
+      return next;
+    });
+  }, []);
+
+  const setPermissions = useCallback((fn) => {
+    setPermsRaw(prev => {
+      const next = typeof fn === "function" ? fn(prev) : fn;
+      if (SHEET_ENABLED) {
+        // Convert object {U01: {id: "U01", ...}} to array for sheet
+        const rows = Object.values(next);
+        sheetPost("replace_all", "Permissions", { rows });
+      }
+      return next;
+    });
+  }, []);
+
+  const setMtgPresets = useCallback((fn) => {
+    setPresetsRaw(prev => {
+      const next = typeof fn === "function" ? fn(prev) : fn;
+      if (SHEET_ENABLED) {
+        // next is { attendeeMap: {...}, instructions: {...} }
+        // Convert back to flat array for sheet
+        const allTypes = Array.from(new Set([...Object.keys(next.attendeeMap), ...Object.keys(next.instructions)]));
+        const rows = allTypes.map(t => ({
+          type: t,
+          attendees: next.attendeeMap[t] || [],
+          instructions: next.instructions[t] || []
+        }));
+        sheetPost("replace_all", "MeetingPresets", { rows });
+      }
+      return next;
+    });
+  }, []);
+
   return {
     dbReady, dbError, fetchData,
     users, setUsers,
@@ -171,6 +231,9 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
     actions, setActions,
     meetings, setMeetings,
     projects, setProjects,
+    escMatrix, setEscMatrix,
+    permissions, setPermissions,
+    mtgPresets, setMtgPresets
   };
 }
 
@@ -1568,7 +1631,7 @@ function ProjectCharterModal({pr,onClose,actions,meetings,user,onProjectUpdate,o
 }
 
 /* ===================== WORK PAGE ===================== */
-function WorkPage({plants,depts,users,onCommitFinal,actions,user,onProjectUpdate,allProjects,setProjects:setProjectsUp,allMeetings,setMeetings:setMeetingsUp,permissions,setPage,globalActiveMtg,setGlobalActiveMtg,mtgRunning,setMtgRunning,mtgElapsed,mtgTxLines,setMtgTxLines,mtgFastActions,setMtgFastActions,mtgInsights,setMtgInsights,clearMeetingState}){
+function WorkPage({plants,depts,users,onCommitFinal,actions,user,onProjectUpdate,allProjects,setProjects:setProjectsUp,allMeetings,setMeetings:setMeetingsUp,permissions,setPage,globalActiveMtg,setGlobalActiveMtg,mtgRunning,setMtgRunning,mtgElapsed,mtgTxLines,setMtgTxLines,mtgFastActions,setMtgFastActions,mtgInsights,setMtgInsights,clearMeetingState,mtgPresets}){
   // activeMtg is now global — WorkPage just reads/writes it
   const activeMtg=globalActiveMtg;
   const setActiveMtg=(m)=>{setGlobalActiveMtg(m);if(m)setMtgRunning(true);};
@@ -1610,7 +1673,7 @@ function WorkPage({plants,depts,users,onCommitFinal,actions,user,onProjectUpdate
   };
   const userMeetings=visibleMeetings.filter(m=>
     m.facilitator===user?.name||
-    (m.attendees||ATTENDEE_MAP[m.type]||[]).includes(user?.name)
+    (m.attendees||mtgPresets?.attendeeMap?.[m.type]||[]).includes(user?.name)
   );
   const conflictIds=new Set();
   userMeetings.forEach((a,i)=>{
@@ -1623,7 +1686,7 @@ function WorkPage({plants,depts,users,onCommitFinal,actions,user,onProjectUpdate
     });
   });
 
-  if(activeMtg) return <MeetingRoom mtg={activeMtg} plants={plants} depts={depts} users={users} onCommit={rows=>{onCommitFinal(rows);}} onCloseMeeting={()=>{clearMeetingState&&clearMeetingState();}} onBack={()=>setPage(0)} prevActions={actions} relatedActions={actions.filter(a=>(a.src===activeMtg.type)||(activeMtg.project&&a.project===activeMtg.project))} running={mtgRunning} setRunning={setMtgRunning} elapsed={mtgElapsed} txLines={mtgTxLines} setTxLines={setMtgTxLines} fastActions={mtgFastActions} setFastActions={setMtgFastActions} insights={mtgInsights} setInsights={setMtgInsights} currentUser={user}/>;
+  if(activeMtg) return <MeetingRoom mtg={activeMtg} plants={plants} depts={depts} users={users} onCommit={rows=>{onCommitFinal(rows);}} onCloseMeeting={()=>{clearMeetingState&&clearMeetingState();}} onBack={()=>setPage(0)} prevActions={actions} relatedActions={actions.filter(a=>(a.src===activeMtg.type)||(activeMtg.project&&a.project===activeMtg.project))} running={mtgRunning} setRunning={setMtgRunning} elapsed={mtgElapsed} txLines={mtgTxLines} setTxLines={setMtgTxLines} fastActions={mtgFastActions} setFastActions={setMtgFastActions} insights={mtgInsights} setInsights={setMtgInsights} currentUser={user} mtgPresets={mtgPresets}/>;
 
   return(
     <div className="fade-in">
@@ -1639,7 +1702,7 @@ function WorkPage({plants,depts,users,onCommitFinal,actions,user,onProjectUpdate
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             {visibleMeetings.map((m,idx)=>{
-              const attendees=ATTENDEE_MAP[m.type]||[];
+              const attendees=m.attendees || mtgPresets?.attendeeMap?.[m.type]||[];
               const linkedProject=(projects||[]).find(p=>p.name===m.project);
               const hasConflict=conflictIds.has(m.id);
               return(
@@ -1676,7 +1739,7 @@ function WorkPage({plants,depts,users,onCommitFinal,actions,user,onProjectUpdate
                       {attendees.length>0&&(
                         <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
                           <span style={{fontSize:10,color:T.text2}}>Attendees:</span>
-                          {attendees.slice(0,5).map((name,i)=><Avatar key={i} name={name} size={20} users={DEFAULT_USERS}/>)}
+                          {attendees.slice(0,5).map((name,i)=><Avatar key={i} name={name} size={20} users={users}/>)}
                           {attendees.length>5&&<span style={{fontSize:10,color:T.text2}}>+{attendees.length-5}</span>}
                         </div>
                       )}
@@ -1783,7 +1846,7 @@ function WorkPage({plants,depts,users,onCommitFinal,actions,user,onProjectUpdate
       {/* Feature 3: Add Project Modal */}
       {showAddProject&&<AddProjectModal plants={plants} users={users} onSave={p=>{setProjects(prev=>[...prev,{...p,id:"PR"+Date.now(),milestones:[],risks:"",team:[]}]);showAddProject&&setShowAddProject(false);}} onClose={()=>setShowAddProject(false)}/>}
       {/* Feature 4: Meeting Plan Side Panel */}
-      {mtgPlan&&<MeetingPlanPanel mtg={mtgPlan} canEdit={canEditMeetings} projects={projects} users={users} plants={plants} onSave={updated=>{setMeetings(p=>p.map(m=>m.id===updated.id?updated:m));setMtgPlan(updated);}} onClose={()=>setMtgPlan(null)}/>}
+      {mtgPlan&&<MeetingPlanPanel mtg={mtgPlan} canEdit={canEditMeetings} projects={projects} users={users} plants={plants} onSave={updated=>{setMeetings(p=>p.map(m=>m.id===updated.id?updated:m));setMtgPlan(updated);}} onClose={()=>setMtgPlan(null)} mtgPresets={mtgPresets}/>}
     </div>
   );
 }
@@ -1829,11 +1892,11 @@ function AddProjectModal({plants,users,onSave,onClose}){
 }
 
 /* Feature 4: Meeting Plan Side Panel */
-function MeetingPlanPanel({mtg,canEdit,projects,users,plants,onSave,onClose}){
+function MeetingPlanPanel({mtg,canEdit,projects,users,plants,onSave,onClose,mtgPresets}){
   useEscClose(onClose);
   const [editMode,setEditMode]=useState(false);
-  const defaultInstructions=MTG_INSTRUCTIONS[mtg.type]||["Follow meeting agenda","Capture all action points","Assign clear owners and due dates","Confirm previous actions before closing"];
-  const defaultAttendees=ATTENDEE_MAP[mtg.type]||[];
+  const defaultInstructions=mtgPresets?.instructions?.[mtg.type]||["Follow meeting agenda","Capture all action points","Assign clear owners and due dates","Confirm previous actions before closing"];
+  const defaultAttendees=mtgPresets?.attendeeMap?.[mtg.type]||[];
   const [draft,setDraft]=useState({
     ...mtg,
     guidelines: mtg.guidelines || [...defaultInstructions],
@@ -2021,7 +2084,7 @@ function AddMeetingModal({plants,users,projects,onSave,onClose}){
 }
 
 /* ===================== MEETING ROOM ===================== */
-function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prevActions,relatedActions,running,setRunning,elapsed,txLines,setTxLines,fastActions,setFastActions,insights,setInsights,currentUser}){
+function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prevActions,relatedActions,running,setRunning,elapsed,txLines,setTxLines,fastActions,setFastActions,insights,setInsights,currentUser,mtgPresets}){
   const [phase,setPhase]=useState("live");
   const [showSidePanel,setShowSidePanel]=useState(false);
   const [selAction,setSelAction]=useState(null);
@@ -2046,8 +2109,8 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
   const lastAnalyzedIdxRef=useRef(0); // tracks which txLines were already analyzed
   const [batchCountdown,setBatchCountdown]=useState(120); // seconds until next analysis
   const batchCountdownRef=useRef(null);
-  const instructions=MTG_INSTRUCTIONS[mtg.type]||["Follow meeting agenda","Capture all action points","Assign clear owners and due dates","Confirm previous actions before closing"];
-  const attendees=ATTENDEE_MAP[mtg.type]||[];
+  const instructions=mtgPresets?.instructions?.[mtg.type]||["Follow meeting agenda","Capture all action points","Assign clear owners and due dates","Confirm previous actions before closing"];
+  const attendees=mtgPresets?.attendeeMap?.[mtg.type]||[];
 
   // Auto-scroll transcript
   useEffect(()=>{if(txRef.current)txRef.current.scrollTop=txRef.current.scrollHeight;},[txLines,sttInterim]);
@@ -4086,7 +4149,7 @@ function EscMatrixTab({escMatrix,setEscMatrix}){
   );
 }
 
-function MasterPage({plants,setPlants,depts,setDepts,users,setUsers,permissions,setPermissions,escMatrix,setEscMatrix}){
+function MasterPage({plants,setPlants,depts,setDepts,users,setUsers,permissions,setPermissions,escMatrix,setEscMatrix,mtgPresets,setMtgPresets}){
   const [tab,setTab]=useState("users");
   const [modal,setModal]=useState(null);
   const [form,setForm]=useState({});
@@ -4100,7 +4163,7 @@ function MasterPage({plants,setPlants,depts,setDepts,users,setUsers,permissions,
     const u={...form,id:form.id||"U"+String(users.length+1).padStart(2,"0"),initials:form.name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase(),color:form.color||COLORS[users.length%6]};
     if(modal.mode==="edit")setUsers(p=>p.map(x=>x.id===u.id?u:x));else setUsers(p=>[...p,u]);close();
   };
-  const TABS=[["users","👥 Users"],["plants","🏭 Plants"],["depts","🗂 Departments"],["org","🌳 Org Chart"],["perms","🔐 Permissions"],["escmatrix","🚨 Escalation Matrix"]];
+  const TABS=[["users","👥 Users"],["plants","🏭 Plants"],["depts","🗂 Departments"],["org","🌳 Org Chart"],["perms","🔐 Permissions"],["escmatrix","🚨 Escalation Matrix"],["presets","🎙 Meeting Presets"]];
 
   function OrgNode({name,allUsers,depth}){
     const u=allUsers.find(x=>x.name===name);
@@ -4239,6 +4302,43 @@ function MasterPage({plants,setPlants,depts,setDepts,users,setUsers,permissions,
       </div>}
 
       {tab==="escmatrix"&&<EscMatrixTab escMatrix={escMatrix} setEscMatrix={setEscMatrix}/>}
+      {tab==="presets"&&<div className="card" style={{padding:20}}>
+        <div style={{fontFamily:"'Sora',sans-serif",fontWeight:800,fontSize:15,color:T.navy,marginBottom:14}}>Meeting Presets (Attendees & Guidelines)</div>
+        <div style={{display:"grid",gap:16}}>
+          {MEETING_TYPES.map(type=>(
+            <div key={type} className="card" style={{padding:16,background:T.bg}}>
+              <div style={{fontWeight:700,color:T.navy,marginBottom:10,fontSize:14}}>{type}</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+                <div>
+                  <Lbl t="Default Attendees"/>
+                  <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:150,overflowY:"auto",padding:8,background:"#fff",border:`1px solid ${T.border}`,borderRadius:8}}>
+                    {users.map(u=>(
+                      <label key={u.id} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,cursor:"pointer"}}>
+                        <input type="checkbox" checked={(mtgPresets?.attendeeMap?.[type]||[]).includes(u.name)} 
+                          onChange={e=>{
+                            const cur=mtgPresets?.attendeeMap?.[type]||[];
+                            const next=e.target.checked?[...cur,u.name]:cur.filter(n=>n!==u.name);
+                            setMtgPresets(prev=>({...prev,attendeeMap:{...prev.attendeeMap,[type]:next}}));
+                          }}/>
+                        {u.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <Lbl t="Default Guidelines / Instructions (one per line)"/>
+                  <textarea value={(mtgPresets?.instructions?.[type]||[]).join("\n")} 
+                    onChange={e=>{
+                      const next=e.target.value.split("\n").filter(l=>l.trim()!=="");
+                      setMtgPresets(prev=>({...prev,instructions:{...prev.instructions,[type]:next}}));
+                    }}
+                    style={{fontSize:12,height:150,resize:"none"}}/>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>}
 
       {modal&&<div className="overlay" onClick={close}><div className="modal" style={{width:520,padding:28}} onClick={e=>e.stopPropagation()}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
@@ -4342,14 +4442,13 @@ export default function App(){
     } catch(e){ return null; }
   });
   const [audit,setAudit]    = useState([]);
-  const [escMatrix,setEscMatrix] = useState(DEFAULT_ESC_MATRIX);
   const [page,setPage]      = useState(()=>{
     const saved=localStorage.getItem("mcs_session_page");
     return saved?parseInt(saved,10)||0:0;
   });
   const [showQuickAdd,setShowQuickAdd]=useState(false);
   const [brandLogo,setBrandLogo]=useState(null);
-  const [permissions,setPermissions]=useState(DEFAULT_PERMISSIONS_SEED);
+  const [brandLogo,setBrandLogo]=useState(null);
 
   // ── Google Sheet live database ──
   const {
@@ -4360,6 +4459,9 @@ export default function App(){
     actions,  setActions,
     meetings, setMeetings,
     projects, setProjects,
+    escMatrix, setEscMatrix,
+    permissions, setPermissions,
+    mtgPresets, setMtgPresets
   } = useSheetDB({
     defaultUsers:    DEFAULT_USERS,
     defaultPlants:   DEFAULT_PLANTS,
@@ -4367,6 +4469,9 @@ export default function App(){
     defaultActions:  SEED_ACTIONS,
     defaultMeetings: SEED_MEETINGS,
     defaultProjects: SEED_PROJECTS,
+    defaultEscMatrix: DEFAULT_ESC_MATRIX,
+    defaultPermissions: DEFAULT_PERMISSIONS_SEED(),
+    defaultPresets: { attendeeMap: ATTENDEE_MAP, instructions: MTG_INSTRUCTIONS }
   });
   // Global active meeting — persists across page navigation
   const [globalActiveMtg,setGlobalActiveMtg]=useState(null);
@@ -4466,7 +4571,7 @@ export default function App(){
         {page===2&&<ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects}/>}
         {page===3&&<DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={()=>setPage(4)} refreshData={fetchData}/>}
         {page===4&&<EscalationsPage actions={actions} audit={audit} user={user} setPage={setPage} users={users}/>}
-        {page===99&&user?.role==="Admin"&&<MasterPage plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} permissions={permissions} setPermissions={setPermissions} escMatrix={escMatrix} setEscMatrix={setEscMatrix}/>}
+        {page===99&&user?.role==="Admin"&&<MasterPage plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} permissions={permissions} setPermissions={setPermissions} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets}/>}
       </Shell>
       {showSupport&&<SupportModal user={user} onClose={()=>setShowSupport(false)}/>}
       {showProfile&&<UserProfilePanel user={user} users={users} actions={actions} onClose={()=>setShowProfile(false)}/>}
