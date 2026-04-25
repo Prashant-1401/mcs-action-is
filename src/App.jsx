@@ -853,42 +853,44 @@ function Shell({children,page,setPage,user,onLogout,onQuickAdd,brandLogo,pending
         </div>
       </aside>
       <main style={{flex:1,overflow:"auto",minWidth:0,position:"relative"}}>
-        {/* Right Side Floating Icons (Center) */}
-        <div style={{position:"fixed",right:0,top:"50%",transform:"translateY(-50%)",zIndex:600,display:"flex",flexDirection:"column",gap:4}}>
-          {user?.role!=="Guest"&&user?.role!=="Admin"&&(
-            <button onClick={()=>onShowSupport&&onShowSupport()} title="Get Support" style={{width:38,height:40,borderRadius:"8px 0 0 8px",background:T.navy,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"#fff",boxShadow:"-2px 0 10px rgba(0,0,0,.15)",transition:"all .2s"}}>💬</button>
-          )}
-          <div style={{position:"relative"}}>
-            <button onClick={()=>setShowNotifs(p=>!p)} title="Notifications" style={{width:38,height:40,borderRadius:"8px 0 0 8px",background:T.navy,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"#fff",boxShadow:"-2px 0 10px rgba(0,0,0,.15)",position:"relative",transition:"all .2s"}}>
-              🔔
-              {unreadCount>0&&<span style={{position:"absolute",top:-4,left:-2,background:T.red,color:"#fff",borderRadius:10,padding:"1px 5px",fontSize:9,fontWeight:700,minWidth:16,textAlign:"center"}}>{unreadCount>9?"9+":unreadCount}</span>}
-            </button>
-            {showNotifs&&(
-              <>
-                <div style={{position:"fixed",inset:0,zIndex:599}} onClick={()=>setShowNotifs(false)}/>
-                <div style={{position:"absolute",top:0,right:"100%",marginRight:10,width:320,background:"#fff",borderRadius:14,boxShadow:"-8px 0 32px rgba(0,0,0,.18)",border:`1px solid ${T.border}`,zIndex:600,overflow:"hidden",animation:"fadeIn .2s ease"}}>
-                  <div style={{padding:"12px 16px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <div style={{fontWeight:700,fontSize:14,color:T.navy}}>Notifications</div>
-                    {unreadCount>0&&<button onClick={()=>{onMarkAllRead&&onMarkAllRead();}} style={{fontSize:11,color:T.navy,border:"none",background:"transparent",cursor:"pointer",fontWeight:600}}>Mark all read</button>}
-                  </div>
-                  <div style={{maxHeight:380,overflowY:"auto"}}>
-                    {(!notifications||notifications.length===0)?<Empty icon="🔕" title="All clear" sub="No notifications yet."/>:
-                      notifications.slice(0,12).map(n=>(
-                        <div key={n.id} style={{padding:"12px 16px",borderBottom:`1px solid ${T.border}`,background:n.read?"transparent":"#F8FAFC",display:"flex",gap:10,alignItems:"flex-start"}}>
-                          <span style={{fontSize:18,flexShrink:0}}>{n.icon}</span>
-                          <div style={{flex:1}}>
-                            <div style={{fontSize:12,fontWeight:n.read?500:700,color:T.text,lineHeight:1.3}}>{n.title}</div>
-                            <div style={{fontSize:11,color:T.text2,marginTop:2,lineHeight:1.4}}>{n.body}</div>
-                          </div>
-                        </div>
-                      ))
-                    }
-                  </div>
-                </div>
-              </>
+        {/* Right Side Floating Icons (Center) - Hidden on Escalations Page (4) */}
+        {page !== 4 && (
+          <div style={{position:"fixed",right:0,top:"50%",transform:"translateY(-50%)",zIndex:600,display:"flex",flexDirection:"column",gap:4}}>
+            {user?.role!=="Guest"&&user?.role!=="Admin"&&(
+              <button onClick={()=>onShowSupport&&onShowSupport()} title="Get Support" style={{width:38,height:40,borderRadius:"8px 0 0 8px",background:T.navy,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"#fff",boxShadow:"-2px 0 10px rgba(0,0,0,.15)",transition:"all .2s"}}>💬</button>
             )}
+            <div style={{position:"relative"}}>
+              <button onClick={()=>setShowNotifs(p=>!p)} title="Notifications" style={{width:38,height:40,borderRadius:"8px 0 0 8px",background:T.navy,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"#fff",boxShadow:"-2px 0 10px rgba(0,0,0,.15)",position:"relative",transition:"all .2s"}}>
+                🔔
+                {unreadCount>0&&<span style={{position:"absolute",top:-4,left:-2,background:T.red,color:"#fff",borderRadius:10,padding:"1px 5px",fontSize:9,fontWeight:700,minWidth:16,textAlign:"center"}}>{unreadCount>9?"9+":unreadCount}</span>}
+              </button>
+              {showNotifs&&(
+                <>
+                  <div style={{position:"fixed",inset:0,zIndex:599}} onClick={()=>setShowNotifs(false)}/>
+                  <div style={{position:"absolute",top:0,right:"100%",marginRight:10,width:320,background:"#fff",borderRadius:14,boxShadow:"-8px 0 32px rgba(0,0,0,.18)",border:`1px solid ${T.border}`,zIndex:600,overflow:"hidden",animation:"fadeIn .2s ease"}}>
+                    <div style={{padding:"12px 16px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div style={{fontWeight:700,fontSize:14,color:T.navy}}>Notifications</div>
+                      {unreadCount>0&&<button onClick={()=>{onMarkAllRead&&onMarkAllRead();}} style={{fontSize:11,color:T.navy,border:"none",background:"transparent",cursor:"pointer",fontWeight:600}}>Mark all read</button>}
+                    </div>
+                    <div style={{maxHeight:380,overflowY:"auto"}}>
+                      {(!notifications||notifications.length===0)?<Empty icon="🔕" title="All clear" sub="No notifications yet."/>:
+                        notifications.slice(0,12).map(n=>(
+                          <div key={n.id} style={{padding:"12px 16px",borderBottom:`1px solid ${T.border}`,background:n.read?"transparent":"#F8FAFC",display:"flex",gap:10,alignItems:"flex-start"}}>
+                            <span style={{fontSize:18,flexShrink:0}}>{n.icon}</span>
+                            <div style={{flex:1}}>
+                              <div style={{fontSize:12,fontWeight:n.read?500:700,color:T.text,lineHeight:1.3}}>{n.title}</div>
+                              <div style={{fontSize:11,color:T.text2,marginTop:2,lineHeight:1.4}}>{n.body}</div>
+                            </div>
+                          </div>
+                        ))
+                      }
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
-        </div>
+        )}
         {/* Floating "Meeting Running" pill when away from Work page */}
         {activeMtg&&page!==1&&(
           <div onClick={onResumeActiveMtg} style={{position:"sticky",top:0,zIndex:400,background:`linear-gradient(90deg,${T.red},#C0392B)`,color:"#fff",padding:"8px 20px",display:"flex",alignItems:"center",gap:10,cursor:"pointer",boxShadow:"0 2px 12px rgba(0,0,0,.2)"}}>
