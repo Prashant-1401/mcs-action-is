@@ -2281,6 +2281,21 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
 
   const hms=s=>`${String(Math.floor(s/3600)).padStart(2,"0")}:${String(Math.floor((s%3600)/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
 
+  const triggerManualAnalysis = () => {
+    if (analyzingPara) return;
+    const lines = txLinesRef.current || [];
+    const startIdx = lastAnalyzedIdxRef.current;
+    const newLines = lines.slice(startIdx).filter(l => l.trim());
+    if (newLines.length > 0) {
+      const batchText = newLines.join(" ").trim();
+      if (batchText.length >= 20) {
+        analyzeParagraph(batchText);
+        lastAnalyzedIdxRef.current = lines.length;
+        setBatchCountdown(120); 
+      }
+    }
+  };
+
   const stopAndStage=()=>{
     stopSTT();
     setRunning(false);
@@ -2525,6 +2540,12 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontWeight:700,fontSize:13,color:T.navy}}>⚡ AI Insights</div>
             <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <button className="btn btn-navy btn-sm" 
+                onClick={triggerManualAnalysis} 
+                disabled={analyzingPara || !running || (txLines.slice(lastAnalyzedIdxRef.current).filter(l=>l.trim()).join("").length < 20)}
+                style={{padding:"2px 8px",fontSize:10,height:22}}>
+                {analyzingPara ? <Spin/> : "🧠 Get Insights"}
+              </button>
               {insightCount>0&&<span style={{background:T.navy,color:"#fff",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700}}>{insightCount}</span>}
               {analyzingPara&&<span style={{width:12,height:12,border:"2px solid #E69903",borderTopColor:"transparent",borderRadius:"50%",display:"inline-block",animation:"spin .7s linear infinite"}}/>}
             </div>
