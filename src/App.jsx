@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 // 1. Deploy Code.gs as a Web App (Apps Script → Deploy → Web App → Anyone)
 // 2. Paste the deployment URL below
 const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbzkxOs7ZMiioyG_gJiG_Vfyv0sJCLG_PZHZZm90G8lfqETVqPoPX5LrNvGLa3OxB7PHzA/exec";
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://mcs-action.onrender.com";
 const SHEET_ID         = "1OR4J17WrhQg9rqFV3uIhLCDG9UDCoQ5lc9-8ZXoNSOo";
 const SHEET_ENABLED    = SHEET_SCRIPT_URL !== "YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
 
@@ -2724,6 +2724,8 @@ function AddActionPanel({users,plants,depts,defaultPlant,defaultSrc,projects,onS
 /* STAGING AREA */
 function StagingArea({staged,mtg,plants,depts,users,txLines,onCommit,onCloseMeeting,onBack,elapsedSecs}){
   const [draft,setDraft]=useState(()=>staged.map((r,i)=>({...r,stageSN:"STG-"+String(i+1).padStart(3,"0"),status:"IN PROCESS",priority:r.priority||"NORMAL",section:r.section||"General",plant:r.plant||mtg.plant})));
+  const [analyzingSmart,setAnalyzingSmart]=useState(false);
+  const [smartResult,setSmartResult]=useState(null);
 
   const up=(id,k,v)=>setDraft(d=>d.map(r=>r.id===id?{...r,[k]:v}:r));
   const del=id=>setDraft(d=>d.filter(r=>r.id!==id));
@@ -2752,6 +2754,41 @@ function StagingArea({staged,mtg,plants,depts,users,txLines,onCommit,onCloseMeet
     URL.revokeObjectURL(url);
   };
   const hms=s=>`${String(Math.floor(s/3600)).padStart(2,"0")}:${String(Math.floor(s%3600/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+
+  const runSmartSync = async () => {
+    if(!txLines || txLines.length === 0) return;
+    setAnalyzingSmart(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/meetings/extract-insights`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transcript: txLines.join("\n"),
+          meeting_type: mtg.type,
+          plant: mtg.plant,
+          previous_actions: [] 
+        })
+      });
+      const data = await res.json();
+      if(data.actions) {
+        setSmartResult(data);
+      }
+    } catch(e) { console.error("Smart Sync failed", e); }
+    setAnalyzingSmart(false);
+  };
+
+  const applySmartActions = () => {
+    if(!smartResult) return;
+    const next = smartResult.actions.map((a,i)=>({
+      ...a,
+      id: Date.now() + i,
+      stageSN: "SMART-"+String(i+1).padStart(3,"0"),
+      status: "IN PROCESS",
+      fromTranscript: true,
+      fromSmart: true
+    }));
+    setDraft(next);
+  };
   return(
     <div className="fade-in">
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,flexWrap:"wrap"}}>
@@ -2761,6 +2798,9 @@ function StagingArea({staged,mtg,plants,depts,users,txLines,onCommit,onCloseMeet
           <div style={{fontSize:12,color:T.text2}}>{mtg.type} · Duration: {hms(elapsedSecs||0)} · <b style={{color:T.green}}>{valid.length} ready</b> · {draft.length-valid.length} incomplete (will be saved as Unassigned)</div>
         </div>
         <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
+          <button className="btn btn-navy" onClick={runSmartSync} disabled={analyzingSmart || !txLines?.length}>
+            {analyzingSmart ? <Spin/> : "🧠 Smart Sync (Deduplicate)"}
+          </button>
           <button className="btn btn-ghost" onClick={exportTranscript} disabled={!txLines||txLines.length===0} style={{border:`1px solid ${T.border}`}}>
             📥 Export Transcript
           </button>
@@ -2778,6 +2818,22 @@ function StagingArea({staged,mtg,plants,depts,users,txLines,onCommit,onCloseMeet
       <div style={{display:"grid",gridTemplateColumns:"300px 1fr",gap:20}}>
         <div className="card" style={{padding:20,height:"fit-content"}}>
           <div style={{fontWeight:700,fontSize:13,color:T.navy,marginBottom:10}}>📝 Discussed Points</div>
+          
+          {smartResult && (
+            <div style={{marginBottom:16,padding:12,background:T.bg,borderRadius:10,border:`1px solid ${T.navy}30`}}>
+               <div style={{fontSize:11,fontWeight:800,color:T.navy,textTransform:"uppercase",marginBottom:8}}>📌 Key Topics (AI)</div>
+               {smartResult.topics?.map((t,idx)=>(
+                 <div key={idx} style={{marginBottom:10}}>
+                   <div style={{fontSize:12,fontWeight:700,color:T.text}}>{t.topic}</div>
+                   <div style={{fontSize:11,color:T.text2,lineHeight:1.4}}>{t.summary}</div>
+                 </div>
+               ))}
+               <button className="btn btn-navy btn-sm" style={{width:"100%",marginTop:8}} onClick={applySmartActions}>
+                 Apply AI Deduplication
+               </button>
+            </div>
+          )}
+
           <div style={{fontSize:12,lineHeight:1.9,color:"#555"}}>
             {txLines.map((l,i)=><div key={i} style={{padding:"4px 0",borderBottom:`1px solid ${T.border}`,display:"flex",gap:8}}><span style={{color:T.text2,fontSize:10,flexShrink:0,marginTop:2}}>{i+1}.</span><span style={{color:l.toLowerCase().includes("action")?T.navy:T.text}}>{l}</span></div>)}
             {txLines.length===0&&<span style={{color:"#B2BEC3"}}>No transcript available.</span>}

@@ -11,7 +11,10 @@ from dotenv import load_dotenv
 import requests
 
 # Load environment variables from .env file
+# Look in current dir, backend/ dir, and parent dir
 load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+load_dotenv(os.path.join(os.getcwd(), ".env"))
 
 # 1. Initialize the FastAPI App
 app = FastAPI()
@@ -35,7 +38,8 @@ genai.configure(api_key=GEMINI_API_KEY)
 class MeetingReviewReq(BaseModel):
     transcript: str
     meeting_type: str
-    plant: str = ""
+    plant: str = "Adroit"
+    previous_actions: List[Dict[str, Any]] = []
 
 class ParagraphAnalysisReq(BaseModel):
     paragraph: str
@@ -90,6 +94,43 @@ SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASS = os.environ.get("SMTP_PASS", "")
+
+def clean_json_response(text: str) -> str:
+    """Extracts JSON from an LLM response robustly."""
+    text = text.strip()
+    # If wrapped in ```json ... ```, extract it
+    if "```json" in text:
+        try:
+            start = text.index("```json") + 7
+            end = text.rindex("```")
+            return text[start:end].strip()
+        except:
+            pass
+    # If wrapped in ``` ... ```, extract it
+    elif "```" in text:
+        try:
+            start = text.index("```") + 3
+            end = text.rindex("```")
+            return text[start:end].strip()
+        except:
+            pass
+    
+    # Try to find first { or [ and last } or ]
+    try:
+        first_obj = text.find('{')
+        first_arr = text.find('[')
+        last_obj = text.rfind('}')
+        last_arr = text.rfind(']')
+        
+        start = min(x for x in [first_obj, first_arr] if x != -1)
+        end = max(x for x in [last_obj, last_arr] if x != -1)
+        
+        if start != -1 and end != -1:
+            return text[start:end+1].strip()
+    except:
+        pass
+
+    return text
 
 def send_email(to_emails: List[str], subject: str, html_content: str):
     if not SMTP_USER or not SMTP_PASS:
@@ -148,48 +189,50 @@ async def email_share_insights(req: InsightsShareReq):
 # 6. Full transcript extraction (existing route)
 @app.post("/api/meetings/extract-insights")
 async def extract_insights(req: MeetingReviewReq):
+    import datetime
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    
     prompt = f"""
-    You are an industrial management assistant. Analyze this meeting transcript and extract actionable tasks.
-    Return ONLY a valid JSON array of objects. Do not wrap it in markdown blockquotes.
+    You are an AI meeting assistant. Task: Analyze transcription and produce a consolidated action log.
     
-    Each object must match this schema EXACTLY:
-    [
-      {{
-        "text": "The action description",
-        "responsible": "Name of the person assigned (or empty string if unassigned)",
-        "due": "YYYY-MM-DD (or empty string if no date mentioned)",
-        "section": "Production, Maintenance, Quality, Safety, Electrical, Mechanical, Instrumentation, Stores & Logistics, or General",
-        "priority": "CRITICAL, WARNING, or NORMAL"
-      }}
-    ]
+    Follow these steps precisely:
+    1. Identify Key Discussion Topics: Identify and list main topics. Summarize key points for each.
+    2. Create an Action Log:
+       - De-duplicate: Consolidate multiple mentions of same task.
+       - Update Repeated Items: If an action is a repeat/follow-up on an item in 'PREVIOUS ACTIONS', do not create new row. Update its 'remarks' with a summary and date (e.g., "Discussed again on {today}: ...").
+       - Fill Columns: Source: "Daily Meeting", Plant: "{req.plant}", Date: "{today}", Status: "IN PROCESS".
     
-    Context: {req.meeting_type} at {req.plant}
-    Transcript: {req.transcript}
+    Return ONLY a JSON object:
+    {{
+      "topics": [{{ "topic": "...", "summary": "..." }}],
+      "actions": [
+        {{
+          "text": "...", "responsible": "...", "due": "YYYY-MM-DD", 
+          "section": "...", "priority": "...", "remarks": "...", "is_update": true/false
+        }}
+      ]
+    }}
+    
+    PREVIOUS ACTIONS (context): {json.dumps(req.previous_actions[:20])}
+    
+    TRANSCRIPT:
+    {req.transcript}
     """
-    
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt)
-        text_resp = response.text
+        model = genai.GenerativeModel('gemini-flash-lite-latest')
+        res = model.generate_content(prompt)
+        text = res.text
     except Exception as e:
-        print(f"Gemini API failed in extract_insights: {e}")
-        text_resp = call_ollama_fallback(prompt)
-        if not text_resp:
-            return {"error": "Failed to parse AI response", "actions": []}
-            
+        print(f"Extraction failed: {e}")
+        text = call_ollama_fallback(prompt)
+        if not text: return {"error": "Service unavailable", "actions": []}
+
     try:
-        clean_json = text_resp.strip()
-        if clean_json.startswith("```json"):
-            clean_json = clean_json[7:]
-        if clean_json.endswith("```"):
-            clean_json = clean_json[:-3]
-            
-        actions_list = json.loads(clean_json.strip())
-        return {"actions": actions_list}
-        
+        data = json.loads(clean_json_response(text))
+        return data
     except Exception as e:
-        print(f"Failed to parse LLM output: {e}")
-        return {"error": "Failed to parse AI response", "actions": []}
+        print(f"Parse failed: {e}\nRaw: {text}")
+        return {"error": "Format error", "actions": []}
 
 # 7. Real-time paragraph analysis (called by frontend during live meeting)
 @app.post("/api/meetings/analyze-paragraph")
@@ -221,7 +264,7 @@ async def analyze_paragraph(req: ParagraphAnalysisReq):
     """
 
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-flash-lite-latest')
         response = model.generate_content(prompt)
         text_resp = response.text
     except Exception as e:
@@ -231,17 +274,13 @@ async def analyze_paragraph(req: ParagraphAnalysisReq):
             return {"actions": [], "decisions": [], "risks": [], "keyPoints": []}
 
     try:
-        clean_json = text_resp.strip()
-        if clean_json.startswith("```json"):
-            clean_json = clean_json[7:]
-        if clean_json.endswith("```"):
-            clean_json = clean_json[:-3]
-
-        parsed = json.loads(clean_json.strip())
+        clean_json = clean_json_response(text_resp)
+        parsed = json.loads(clean_json)
         return parsed
 
     except Exception as e:
         print(f"Paragraph analysis parsing failed: {e}")
+        print(f"RAW RESP: {text_resp}")
         return {"actions": [], "decisions": [], "risks": [], "keyPoints": []}
 
 # 8. Hindi to English translation (real-time during meeting)
@@ -262,7 +301,7 @@ Preserve all proper nouns (person names, place names, company names) as-is.
 Text: {req.text}"""
     
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-flash-lite-latest')
         response = model.generate_content(prompt)
         translated = response.text.strip()
         return {"translated": translated, "original": req.text}
