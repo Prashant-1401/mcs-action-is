@@ -888,7 +888,7 @@ function Shell({children,page,setPage,user,onLogout,onQuickAdd,brandLogo,pending
                   <div style={{fontSize:11,color:T.text2}}>{user?.role} — {user?.plant}</div>
                 </div>
                 {user?.role!=="Guest"&&<button onClick={()=>{setShowUserMenu(false);onShowProfile&&onShowProfile();}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 12px",border:"none",background:"transparent",cursor:"pointer",color:T.text,fontSize:13,fontWeight:600,borderRadius:8}}>👤 My Profile</button>}
-          {user?.role!=="Guest"&&user?.role!=="Admin"&&<button onClick={()=>{setShowUserMenu(false);onShowSupport&&onShowSupport();}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 12px",border:"none",background:"transparent",cursor:"pointer",color:T.navy,fontSize:13,fontWeight:600,borderRadius:8}}>💬 Get Support</button>}
+          {user?.role!=="Guest"&&user?.role!=="Admin"&&page!==4&&<button onClick={()=>{setShowUserMenu(false);onShowSupport&&onShowSupport();}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 12px",border:"none",background:"transparent",cursor:"pointer",color:T.navy,fontSize:13,fontWeight:600,borderRadius:8}}>💬 Get Support</button>}
           {isAdmin&&<button onClick={()=>{setShowUserMenu(false);onShowAdminNotifs&&onShowAdminNotifs();}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 12px",border:"none",background:"transparent",cursor:"pointer",color:T.amber,fontSize:13,fontWeight:600,borderRadius:8}}>🔔 Notification Rules</button>}
           <button onClick={()=>{setShowUserMenu(false);onLogout();}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 12px",border:"none",background:"transparent",cursor:"pointer",color:T.red,fontSize:13,fontWeight:600,borderRadius:8}}>🚪 Sign Out</button>
               </div>
@@ -897,8 +897,8 @@ function Shell({children,page,setPage,user,onLogout,onQuickAdd,brandLogo,pending
         </div>
       </aside>
       <main style={{flex:1,overflow:"auto",minWidth:0,position:"relative"}}>
-        {/* Right Side Floating Icons (Center) - Hidden on Escalations Page (4) */}
-        {page !== 4 && (
+        {/* Right Side Floating Icons (Center) - Hidden on Dashboard (3) and Escalations Page (4) */}
+        {!([3, 4].includes(page)) && (
           <div style={{position:"fixed",right:0,top:"50%",transform:"translateY(-50%)",zIndex:600,display:"flex",flexDirection:"column",gap:4}}>
             {user?.role!=="Guest"&&user?.role!=="Admin"&&(
               <button onClick={()=>onShowSupport&&onShowSupport()} title="Get Support" style={{width:38,height:40,borderRadius:"8px 0 0 8px",background:T.navy,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"#fff",boxShadow:"-2px 0 10px rgba(0,0,0,.15)",transition:"all .2s"}}>💬</button>
