@@ -839,6 +839,99 @@ function Shell({children,page,setPage,user,onLogout,onQuickAdd,brandLogo,pending
   const [showNotifs,setShowNotifs]=useState(false);
   const isAdmin=user?.role==="Admin";
   const hms=s=>`${String(Math.floor(s/3600)).padStart(2,"0")}:${String(Math.floor((s%3600)/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+
+  // Draggable button positions state
+  const [supportPos, setSupportPos] = useState(() => {
+    const saved = localStorage.getItem('supportBtnPos');
+    return saved ? JSON.parse(saved) : { x: window.innerWidth - 46, y: window.innerHeight / 2 - 20 };
+  });
+  const [notifPos, setNotifPos] = useState(() => {
+    const saved = localStorage.getItem('notifBtnPos');
+    return saved ? JSON.parse(saved) : { x: window.innerWidth - 46, y: window.innerHeight / 2 + 20 };
+  });
+
+  // Drag state
+  const [dragging, setDragging] = useState(null); // 'support' | 'notif' | null
+  const dragDistanceRef = useRef(0);
+  const dragDataRef = useRef(null); // { type, startX, startY, offsetX, offsetY, initialX, initialY }
+
+  // Save positions to localStorage
+  useEffect(() => {
+    localStorage.setItem('supportBtnPos', JSON.stringify(supportPos));
+  }, [supportPos]);
+  useEffect(() => {
+    localStorage.setItem('notifBtnPos', JSON.stringify(notifPos));
+  }, [notifPos]);
+
+  // Mouse down handler
+  const handleMouseDown = (type) => (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const btn = e.currentTarget;
+    const rect = btn.getBoundingClientRect();
+    const offsetX = e.clientX - rect.left;
+    const offsetY = e.clientY - rect.top;
+    dragDistanceRef.current = 0;
+    dragDataRef.current = {
+      type,
+      offsetX,
+      offsetY,
+      initialX: type === 'support' ? supportPos.x : notifPos.x,
+      initialY: type === 'support' ? supportPos.y : notifPos.y
+    };
+    setDragging(type);
+    btn.style.cursor = 'grabbing';
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleMouseMove = (e) => {
+    const data = dragDataRef.current;
+    if (!data) return;
+    const newX = e.clientX - data.offsetX;
+    const newY = e.clientY - data.offsetY;
+    // Track drag distance from initial mouse down position
+    const initialMouseX = data.initialX + data.offsetX;
+    const initialMouseY = data.initialY + data.offsetY;
+    const dx = Math.abs(e.clientX - initialMouseX);
+    const dy = Math.abs(e.clientY - initialMouseY);
+    dragDistanceRef.current = Math.max(dx, dy);
+    // Boundary constraints
+    const btnWidth = 38, btnHeight = 40;
+    const maxX = window.innerWidth - 10;
+    const maxY = window.innerHeight - 10;
+    const minX = -(btnWidth - 30);
+    const minY = -(btnHeight - 30);
+    const constrainedX = Math.max(minX, Math.min(newX, maxX));
+    const constrainedY = Math.max(minY, Math.min(newY, maxY));
+    if (data.type === 'support') {
+      setSupportPos({ x: constrainedX, y: constrainedY });
+    } else {
+      setNotifPos({ x: constrainedX, y: constrainedY });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setDragging(null);
+    document.querySelectorAll('.draggable-btn').forEach(btn => {
+      btn.style.cursor = 'grab';
+    });
+    dragDataRef.current = null;
+  };
+
+  // Click handlers that check if we dragged significantly
+  const handleSupportClick = () => {
+    if (dragDistanceRef.current > 5) return;
+    onShowSupport && onShowSupport();
+  };
+  const handleNotifClick = (e) => {
+    if (dragDistanceRef.current > 5) {
+      e.stopPropagation();
+      return;
+    }
+    setShowNotifs(p=>!p);
+  };
+
   return(
     <div style={{display:"flex",minHeight:"100vh",background:T.bg}}>
       <aside style={{width:228,background:T.navy,color:"#fff",display:"flex",flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh"}}>
@@ -888,7 +981,7 @@ function Shell({children,page,setPage,user,onLogout,onQuickAdd,brandLogo,pending
                   <div style={{fontSize:11,color:T.text2}}>{user?.role} — {user?.plant}</div>
                 </div>
                 {user?.role!=="Guest"&&<button onClick={()=>{setShowUserMenu(false);onShowProfile&&onShowProfile();}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 12px",border:"none",background:"transparent",cursor:"pointer",color:T.text,fontSize:13,fontWeight:600,borderRadius:8}}>👤 My Profile</button>}
-          {user?.role!=="Guest"&&user?.role!=="Admin"&&page!==4&&<button onClick={()=>{setShowUserMenu(false);onShowSupport&&onShowSupport();}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 12px",border:"none",background:"transparent",cursor:"pointer",color:T.navy,fontSize:13,fontWeight:600,borderRadius:8}}>💬 Get Support</button>}
+          {user?.role!=="Guest"&&user?.role!=="Admin"&&Number(page)!==3&&Number(page)!==4&&<button onClick={()=>{setShowUserMenu(false);onShowSupport&&onShowSupport();}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 12px",border:"none",background:"transparent",cursor:"pointer",color:T.navy,fontSize:13,fontWeight:600,borderRadius:8}}>💬 Get Support</button>}
           {isAdmin&&<button onClick={()=>{setShowUserMenu(false);onShowAdminNotifs&&onShowAdminNotifs();}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 12px",border:"none",background:"transparent",cursor:"pointer",color:T.amber,fontSize:13,fontWeight:600,borderRadius:8}}>🔔 Notification Rules</button>}
           <button onClick={()=>{setShowUserMenu(false);onLogout();}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 12px",border:"none",background:"transparent",cursor:"pointer",color:T.red,fontSize:13,fontWeight:600,borderRadius:8}}>🚪 Sign Out</button>
               </div>
@@ -898,39 +991,96 @@ function Shell({children,page,setPage,user,onLogout,onQuickAdd,brandLogo,pending
       </aside>
       <main style={{flex:1,overflow:"auto",minWidth:0,position:"relative"}}>
         {/* Right Side Floating Icons (Center) - Hidden on Dashboard (3) and Escalations Page (4) */}
-        {!([3, 4].includes(page)) && (
-          <div style={{position:"fixed",right:0,top:"50%",transform:"translateY(-50%)",zIndex:600,display:"flex",flexDirection:"column",gap:4}}>
+        {Number(page) !== 3 && Number(page) !== 4 && (
+          <div style={{position:"fixed",top:0,left:0,width:0,height:0,pointerEvents:"none",zIndex:600}}>
+            {/* Support Button - draggable */}
             {user?.role!=="Guest"&&user?.role!=="Admin"&&(
-              <button onClick={()=>onShowSupport&&onShowSupport()} title="Get Support" style={{width:38,height:40,borderRadius:"8px 0 0 8px",background:T.navy,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"#fff",boxShadow:"-2px 0 10px rgba(0,0,0,.15)",transition:"all .2s"}}>💬</button>
+              <div style={{position:'fixed', left: supportPos.x, top: supportPos.y, width: 38, height: 40, zIndex: 600}}>
+                <button
+                  onMouseDown={handleMouseDown('support')}
+                  onClick={handleSupportClick}
+                  title="Get Support (drag to move)"
+                  className="draggable-btn"
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    borderRadius: '8px 0 0 8px',
+                    background: T.navy,
+                    border: 'none',
+                    cursor: 'grab',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 18,
+                    color: '#fff',
+                    boxShadow: dragging === 'support' ? '-4px 0 20px rgba(0,0,0,.25)' : '-2px 0 10px rgba(0,0,0,.15)',
+                    transition: dragging === 'support' ? 'none' : 'box-shadow .2s',
+                    userSelect: 'none',
+                    pointerEvents: 'auto'
+                  }}
+                >💬</button>
+              </div>
             )}
-            <div style={{position:"relative"}}>
-              <button onClick={()=>setShowNotifs(p=>!p)} title="Notifications" style={{width:38,height:40,borderRadius:"8px 0 0 8px",background:T.navy,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"#fff",boxShadow:"-2px 0 10px rgba(0,0,0,.15)",position:"relative",transition:"all .2s"}}>
+            {/* Notifications Button + Dropdown - draggable */}
+            <div style={{position:'fixed', left: notifPos.x, top: notifPos.y, width:38, height:40, zIndex: 600}}>
+              <button
+                onMouseDown={handleMouseDown('notif')}
+                onClick={handleNotifClick}
+                title="Notifications (drag to move)"
+                className="draggable-btn"
+                style={{
+                  width: 38,
+                  height: 40,
+                  borderRadius: '8px 0 0 8px',
+                  background: T.navy,
+                  border: 'none',
+                  cursor: 'grab',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 18,
+                  color: '#fff',
+                  boxShadow: dragging === 'notif' ? '-4px 0 20px rgba(0,0,0,.25)' : '-2px 0 10px rgba(0,0,0,.15)',
+                  transition: dragging === 'notif' ? 'none' : 'box-shadow .2s',
+                  userSelect: 'none'
+                }}
+              >
                 🔔
                 {unreadCount>0&&<span style={{position:"absolute",top:-4,left:-2,background:T.red,color:"#fff",borderRadius:10,padding:"1px 5px",fontSize:9,fontWeight:700,minWidth:16,textAlign:"center"}}>{unreadCount>9?"9+":unreadCount}</span>}
               </button>
               {showNotifs&&(
-                <>
-                  <div style={{position:"fixed",inset:0,zIndex:599}} onClick={()=>setShowNotifs(false)}/>
-                  <div style={{position:"absolute",top:0,right:"100%",marginRight:10,width:320,background:"#fff",borderRadius:14,boxShadow:"-8px 0 32px rgba(0,0,0,.18)",border:`1px solid ${T.border}`,zIndex:600,overflow:"hidden",animation:"fadeIn .2s ease"}}>
-                    <div style={{padding:"12px 16px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                      <div style={{fontWeight:700,fontSize:14,color:T.navy}}>Notifications</div>
-                      {unreadCount>0&&<button onClick={()=>{onMarkAllRead&&onMarkAllRead();}} style={{fontSize:11,color:T.navy,border:"none",background:"transparent",cursor:"pointer",fontWeight:600}}>Mark all read</button>}
-                    </div>
-                    <div style={{maxHeight:380,overflowY:"auto"}}>
-                      {(!notifications||notifications.length===0)?<Empty icon="🔕" title="All clear" sub="No notifications yet."/>:
-                        notifications.slice(0,12).map(n=>(
-                          <div key={n.id} style={{padding:"12px 16px",borderBottom:`1px solid ${T.border}`,background:n.read?"transparent":"#F8FAFC",display:"flex",gap:10,alignItems:"flex-start"}}>
-                            <span style={{fontSize:18,flexShrink:0}}>{n.icon}</span>
-                            <div style={{flex:1}}>
-                              <div style={{fontSize:12,fontWeight:n.read?500:700,color:T.text,lineHeight:1.3}}>{n.title}</div>
-                              <div style={{fontSize:11,color:T.text2,marginTop:2,lineHeight:1.4}}>{n.body}</div>
-                            </div>
-                          </div>
-                        ))
-                      }
-                    </div>
+                <div style={{
+                  position: 'absolute',
+                  top: 0,
+                  right: '100%',
+                  marginRight: 10,
+                  width: 320,
+                  background: "#fff",
+                  borderRadius: 14,
+                  boxShadow: '-8px 0 32px rgba(0,0,0,.18)',
+                  border: `1px solid ${T.border}`,
+                  zIndex: 600,
+                  overflow: 'hidden',
+                  animation: 'fadeIn .2s ease'
+                }}>
+                  <div style={{padding:"12px 16px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div style={{fontWeight:700,fontSize:14,color:T.navy}}>Notifications</div>
+                    {unreadCount>0&&<button onClick={()=>{onMarkAllRead&&onMarkAllRead();setShowNotifs(false);}} style={{fontSize:11,color:T.navy,border:"none",background:"transparent",cursor:"pointer",fontWeight:600}}>Mark all read</button>}
                   </div>
-                </>
+                  <div style={{maxHeight:380,overflowY:"auto"}}>
+                    {(!notifications||notifications.length===0)?<Empty icon="🔕" title="All clear" sub="No notifications yet."/>:
+                      notifications.slice(0,12).map(n=>(
+                        <div key={n.id} style={{padding:"12px 16px",borderBottom:`1px solid ${T.border}`,background:n.read?"transparent":"#F8FAFC",display:"flex",gap:10,alignItems:"flex-start"}}>
+                          <span style={{fontSize:18,flexShrink:0}}>{n.icon}</span>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:12,fontWeight:n.read?500:700,color:T.text,lineHeight:1.3}}>{n.title}</div>
+                            <div style={{fontSize:11,color:T.text2,marginTop:2,lineHeight:1.4}}>{n.body}</div>
+                          </div>
+                        </div>
+                      ))
+                    }
+                  </div>
+                </div>
               )}
             </div>
           </div>
