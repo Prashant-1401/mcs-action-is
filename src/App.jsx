@@ -407,7 +407,7 @@ const CSS=`
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Sora:wght@700;800&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 body{background:#F5F5FB;color:#1A1532;font-family:'Inter',sans-serif;font-size:14px;}
-input,select,textarea{font-family:'Inter',sans-serif;font-size:13px;background:#fff;border:1.5px solid #E8E8F0;border-radius:8px;padding:8px 12px;color:#1A1532;outline:none;width:100%;transition:border-color .18s;}
+input,select,textarea{font-family:'Inter',sans-serif;font-size:13px;background:#fff;border:1.5px solid #E8E8F0;border-radius:8px;padding:8px 12px;color:#1A1532;outline:none;width:100%;transition:border-color .18s;direction:ltr;unicode-bidi:plaintext;}
 input:focus,select:focus,textarea:focus{border-color:#272262;box-shadow:0 0 0 3px rgba(39,34,98,.08);}
 input::placeholder,textarea::placeholder{color:#B2BEC3;}
 ::-webkit-scrollbar{width:5px;height:5px;}::-webkit-scrollbar-thumb{background:#CBD5E0;border-radius:3px;}
@@ -551,14 +551,19 @@ function LoginPage({onLogin,brandLogo,onBrandUpload}){
     <div style={{minHeight:"100vh",background:`linear-gradient(135deg,${T.navy} 0%,#3D378C 100%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
       <div style={{width:420,background:"#fff",borderRadius:20,padding:36,boxShadow:"0 24px 80px rgba(0,0,0,.25)"}}>
         <div style={{textAlign:"center",marginBottom:28}}>
-          {brandLogo
-            ? <img src={brandLogo} alt="Brand" style={{height:52,objectFit:"contain",marginBottom:12,borderRadius:8}}/>
-            : <div style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:52,height:52,borderRadius:14,background:T.amber,marginBottom:12}}>
-                <span style={{fontFamily:"'Sora',sans-serif",fontWeight:800,fontSize:18,color:"#fff"}}>MCS</span>
-              </div>
-          }
-          <div style={{fontFamily:"'Sora',sans-serif",fontWeight:800,fontSize:20,color:T.navy,lineHeight:1.2}}>Management Control System</div>
-          <div style={{fontFamily:"'Sora',sans-serif",fontWeight:700,fontSize:13,color:T.amber,marginTop:3,letterSpacing:1,textTransform:"uppercase"}}>Actions</div>
+          {/* Adroit + Signet dual branding */}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:16}}>
+            <div style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
+              <div style={{fontFamily:"'Sora',sans-serif",fontWeight:800,fontSize:22,color:T.navy,letterSpacing:1}}>ADROIT</div>
+              <div style={{fontSize:9,color:T.text2,fontWeight:600,letterSpacing:2,textTransform:"uppercase"}}>Industries</div>
+            </div>
+            <div style={{width:1.5,height:36,background:T.border,borderRadius:2}}/>
+            <div style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
+              <div style={{fontFamily:"'Sora',sans-serif",fontWeight:800,fontSize:22,color:T.amber,letterSpacing:1}}>SIGNET</div>
+              <div style={{fontSize:9,color:T.text2,fontWeight:600,letterSpacing:2,textTransform:"uppercase"}}>Industries</div>
+            </div>
+          </div>
+          <div style={{fontFamily:"'Sora',sans-serif",fontWeight:800,fontSize:18,color:T.navy,lineHeight:1.2}}>Management Control System</div>
           <div style={{fontSize:11,color:T.text2,marginTop:6}}>Decentralized Work Management Platform</div>
         </div>
         {/* ── Sheet connection indicator ── */}
@@ -570,13 +575,6 @@ function LoginPage({onLogin,brandLogo,onBrandUpload}){
             {connStatus==="offline"&&"Sheet offline — using local data"}
           </span>
         </div>
-        <button onClick={googleLogin} disabled={loading} style={{width:"100%",padding:"11px 0",borderRadius:10,border:`1.5px solid ${T.border}`,background:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:10,fontSize:13,fontWeight:600,color:T.text,marginBottom:18,transition:"all .2s"}}>
-          <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
-          Continue with Google
-        </button>
-        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
-          <div style={{flex:1,height:1,background:T.border}}/><span style={{fontSize:11,color:T.text2,fontWeight:500}}>or sign in with username</span><div style={{flex:1,height:1,background:T.border}}/>
-        </div>
         <div style={{marginBottom:14}}><Lbl t="Username" req/><input value={u} onChange={e=>setU(e.target.value)} placeholder="Enter your username" onKeyDown={e=>e.key==="Enter"&&tryLogin()}/></div>
         <div style={{marginBottom:20,position:"relative"}}>
           <Lbl t="Password" req/>
@@ -587,24 +585,7 @@ function LoginPage({onLogin,brandLogo,onBrandUpload}){
         <button className="btn btn-navy" style={{width:"100%",justifyContent:"center",fontSize:14,padding:"12px 0"}} onClick={tryLogin} disabled={loading}>
           {loading?<><Spin/> Signing in…</>:"Sign In"}
         </button>
-        <div style={{marginTop:16,display:"flex",gap:10}}>
-          <div style={{flex:1,padding:"12px 0",borderTop:`1px solid ${T.border}`}}>
-            <div style={{fontSize:11,color:T.text2,marginBottom:8,fontWeight:600,textTransform:"uppercase",letterSpacing:.5}}>Demo accounts</div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
-              {[{u:"admin",r:"Admin",c:T.navy,pw:"admin123"},{u:"meena",r:"User",c:T.amber,pw:"pass123"},{u:"guest",r:"Guest",c:T.slate,pw:"guest"}].map(x=>(
-                <button key={x.u} onClick={()=>{setU(x.u);if(pw.current)pw.current.value=x.pw;}} style={{padding:"7px 6px",borderRadius:8,border:`1.5px solid ${x.c}30`,background:x.c+"0D",color:x.c,fontSize:11,fontWeight:600,cursor:"pointer",textAlign:"center"}}>
-                  {x.u}<br/><span style={{opacity:.7,fontSize:10}}>{x.r}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div style={{borderTop:`1px solid ${T.border}`,paddingTop:14,marginTop:4}}>
-          <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleBrandUpload}/>
-          <button onClick={()=>fileRef.current?.click()} style={{width:"100%",padding:"8px 0",borderRadius:8,border:`1.5px dashed ${T.border}`,background:"transparent",color:T.text2,fontSize:11,fontWeight:500,cursor:"pointer"}}>
-            {brandLogo?"✓ Brand logo uploaded — click to change":"📷 Upload brand logo (optional)"}
-          </button>
-        </div>
+        <div style={{textAlign:"center",marginTop:20,fontSize:10,color:T.text2}}>Powered by Adroit × Signet</div>
       </div>
     </div>
   );
@@ -1376,7 +1357,7 @@ function HomePage({actions,setActions,user,setPage,users,meetings,setGlobalActiv
       </div>
 
       {/* Unified action detail panel — same as Actions page */}
-      {actionPanel&&<ActionDetailPanel action={actionPanel} onClose={()=>setActionPanel(null)} onUpdate={(id,patch)=>{upAction(id,patch);setActionPanel(p=>p?{...p,...patch}:p);}} user={user} users={users} allUsers={users}/>}
+      {actionPanel&&<ActionDetailPanel action={actionPanel} onClose={()=>setActionPanel(null)} onUpdate={(id,patch)=>{upAction(id,patch);setActionPanel(p=>p?{...p,...patch}:p);}} user={user} users={users} allUsers={users} plants={plants}/>}
 
       {/* Fix 6: Team sub modal */}
       {subModal&&(
@@ -1549,8 +1530,8 @@ function ProjectCharterModal({pr,onClose,actions,meetings,user,onProjectUpdate,o
             <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
               {(editMode?draft:pr).team.map(name=>(
                 <div key={name} style={{display:"flex",alignItems:"center",gap:8,background:T.bg,borderRadius:8,padding:"6px 12px",position:"relative"}}>
-                  <Avatar name={name} size={28} users={DEFAULT_USERS}/>
-                  <div><div style={{fontSize:12,fontWeight:600}}>{name}</div><div style={{fontSize:10,color:T.text2}}>{DEFAULT_USERS.find(u=>u.name===name)?.role||"Member"}</div></div>
+                  <Avatar name={name} size={28} users={allUsers||DEFAULT_USERS}/>
+                  <div><div style={{fontSize:12,fontWeight:600}}>{name}</div><div style={{fontSize:10,color:T.text2}}>{(allUsers||DEFAULT_USERS).find(u=>u.name===name)?.role||"Member"}</div></div>
                   {editMode&&<button onClick={()=>setDraft(d=>({...d,team:d.team.filter(n=>n!==name)}))} style={{marginLeft:4,background:"transparent",border:"none",cursor:"pointer",color:T.red,fontSize:14,lineHeight:1,padding:"0 2px"}} title="Remove">×</button>}
                 </div>
               ))}
@@ -1600,7 +1581,7 @@ function ProjectCharterModal({pr,onClose,actions,meetings,user,onProjectUpdate,o
                     <td style={{fontSize:12,fontWeight:500}}>{m.type}</td>
                     <td style={{fontSize:12}}>{m.plant}</td>
                     <td style={{fontSize:12}}>{m.time} · {m.dur}min</td>
-                    <td><div style={{display:"flex",alignItems:"center",gap:6}}><Avatar name={m.facilitator} size={22} users={DEFAULT_USERS}/><span style={{fontSize:12}}>{m.facilitator}</span></div></td>
+                    <td><div style={{display:"flex",alignItems:"center",gap:6}}><Avatar name={m.facilitator} size={22} users={allUsers||DEFAULT_USERS}/><span style={{fontSize:12}}>{m.facilitator}</span></div></td>
                     <td style={{fontSize:12,color:T.text2}}>{(m.completedSessions||[]).length} done</td>
                   </tr>
                 ))}</tbody>
@@ -1841,7 +1822,7 @@ function WorkPage({plants,depts,users,onCommitFinal,actions,user,onProjectUpdate
         </div>
       </div>
       {charter&&<ProjectCharterModal pr={charter} onClose={()=>{setCharter(null);setCharterActionSel(null);}} actions={actions} meetings={meetings} user={user} users={users} onProjectUpdate={updated=>{setProjects(p=>p.map(x=>x.id===updated.id?updated:x));onProjectUpdate(updated);}} onActionSelect={a=>setCharterActionSel(a)}/>}
-      {charterActionSel&&<ActionDetailPanel action={charterActionSel} onClose={()=>setCharterActionSel(null)} onUpdate={()=>{}} user={user} users={users} allUsers={DEFAULT_USERS}/>}
+      {charterActionSel&&<ActionDetailPanel action={charterActionSel} onClose={()=>setCharterActionSel(null)} onUpdate={()=>{}} user={user} users={users} allUsers={users} plants={plants}/>}
       {showAddMtg&&<AddMeetingModal plants={plants} users={users} projects={projects} onSave={m=>{setMeetings(p=>[...p,{...m,id:"M"+Date.now(),completedSessions:[]}]);setShowAddMtg(false);}} onClose={()=>setShowAddMtg(false)}/>}
       {/* Feature 3: Add Project Modal */}
       {showAddProject&&<AddProjectModal plants={plants} users={users} onSave={p=>{setProjects(prev=>[...prev,{...p,id:"PR"+Date.now(),milestones:[],risks:"",team:[]}]);showAddProject&&setShowAddProject(false);}} onClose={()=>setShowAddProject(false)}/>}
@@ -1976,7 +1957,7 @@ function MeetingPlanPanel({mtg,canEdit,projects,users,plants,onSave,onClose,mtgP
             <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
               {attendees.map((name,i)=>(
                 <div key={i} style={{display:"flex",alignItems:"center",gap:6,background:T.bg,borderRadius:8,padding:"5px 10px"}}>
-                  <Avatar name={name} size={22} users={DEFAULT_USERS}/><span style={{fontSize:12}}>{name}</span>
+                  <Avatar name={name} size={22} users={users||DEFAULT_USERS}/><span style={{fontSize:12}}>{name}</span>
                   {editMode&&<button onClick={()=>up("attendees",attendees.filter((_,idx)=>idx!==i))} style={{background:"transparent",border:"none",cursor:"pointer",color:T.red,fontSize:14,lineHeight:1,padding:"0 2px",marginLeft:2}}>×</button>}
                 </div>
               ))}
@@ -2723,7 +2704,7 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
               <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
                 {attendees.map((name,i)=>(
                   <div key={i} style={{display:"flex",alignItems:"center",gap:4,background:T.bg,borderRadius:6,padding:"2px 7px"}}>
-                    <Avatar name={name} size={16} users={DEFAULT_USERS}/><span style={{fontSize:11}}>{name}</span>
+                    <Avatar name={name} size={16} users={users}/><span style={{fontSize:11}}>{name}</span>
                   </div>
                 ))}
               </div>
@@ -2753,7 +2734,7 @@ function MeetingRoom({mtg,plants,depts,users,onCommit,onCloseMeeting,onBack,prev
 /* ADD ACTION SIDE PANEL */
 function AddActionPanel({users,plants,depts,defaultPlant,defaultSrc,projects,onSave,onClose,currentUser}){
   useEscClose(onClose);
-  const [f,setF]=useState({text:"",responsible:"",due:"",section:"General",plant:defaultPlant||"",src:defaultSrc||"",priority:"NORMAL",remarks:"",project:""});
+  const [f,setF]=useState({text:"",responsible:"",due:"",section:"General",plant:defaultPlant||"",src:defaultSrc||"",priority:"NORMAL",remarks:"",project:"",reasonOfAction:"",machineName:""});
   const up=(k,v)=>setF(x=>({...x,[k]:v}));
   return(
     <>
@@ -2768,14 +2749,18 @@ function AddActionPanel({users,plants,depts,defaultPlant,defaultSrc,projects,onS
           <div><Lbl t="Responsible Person" req/><select value={f.responsible} onChange={e=>up("responsible",e.target.value)}><option value="">Select…</option>{users.map(u=><option key={u.id} value={u.name}>{u.name} ({u.role})</option>)}</select></div>
           <div><Lbl t="Due Date" req/><input type="date" value={f.due} onChange={e=>up("due",e.target.value)}/></div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <div><Lbl t="Department"/><select value={f.section} onChange={e=>up("section",e.target.value)}>{SECTIONS.map(s=><option key={s}>{s}</option>)}</select></div>
+            <div><Lbl t="Department"/><select value={f.section} onChange={e=>up("section",e.target.value)}><option value="General">General</option>{(depts||[]).map(d=><option key={d.id} value={d.name}>{d.name}</option>)}{SECTIONS.filter(s=>!(depts||[]).find(d=>d.name===s)).map(s=><option key={s}>{s}</option>)}</select></div>
             <div><Lbl t="Plant"/><select value={f.plant} onChange={e=>up("plant",e.target.value)}>{plants.map(p=><option key={p.id}>{p.name}</option>)}</select></div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
             <div><Lbl t="Priority"/><select value={f.priority} onChange={e=>up("priority",e.target.value)}>{PRIORITY_LIST.map(p=><option key={p}>{p}</option>)}</select></div>
             {projects&&<div><Lbl t="Link to Project"/><select value={f.project} onChange={e=>up("project",e.target.value)}><option value="">None</option>{projects.map(p=><option key={p.id}>{p.name}</option>)}</select></div>}
           </div>
-          <div><Lbl t="Remarks"/><input value={f.remarks} onChange={e=>up("remarks",e.target.value)} placeholder="Optional notes…"/></div>
+          <div><Lbl t="Reason of Action"/><input value={f.reasonOfAction} onChange={e=>up("reasonOfAction",e.target.value)} placeholder="Why is this action needed? (optional)"/></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div><Lbl t="Machine Name"/><input value={f.machineName} onChange={e=>up("machineName",e.target.value)} placeholder="Machine or equipment (optional)"/></div>
+            <div><Lbl t="Remarks"/><input value={f.remarks} onChange={e=>up("remarks",e.target.value)} placeholder="Optional notes…"/></div>
+          </div>
         </div>
         <div style={{marginTop:20,display:"flex",gap:10}}>
           <button className="btn btn-ghost" style={{flex:1,justifyContent:"center"}} onClick={onClose}>Cancel</button>
@@ -2938,7 +2923,7 @@ function StagingArea({staged,mtg,plants,depts,users,txLines,onCommit,onCloseMeet
 
 /* ===================== ACTION DETAIL SIDE PANEL ===================== */
 /* Completion workflow: assignee marks done → goes to allocatedBy + their superior for confirmation */
-function ActionDetailPanel({action,onClose,onUpdate,user,users,allUsers}){
+function ActionDetailPanel({action,onClose,onUpdate,user,users,allUsers,plants:panelPlants}){
   useEscClose(onClose);
   const [msgText,setMsgText]=useState("");
   const messagesEndRef=useRef(null);
@@ -3061,11 +3046,16 @@ function ActionDetailPanel({action,onClose,onUpdate,user,users,allUsers}){
               <div><div style={{fontSize:10,color:T.text2,fontWeight:700,textTransform:"uppercase",letterSpacing:.4,marginBottom:3}}>Allocated By</div><div style={{display:"flex",alignItems:"center",gap:6,padding:"3px 6px"}}><Avatar name={action.allocatedBy} size={20} users={allUsers}/><span style={{fontSize:12}}>{action.allocatedBy||"—"}</span></div></div>
               {/* Editable fields */}
               <InlineField label="Source" field="src" value={action.src} type="text"/>
-              <InlineField label="Department" field="section" value={action.section} type="select" opts={SECTIONS}/>
-              <InlineField label="Plant" field="plant" value={action.plant} type="select" opts={DEFAULT_PLANTS.map(p=>p.name)}/>
+              <InlineField label="Department" field="section" value={action.section} type="select" opts={[...(panelPlants ? [] : SECTIONS), ...((panelPlants ? (allUsers||[]) : []).length > 0 ? [...new Set(["General", ...(allUsers||[]).map(u=>u.dept).filter(Boolean)])] : SECTIONS)]}/>
+
+              <InlineField label="Plant" field="plant" value={action.plant} type="select" opts={(panelPlants||DEFAULT_PLANTS).map(p=>p.name)}/>
               <InlineField label="Responsible" field="responsible" value={action.responsible} type="select" opts={allUsers.map(u=>u.name)}/>
               <InlineField label="Due Date" field="due" value={action.due} type="date"/>
               <div><div style={{fontSize:10,color:T.text2,fontWeight:700,textTransform:"uppercase",letterSpacing:.4,marginBottom:3}}>Closed On</div><div style={{fontSize:12,padding:"3px 6px"}}>{fmt(action.closedOn)}</div></div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+              <InlineField label="Reason of Action" field="reasonOfAction" value={action.reasonOfAction} type="text"/>
+              <InlineField label="Machine Name" field="machineName" value={action.machineName} type="text"/>
             </div>
             <InlineField label="Remarks" field="remarks" value={action.remarks} type="textarea"/>
             {/* Actions */}
@@ -3100,11 +3090,11 @@ function ActionDetailPanel({action,onClose,onUpdate,user,users,allUsers}){
                   </div>
                 );
                 return(
-                  <div key={m.id} style={{display:"flex",flexDirection:isMe?"row-reverse":"row",gap:8,alignItems:"flex-end"}}>
+                  <div key={m.id} style={{display:"flex",flexDirection:"row",gap:8,alignItems:"flex-end"}}>
                     <div style={{width:28,height:28,borderRadius:"50%",background:m.authorColor+"20",color:m.authorColor,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,flexShrink:0,border:`1.5px solid ${m.authorColor}30`}}>{m.authorInitials}</div>
                     <div style={{maxWidth:"72%"}}>
-                      <div style={{fontSize:10,color:T.text2,marginBottom:3,textAlign:isMe?"right":"left"}}>{m.author} · {fmtTime(m.ts)}</div>
-                      <div style={{background:isMe?T.navy+"15":T.bg,border:`1px solid ${isMe?T.navy+"20":T.border}`,borderRadius:isMe?"12px 12px 2px 12px":"12px 12px 12px 2px",padding:"9px 13px",fontSize:13,lineHeight:1.5,color:T.text}}>{m.text}</div>
+                      <div style={{fontSize:10,color:T.text2,marginBottom:3,textAlign:"left"}}>{m.author}{isMe?" (You)":""} · {fmtTime(m.ts)}</div>
+                      <div style={{background:isMe?T.navy+"15":T.bg,border:`1px solid ${isMe?T.navy+"20":T.border}`,borderRadius:"12px 12px 12px 2px",padding:"9px 13px",fontSize:13,lineHeight:1.5,color:T.text}}>{m.text}</div>
                     </div>
                   </div>
                 );
@@ -3346,16 +3336,16 @@ function ActionsPage({actions,setActions,plants,depts,users,user,projects}){
         </div>
       </div>
       {openFilter&&<div style={{position:"fixed",inset:0,zIndex:599}} onClick={()=>setOpenFilter(null)}/>}
-      {view==="table"&&<TableView fa={fa} upStatus={upStatus} setSel={a=>{setSel(a);}} canEdit={canEdit} upAction={upAction} sortState={userSortPref[userKey]} onSortChange={s=>{userSortPref[userKey]=s;}}/>}
+      {view==="table"&&<TableView fa={fa} upStatus={upStatus} setSel={a=>{setSel(a);}} canEdit={canEdit} upAction={upAction} sortState={userSortPref[userKey]} onSortChange={s=>{userSortPref[userKey]=s;}} users={users}/>}
       {view==="board"&&<BoardView fa={fa} setSel={setSel} users={users}/>}
       {view==="kanban"&&<KanbanView fa={fa} upStatus={upStatus} canEdit={canEdit} users={users} setSel={setSel}/>}
       {view==="timeline"&&<TimelineView fa={fa}/>}
-      {sel&&<ActionDetailPanel action={sel} onClose={()=>setSel(null)} onUpdate={(id,patch)=>{upAction(id,patch);setSel(p=>p?{...p,...patch}:p);}} user={user} users={users} allUsers={DEFAULT_USERS}/>}
+      {sel&&<ActionDetailPanel action={sel} onClose={()=>setSel(null)} onUpdate={(id,patch)=>{upAction(id,patch);setSel(p=>p?{...p,...patch}:p);}} user={user} users={users} allUsers={users} plants={plants}/>}
     </div>
   );
 }
 
-function TableView({fa,upStatus,setSel,canEdit,upAction,sortState,onSortChange}){
+function TableView({fa,upStatus,setSel,canEdit,upAction,sortState,onSortChange,users}){
   // Use externally-provided sort state if available (for persistence), else local
   const [localSortKey,setLocalSortKey]=useState(sortState?.key||"dateOfAction");
   const [localSortDir,setLocalSortDir]=useState(sortState?.dir||"desc");
@@ -3397,7 +3387,7 @@ function TableView({fa,upStatus,setSel,canEdit,upAction,sortState,onSortChange})
           <TH k="section" label="Department" minWidth={100}/>
           <TH k="plant" label="Plant" minWidth={90}/>
           <TH k="dateOfAction" label="Date" minWidth={100}/>
-          <TH k="text" label="Action Point" minWidth={210}/>
+          <TH k="text" label="Action Point" minWidth={280}/>
           <TH k="responsible" label="Responsible" minWidth={130}/>
           <TH k="due" label="Due Date" minWidth={100}/>
           <TH k="status" label="Status" minWidth={130}/>
@@ -3411,12 +3401,12 @@ function TableView({fa,upStatus,setSel,canEdit,upAction,sortState,onSortChange})
               <td style={{fontSize:12}}>{a.section}</td>
               <td style={{fontSize:11}}>{a.plant}</td>
               <td style={{fontSize:11,color:T.text2,whiteSpace:"nowrap"}}>{fmt(a.dateOfAction)}</td>
-              <td style={{maxWidth:210}}>
-                <div style={{fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:13}}>{a.text}</div>
+              <td style={{minWidth:280,maxWidth:360}}>
+                <div style={{fontWeight:500,whiteSpace:"normal",wordBreak:"break-word",fontSize:13,lineHeight:1.4}}>{a.text}</div>
                 {isOverdue(a)&&<div style={{fontSize:10,color:T.red,fontWeight:600}}>⚠ {daysOver(a)}d overdue</div>}
                 {a.pendingConfirmation&&<div style={{fontSize:10,color:T.amber,fontWeight:600}}>⏳ Pending confirm</div>}
               </td>
-              <td onClick={e=>e.stopPropagation()}><div style={{display:"flex",alignItems:"center",gap:6}}><Avatar name={a.responsible} size={24} users={DEFAULT_USERS}/><span style={{fontSize:12}}>{a.responsible}</span></div></td>
+              <td onClick={e=>e.stopPropagation()}><div style={{display:"flex",alignItems:"center",gap:6}}><Avatar name={a.responsible} size={24} users={users}/><span style={{fontSize:12}}>{a.responsible}</span></div></td>
               <td style={{fontSize:12,color:isOverdue(a)?T.red:T.text,whiteSpace:"nowrap"}}>{fmt(a.due)}</td>
               <td onClick={e=>e.stopPropagation()}><SBadge s={a.pendingConfirmation?"PENDING CONFIRM":a.status}/></td>
               <td style={{textAlign:"center"}}>{(a.revisions||0)>0?<span style={{fontWeight:700,color:T.amber,fontSize:12}}>{a.revisions}</span>:<span style={{color:T.text2,fontSize:12}}>—</span>}</td>
@@ -3543,10 +3533,11 @@ function TimelineView({fa}){
 }
 
 /* ===================== DASHBOARD ===================== */
-function DashboardPage({actions,plants,depts,users,audit,user,meetings,onViewEscalations,refreshData}){
+function DashboardPage({actions,plants,depts,users,audit,user,meetings,onViewEscalations,refreshData,setActions:setActionsUp}){
   const [drill,setDrill]=useState(null);
   const [deptDrill,setDeptDrill]=useState(null);
   const [mtgDrill,setMtgDrill]=useState(false);
+  const [actionDetail,setActionDetail]=useState(null);
   const [plantF,setPlantF]=useState("All");
   const [deptF,setDeptF]=useState("All");
   useEscClose(useCallback(()=>{setDrill(null);setDeptDrill(null);setMtgDrill(false);},[]) );
@@ -3642,10 +3633,10 @@ function DashboardPage({actions,plants,depts,users,audit,user,meetings,onViewEsc
             const c=da.filter(a=>a.priority==="CRITICAL"&&a.status!=="COMPLETED"&&a.status!=="DROPPED").length;
             const o=da.filter(isOverdue).length;
             const dn=da.filter(a=>a.status==="COMPLETED").length;
-            const r=da.length?Math.round(dn/da.length*100):100;
-            const health=c>0?"red":o>0?"amber":"green";
-            const hc=health==="red"?T.red:health==="amber"?T.amber:T.green;
-            const hb=health==="red"?T.redL:health==="amber"?T.amberL:T.greenL;
+            const r=da.length?Math.round(dn/da.length*100):0;
+            const health=da.length===0?"nodata":c>0?"red":o>0?"amber":"green";
+            const hc=health==="red"?T.red:health==="amber"?T.amber:health==="nodata"?T.slate:T.green;
+            const hb=health==="red"?T.redL:health==="amber"?T.amberL:health==="nodata"?"#F0F0F8":T.greenL;
             return(
               <tr key={d.id} style={{cursor:"pointer"}} onClick={()=>setDeptDrill(d)}>
                 <td><div style={{display:"flex",alignItems:"center",gap:10}}><span style={{width:10,height:10,borderRadius:3,background:hc,flexShrink:0}}/><span style={{fontSize:18}}>{d.icon}</span><div><div style={{fontWeight:600,fontSize:13}}>{d.name}</div><div style={{fontSize:11,color:T.text2}}>HOD: {d.head}</div></div></div></td>
@@ -3677,7 +3668,7 @@ function DashboardPage({actions,plants,depts,users,audit,user,meetings,onViewEsc
               <div key={a.id} style={{display:"flex",gap:12,padding:"10px 0",borderBottom:`1px solid ${T.border}`,alignItems:"flex-start"}}>
                 <span style={{width:8,height:8,borderRadius:2,background:a.priority==="CRITICAL"?T.red:T.amber,marginTop:4,flexShrink:0}}/>
                 <div style={{flex:1}}><div style={{fontSize:13,fontWeight:500,lineHeight:1.4}}>{a.text.slice(0,55)}{a.text.length>55?"…":""}</div><div style={{fontSize:11,color:T.text2,marginTop:2}}>{a.section} · {isOverdue(a)?<span style={{color:T.red,fontWeight:600}}>{daysOver(a)}d late</span>:fmt(a.due)}</div></div>
-                <Avatar name={a.responsible} size={24} users={DEFAULT_USERS}/>
+                <Avatar name={a.responsible} size={24} users={users}/>
               </div>
             ))
           }
@@ -3723,7 +3714,7 @@ function DashboardPage({actions,plants,depts,users,audit,user,meetings,onViewEsc
                 {critOverdue.length===0?<Empty icon="✅" title="All clear!" sub="No critical or overdue actions."/>:
                   <div style={{display:"flex",flexDirection:"column",gap:12}}>
                     {critOverdue.map(a=>(
-                      <div key={a.id} style={{background:T.bg,borderRadius:10,padding:"14px 16px",border:`1.5px solid ${a.priority==="CRITICAL"?T.red:T.amber}30`}}>
+                      <div key={a.id} style={{background:T.bg,borderRadius:10,padding:"14px 16px",border:`1.5px solid ${a.priority==="CRITICAL"?T.red:T.amber}30`,cursor:"pointer",transition:"transform .15s"}} onClick={()=>setActionDetail(a)} onMouseEnter={e=>e.currentTarget.style.transform="translateY(-1px)"} onMouseLeave={e=>e.currentTarget.style.transform="none"}>
                         <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
                           <span style={{fontFamily:"monospace",fontSize:10,color:T.text2}}>{a.sn}</span>
                           <div style={{display:"flex",gap:6}}><SBadge s={a.status}/><PBadge p={a.priority}/></div>
@@ -3731,7 +3722,7 @@ function DashboardPage({actions,plants,depts,users,audit,user,meetings,onViewEsc
                         <div style={{fontSize:13,fontWeight:600,marginBottom:8,lineHeight:1.4}}>{a.text}</div>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                           <div style={{display:"flex",alignItems:"center",gap:6}}>
-                            <Avatar name={a.responsible} size={22} users={DEFAULT_USERS}/>
+                            <Avatar name={a.responsible} size={22} users={users}/>
                             <span style={{fontSize:12,color:T.text2}}>{a.responsible}</span>
                           </div>
                           <span style={{fontSize:11,fontWeight:700,color:isOverdue(a)?T.red:T.amber}}>{isOverdue(a)?`${daysOver(a)}d overdue`:fmt(a.due)}</span>
@@ -3779,7 +3770,7 @@ function DashboardPage({actions,plants,depts,users,audit,user,meetings,onViewEsc
                 {d.rows.length===0?<Empty icon="📭" title="No records" sub="Nothing to show for this filter."/>:
                   <div style={{display:"flex",flexDirection:"column",gap:10}}>
                     {d.rows.slice(0,30).map(a=>(
-                      <div key={a.id} style={{background:T.bg,borderRadius:10,padding:"12px 14px",border:`1.5px solid ${isOverdue(a)?T.red+"40":T.border}`}}>
+                      <div key={a.id} style={{background:T.bg,borderRadius:10,padding:"12px 14px",border:`1.5px solid ${isOverdue(a)?T.red+"40":T.border}`,cursor:"pointer",transition:"transform .15s"}} onClick={()=>setActionDetail(a)} onMouseEnter={e=>e.currentTarget.style.transform="translateY(-1px)"} onMouseLeave={e=>e.currentTarget.style.transform="none"}>
                         <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
                           <span style={{fontFamily:"monospace",fontSize:10,color:T.text2}}>{a.sn}</span>
                           <div style={{display:"flex",gap:5}}><SBadge s={a.pendingConfirmation?"PENDING CONFIRM":a.status}/><PBadge p={a.priority}/></div>
@@ -3787,7 +3778,7 @@ function DashboardPage({actions,plants,depts,users,audit,user,meetings,onViewEsc
                         <div style={{fontSize:13,fontWeight:600,marginBottom:6,lineHeight:1.4}}>{a.text}</div>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                           <div style={{display:"flex",alignItems:"center",gap:6}}>
-                            <Avatar name={a.responsible} size={22} users={DEFAULT_USERS}/>
+                            <Avatar name={a.responsible} size={22} users={users}/>
                             <span style={{fontSize:12,color:T.text2}}>{a.responsible||"Unassigned"}</span>
                           </div>
                           <div style={{display:"flex",gap:8,fontSize:11,color:T.text2}}>
@@ -3860,20 +3851,22 @@ function DashboardPage({actions,plants,depts,users,audit,user,meetings,onViewEsc
               </div>
               <table><thead><tr><th>SN</th><th>Action</th><th>Responsible</th><th>Status</th><th>Due</th></tr></thead>
               <tbody>{da.map(a=>(
-                <tr key={a.id}><td style={{fontFamily:"monospace",fontSize:11,color:T.text2}}>{a.sn}</td><td style={{maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.text}</td><td><div style={{display:"flex",alignItems:"center",gap:6}}><Avatar name={a.responsible} size={22} users={DEFAULT_USERS}/><span style={{fontSize:12}}>{a.responsible?.split(" ")[0]}</span></div></td><td><SBadge s={a.status}/></td><td style={{fontSize:12,color:isOverdue(a)?T.red:T.text}}>{fmt(a.due)}</td></tr>
+                <tr key={a.id}><td style={{fontFamily:"monospace",fontSize:11,color:T.text2}}>{a.sn}</td><td style={{maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.text}</td><td><div style={{display:"flex",alignItems:"center",gap:6}}><Avatar name={a.responsible} size={22} users={users}/><span style={{fontSize:12}}>{a.responsible?.split(" ")[0]}</span></div></td><td><SBadge s={a.status}/></td><td style={{fontSize:12,color:isOverdue(a)?T.red:T.text}}>{fmt(a.due)}</td></tr>
               ))}</tbody></table>
             </div>
           </div>
         );
       })()}
+      {actionDetail&&<ActionDetailPanel action={actionDetail} onClose={()=>setActionDetail(null)} onUpdate={(id,patch)=>{if(setActionsUp)setActionsUp(p=>p.map(a=>a.id!==id?a:{...a,...patch}));setActionDetail(p=>p?{...p,...patch}:p);}} user={user} users={users} allUsers={users} plants={plants}/>}
     </div>
   );
 }
 
 /* ===================== ESCALATIONS PAGE — Feature 9 ===================== */
-function EscalationsPage({actions,audit,user,setPage}){
+function EscalationsPage({actions,audit,user,setPage,users,plants,setActions:setActionsUp}){
   const [sel,setSel]=useState(null);
   const [filterMode,setFilterMode]=useState("mine"); // "mine" | "all"
+  const [actionDetail,setActionDetail]=useState(null);
 
   // Get subordinates recursively
   const getSubTree=(name,allUsers)=>{
@@ -3882,7 +3875,7 @@ function EscalationsPage({actions,audit,user,setPage}){
     directs.forEach(d=>{all.push(...getSubTree(d.name,allUsers).filter(n=>!all.includes(n)));});
     return all;
   };
-  const mySubTree=user?getSubTree(user.name,DEFAULT_USERS):[];
+  const mySubTree=user?getSubTree(user.name,users||DEFAULT_USERS):[];
 
   // Deduplicate audit: one entry per action SN (keep highest level)
   const dedupedAudit=Object.values(
@@ -3962,7 +3955,7 @@ function EscalationsPage({actions,audit,user,setPage}){
               return(
                 <>
                 <tr key={p.name} style={{cursor:"pointer",background:isExpanded?T.bg:""}} onClick={()=>setSel(isExpanded?null:p)}>
-                  <td><div style={{display:"flex",alignItems:"center",gap:8}}><Avatar name={p.name} size={30} users={DEFAULT_USERS}/><div><div style={{fontWeight:600,fontSize:13}}>{p.name}</div><div style={{fontSize:11,color:T.text2}}>{DEFAULT_USERS.find(u=>u.name===p.name)?.role||"—"}</div></div></div></td>
+                  <td><div style={{display:"flex",alignItems:"center",gap:8}}><Avatar name={p.name} size={30} users={users||DEFAULT_USERS}/><div><div style={{fontWeight:600,fontSize:13}}>{p.name}</div><div style={{fontSize:11,color:T.text2}}>{(users||DEFAULT_USERS).find(u=>u.name===p.name)?.role||"—"}</div></div></div></td>
                   <td><span style={{background:T.redL,color:T.red,padding:"3px 9px",borderRadius:20,fontSize:11,fontWeight:700}}>{p.count}</span></td>
                   <td style={{fontWeight:600,fontSize:13,color:p.actions.filter(a=>a.status!=="COMPLETED"&&a.status!=="DROPPED").length>0?T.amber:T.green}}>{p.actions.filter(a=>a.status!=="COMPLETED"&&a.status!=="DROPPED").length}</td>
                   <td><span style={{background:levelBg,color:levelColor,padding:"3px 9px",borderRadius:20,fontSize:11,fontWeight:700}}>Level {maxLevel}</span></td>
@@ -3977,7 +3970,7 @@ function EscalationsPage({actions,audit,user,setPage}){
                           {p.escalations.map((e)=>{
                             const action=actions.find(a=>a.sn===e.sn);
                             return(
-                              <div key={e.id||e.sn} style={{background:"#fff",borderRadius:8,padding:"10px 14px",border:`1px solid ${T.border}`,display:"flex",gap:12,alignItems:"flex-start"}}>
+                              <div key={e.id||e.sn} style={{background:"#fff",borderRadius:8,padding:"10px 14px",border:`1px solid ${T.border}`,display:"flex",gap:12,alignItems:"flex-start",cursor:"pointer",transition:"background .15s"}} onClick={()=>{if(action)setActionDetail(action);}} onMouseEnter={ev=>ev.currentTarget.style.background=T.bg} onMouseLeave={ev=>ev.currentTarget.style.background="#fff"}>
                                 <span style={{padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:700,flexShrink:0,background:e.level>=3?T.redL:e.level===2?"#FDEBD0":T.amberL,color:e.level>=3?T.red:e.level===2?"#884E00":T.amber}}>L{e.level}</span>
                                 <div style={{flex:1}}>
                                   <div style={{fontSize:12,fontWeight:600,marginBottom:2}}>{e.sn}</div>
@@ -4002,6 +3995,7 @@ function EscalationsPage({actions,audit,user,setPage}){
           </tbody>
         </table>
       </div>
+      {actionDetail&&<ActionDetailPanel action={actionDetail} onClose={()=>setActionDetail(null)} onUpdate={(id,patch)=>{if(setActionsUp)setActionsUp(p=>p.map(a=>a.id!==id?a:{...a,...patch}));setActionDetail(p=>p?{...p,...patch}:p);}} user={user} users={users} allUsers={users} plants={plants}/>}
     </div>
   );
 }
@@ -4448,7 +4442,6 @@ export default function App(){
   });
   const [showQuickAdd,setShowQuickAdd]=useState(false);
   const [brandLogo,setBrandLogo]=useState(null);
-  const [brandLogo,setBrandLogo]=useState(null);
 
   // ── Google Sheet live database ──
   const {
@@ -4532,8 +4525,8 @@ export default function App(){
 
   const pendingForMe=actions.filter(a=>{
     if(!a.pendingConfirmation)return false;
-    const allocatorU=DEFAULT_USERS.find(u=>u.name===a.allocatedBy);
-    const allocSuperior=allocatorU?.superior?DEFAULT_USERS.find(u=>u.name===allocatorU.superior):null;
+    const allocatorU=users.find(u=>u.name===a.allocatedBy);
+    const allocSuperior=allocatorU?.superior?users.find(u=>u.name===allocatorU.superior):null;
     return user?.name===a.allocatedBy||user?.name===allocSuperior?.name||user?.role==="Admin";
   }).length;
 
@@ -4569,8 +4562,8 @@ export default function App(){
         {page===0&&<HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} setGlobalActiveMtg={m=>{setGlobalActiveMtg(m);setMtgRunning(true);}}/>}
         {page===1&&<WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows=>{commitFinal(rows);clearMeetingState();}} actions={actions} user={user} onProjectUpdate={updated=>setProjects(p=>p.map(x=>x.id===updated.id?updated:x))} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} permissions={permissions} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m=>{setGlobalActiveMtg(m);if(m)setMtgRunning(true);}} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState}/>}
         {page===2&&<ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects}/>}
-        {page===3&&<DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={()=>setPage(4)} refreshData={fetchData}/>}
-        {page===4&&<EscalationsPage actions={actions} audit={audit} user={user} setPage={setPage} users={users}/>}
+        {page===3&&<DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={()=>setPage(4)} refreshData={fetchData} setActions={setActions}/>}
+        {page===4&&<EscalationsPage actions={actions} audit={audit} user={user} setPage={setPage} users={users} plants={plants} setActions={setActions}/>}
         {page===99&&user?.role==="Admin"&&<MasterPage plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} permissions={permissions} setPermissions={setPermissions} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets}/>}
       </Shell>
       {showSupport&&<SupportModal user={user} onClose={()=>setShowSupport(false)}/>}
