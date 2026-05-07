@@ -3,30 +3,105 @@ import { useState, useEffect, useRef, useCallback } from "react";
 /* ===================== GOOGLE SHEET CONFIG ===================== */
 // 1. Deploy Code.gs as a Web App (Apps Script → Deploy → Web App → Anyone)
 // 2. Paste the deployment URL below
-const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbxpkCtBFKzyGt864Jnq9hK0tBjXRdWLiR_IJemLbt1XAfVyR3nTVRR2G_AgQGWRw3po-Q/exec";
+const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbzkxOs7ZMiioyG_gJiG_Vfyv0sJCLG_PZHZZm90G8lfqETVqPoPX5LrNvGLa3OxB7PHzA/exec";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://mcs-action.onrender.com";
 const SHEET_ID = import.meta.env.VITE_SHEET_ID || "1OR4J17WrhQg9rqFV3uIhLCDG9UDCoQ5lc9-8ZXoNSOo";
-const SHEET_ENABLED = SHEET_SCRIPT_URL !== "https://script.google.com/macros/s/AKfycbxpkCtBFKzyGt864Jnq9hK0tBjXRdWLiR_IJemLbt1XAfVyR3nTVRR2G_AgQGWRw3po-Q/exec";
+const SHEET_ENABLED = SHEET_SCRIPT_URL !== "YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
 
-// CSV read URL (no auth needed for publicly shared sheets)
+// CSV read URL — fallback only (requires sheet to be publicly shared)
 const csvUrl = (tab) =>
   `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
 
+/* ─── Excel serial-date → YYYY-MM-DD ───────────────────────────────────── */
+// Google Sheets / Excel stores dates as days since 30 Dec 1899.
+// Numbers like 46137 mean 2026-04-25. We detect and convert them.
+function excelSerialToDate(n) {
+  if (typeof n !== "number" || n < 1 || n > 99999) return null;
+  // Adjust for Excel's phantom leap day on 28 Feb 1900
+  const d = new Date(Date.UTC(1899, 11, 30) + n * 86400000);
+  return d.toISOString().slice(0, 10); // "YYYY-MM-DD"
+}
+// Date-like columns that should be converted
+const DATE_COLS = new Set(["dateOfAction", "due", "created", "closedOn", "start", "end"]);
+
 /* ─── Sheet API helpers ─────────────────────────────────────────────────── */
+
+/**
+ * sheetGet — primary read path via GAS doGet endpoint.
+ * Falls back to gviz CSV if GAS URL is not configured or fails.
+ */
 async function sheetGet(tab) {
-  const res = await fetch(csvUrl(tab));
-  if (!res.ok) throw new Error(`Sheet read failed: ${tab}`);
-  const text = await res.text();
-  return parseCsv(text);
+  // ── Primary: GAS doGet ──────────────────────────────────────────────────
+  if (SHEET_ENABLED) {
+    try {
+      const url = `${SHEET_SCRIPT_URL}?tab=${encodeURIComponent(tab)}`;
+      const res = await fetch(url, { redirect: "follow" });
+      const text = await res.text();
+      // GAS returns JSON {ok, data:[...]}
+      const json = JSON.parse(text);
+      if (json.ok && Array.isArray(json.data)) {
+        return json.data.map(normaliseRow);
+      }
+      // GAS returned ok:false — tab probably doesn't exist yet, return empty
+      console.warn(`GAS read warning for tab "${tab}":`, json.error || "unknown");
+      return [];
+    } catch (e) {
+      console.warn(`GAS read failed for "${tab}", trying CSV fallback:`, e.message);
+    }
+  }
+  // ── Fallback: gviz CSV (works only for publicly shared sheets) ──────────
+  try {
+    const res = await fetch(csvUrl(tab));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    // gviz returns HTML when sheet is private — detect and bail
+    if (text.trim().startsWith("<")) throw new Error("Sheet is not public — gviz returned HTML");
+    return parseCsv(text);
+  } catch (e) {
+    console.warn(`CSV fallback also failed for "${tab}":`, e.message);
+    return [];
+  }
+}
+
+/**
+ * normaliseRow — cleans a row object coming from GAS doGet.
+ * Converts Excel serial dates, coerces booleans and JSON strings.
+ */
+function normaliseRow(row) {
+  const out = {};
+  Object.entries(row).forEach(([k, v]) => {
+    if (k === "" || k == null) return;           // skip unnamed columns
+    // Excel serial dates
+    if (DATE_COLS.has(k) && typeof v === "number") {
+      const iso = excelSerialToDate(v);
+      out[k] = iso || v;
+      return;
+    }
+    // Booleans stored as strings
+    if (v === "TRUE" || v === "true")  { out[k] = true;  return; }
+    if (v === "FALSE" || v === "false") { out[k] = false; return; }
+    // JSON fields stored as strings
+    if (typeof v === "string" && (v.startsWith("[") || v.startsWith("{"))) {
+      try { out[k] = JSON.parse(v); return; } catch { /* fall through */ }
+    }
+    out[k] = v;
+  });
+  return out;
 }
 
 async function sheetPost(action, tab, payload) {
   if (!SHEET_ENABLED) return null;
-  const res = await fetch(SHEET_SCRIPT_URL, {
-    method: "POST",
-    body: JSON.stringify({ action, tab, ...payload }),
-  });
-  return res.json();
+  try {
+    const res = await fetch(SHEET_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" }, // avoid CORS preflight
+      body: JSON.stringify({ action, tab, ...payload }),
+    });
+    return res.json();
+  } catch (e) {
+    console.warn("sheetPost failed:", e.message);
+    return null;
+  }
 }
 
 function parseCsv(text) {
@@ -37,16 +112,25 @@ function parseCsv(text) {
     const vals = parseCsvRow(line);
     const obj = {};
     headers.forEach((h, i) => {
+      if (!h) return;
       let v = vals[i] ?? "";
-      // Auto-parse JSON arrays/objects stored in cells
-      if (v.startsWith("[") || v.startsWith("{")) {
+      // JSON fields
+      if (typeof v === "string" && (v.startsWith("[") || v.startsWith("{"))) {
         try { v = JSON.parse(v); } catch { /* keep as string */ }
       }
-      // Booleans
-      if (v === "true") v = true;
-      if (v === "false") v = false;
-      // Numerics (only pure numbers)
-      if (v !== "" && !isNaN(v) && typeof v === "string") v = Number(v);
+      if (v === "true" || v === "TRUE")  { obj[h] = true;  return; }
+      if (v === "false" || v === "FALSE") { obj[h] = false; return; }
+      // Pure numbers
+      if (v !== "" && !isNaN(v) && typeof v === "string") {
+        const n = Number(v);
+        // Excel serial date detection
+        if (DATE_COLS.has(h) && n > 40000 && n < 99999) {
+          obj[h] = excelSerialToDate(n) || v;
+          return;
+        }
+        obj[h] = n;
+        return;
+      }
       obj[h] = v;
     });
     return obj;
@@ -86,49 +170,89 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
 
   const fetchData = useCallback(async () => {
     if (!SHEET_ENABLED) { setDbReady(true); return; }
-    try {
-      const [u, p, d, a, m, pr, em, pm, ps] = await Promise.all([
-        sheetGet("Users"),
-        sheetGet("Plants"),
-        sheetGet("Departments"),
-        sheetGet("Actions"),
-        sheetGet("Meetings"),
-        sheetGet("Projects"),
-        sheetGet("EscalationMatrix"),
-        sheetGet("Permissions"),
-        sheetGet("MeetingPresets"),
-      ]);
-      const sanitize = (arr, prefix) => (Array.isArray(arr) ? arr : [])
-        .filter(x => x && (x.id || x.text || x.name || x.label || x.sn))
-        .map((x, i) => ({ ...x, id: (x.id && String(x.id).trim()) ? x.id : `${prefix}-${i}` }));
-      if (u.length) setUsersRaw(sanitize(u, "u"));
-      if (p.length) setPlantsRaw(sanitize(p, "p"));
-      if (d.length) setDeptsRaw(sanitize(d, "d"));
-      if (a.length) setActionsRaw(sanitize(a, "a"));
-      if (m.length) setMeetingsRaw(sanitize(m, "m"));
-      if (pr.length) setProjectsRaw(sanitize(pr, "pr"));
-      if (em.length) setEscRaw(sanitize(em, "e"));
-      if (pm.length) {
-        const pObj = {};
-        pm.forEach(row => { if (row.id) pObj[row.id] = row; });
-        setPermsRaw(pObj);
-      }
-      if (ps.length) {
-        const pMap = { attendeeMap: {}, instructions: {} };
-        ps.forEach(row => {
-          if (row.type) {
-            pMap.attendeeMap[row.type] = row.attendees || [];
-            pMap.instructions[row.type] = row.instructions || [];
-          }
-        });
-        setPresetsRaw(pMap);
-      }
-      setDbReady(true);
-    } catch (e) {
-      console.warn("Sheet load failed, using seeds:", e.message);
-      setDbError(e.message);
-      setDbReady(true);
+
+    // Each tab is fetched independently — one missing tab never kills the rest
+    const safe = async (tab) => { try { return await sheetGet(tab); } catch { return []; } };
+    const sanitize = (arr, prefix) => (Array.isArray(arr) ? arr : [])
+      .filter(x => x && (x.id || x.text || x.name || x.label || x.sn))
+      .map((x, i) => ({ ...x, id: (x.id != null && String(x.id).trim()) ? String(x.id).trim() : `${prefix}-${i}` }));
+
+    const [u, p, d, a, m, pr, em, pm, ps] = await Promise.all([
+      safe("Users"), safe("Plants"), safe("Departments"), safe("Actions"),
+      safe("Meetings"), safe("Projects"), safe("EscalationMatrix"),
+      safe("Permissions"), safe("MeetingPresets"),
+    ]);
+
+    // Users
+    if (u.length) setUsersRaw(sanitize(u, "u"));
+
+    // Plants — sheet may have no 'id' column; derive id from name
+    if (p.length) {
+      const plants = p.filter(x => x && (x.name || x.id)).map((x, i) => ({
+        ...x,
+        id: (x.id && String(x.id).trim()) ? String(x.id).trim()
+          : x.name ? `P-${x.name.replace(/\s+/g, "")}` : `p-${i}`
+      }));
+      if (plants.length) setPlantsRaw(plants);
     }
+
+    // Departments
+    if (d.length) setDeptsRaw(sanitize(d, "d"));
+
+    // Actions — ensure JSON fields always exist
+    if (a.length) {
+      const clean = a.filter(x => x && (x.id || x.text || x.sn)).map((x, i) => ({
+        revisionHistory: [], messages: [],
+        ...x,
+        id: (x.id != null && String(x.id).trim()) ? String(x.id).trim() : `a-${i}`,
+        revisions: Number(x.revisions) || 0,
+      }));
+      if (clean.length) setActionsRaw(clean);
+    }
+
+    // Meetings
+    if (m.length) {
+      const clean = m.filter(x => x && (x.id || x.type)).map((x, i) => ({
+        completedSessions: [],
+        ...x,
+        id: (x.id != null && String(x.id).trim()) ? String(x.id).trim() : `m-${i}`,
+      }));
+      if (clean.length) setMeetingsRaw(clean);
+    }
+
+    // Projects
+    if (pr.length) {
+      const clean = pr.filter(x => x && (x.id || x.name)).map((x, i) => ({
+        milestones: [], team: [],
+        ...x,
+        id: (x.id != null && String(x.id).trim()) ? String(x.id).trim() : `pr-${i}`,
+      }));
+      if (clean.length) setProjectsRaw(clean);
+    }
+
+    // EscalationMatrix
+    if (em.length) setEscRaw(sanitize(em, "e"));
+
+    // Permissions
+    if (pm.length) {
+      const pObj = {};
+      pm.forEach(row => { if (row.id) pObj[row.id] = row; });
+      setPermsRaw(pObj);
+    }
+
+    // MeetingPresets
+    if (ps.length) {
+      const pMap = { attendeeMap: {}, instructions: {} };
+      ps.forEach(row => {
+        if (row.type) {
+          pMap.attendeeMap[row.type] = Array.isArray(row.attendees) ? row.attendees : [];
+          pMap.instructions[row.type] = Array.isArray(row.instructions) ? row.instructions : [];
+        }
+      });
+      setPresetsRaw(pMap);
+    }
+
+    setDbReady(true);
   }, []);
 
   // ── initial load ──
@@ -488,12 +612,9 @@ function LoginPage({ onLogin }) {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(csvUrl("Users"));
-        if (!res.ok) throw new Error("bad response");
-        const text = await res.text();
-        const rows = parseCsv(text);
+        const rows = await sheetGet("Users");
         setUserCount(rows.length);
-        setConnStatus("connected");
+        setConnStatus(rows.length > 0 ? "connected" : "offline");
       } catch (e) {
         setConnStatus("offline");
       }
@@ -503,9 +624,7 @@ function LoginPage({ onLogin }) {
     setLoading(true); setErrMsg("");
     try {
       // Fetch Users tab from sheet and match credentials
-      const res = await fetch(csvUrl("Users"));
-      const text = await res.text();
-      const sheetUsers = parseCsv(text);
+      const sheetUsers = await sheetGet("Users");
       const uname = u.trim().toLowerCase();
       const pwval = pw.current.value;
       const acc = sheetUsers.find(a =>
@@ -847,7 +966,7 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
                 <span style={{ fontSize: 16, width: 22, textAlign: "center", flexShrink: 0 }}>{n.icon}</span>
                 <span style={{ flex: 1 }}>{n.label}</span>
                 {n.id
- === 2 && pendingCount > 0 && <span style={{ background: T.red, color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{pendingCount}</span>}
+                  === 2 && pendingCount > 0 && <span style={{ background: T.red, color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{pendingCount}</span>}
                 {n.id === 4 && auditCount > 0 && <span style={{ background: T.amber, color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{auditCount}</span>}
                 {active && <span style={{ width: 3, height: 20, borderRadius: 2, background: T.amber, position: "absolute", right: 8 }} />}
               </button>
@@ -865,7 +984,7 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
             {showNotifPanel && (
               <>
                 <div style={{ position: "fixed", inset: 0, zIndex: 180 }} onClick={() => setShowNotifPanel(false)} />
-                <div style={{ position: "absolute", bottom: "100%", left: 10, right: 10, background: "#fff", borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,.2)", padding: 0, zIndex: 190, maxHeight: 380, overflowY: "auto", animation: "slideUp .2s ease" }}>
+                <div style={{ position: "fixed", bottom: 120, left: 14, width: 310, background: "#fff", borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,.2)", padding: 0, zIndex: 999, maxHeight: 380, overflowY: "auto", animation: "slideUp .2s ease" }}>
                   <div style={{ padding: "12px 14px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: "#fff", borderRadius: "12px 12px 0 0" }}>
                     <div style={{ fontWeight: 700, fontSize: 13, color: T.navy }}>🔔 Notifications</div>
                     {(notifications || []).length > 0 && <button onClick={e => { e.stopPropagation(); onMarkAllRead && onMarkAllRead(); }} style={{ fontSize: 10, color: T.text2, border: "none", background: "transparent", cursor: "pointer", fontWeight: 600 }}>Mark all read</button>}
@@ -2758,7 +2877,7 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projec
     sheetGet("Reasons").then(rows => {
       const reasons = rows.map(r => r.reason || r.Reason || r.text || r.Text || Object.values(r)[0]).filter(Boolean);
       if (reasons.length) setReasonSuggestions(reasons);
-    }).catch(() => {/* silently ignore */});
+    }).catch(() => {/* silently ignore */ });
   }, []);
   return (
     <>
@@ -3415,6 +3534,7 @@ function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortC
             <TH k="plant" label="Plant" minWidth={90} />
             <TH k="dateOfAction" label="Date" minWidth={100} />
             <TH k="text" label="Action Point" minWidth={280} />
+            <TH k="reasonOfAction" label="Action Reason" minWidth={160} />
             <TH k="responsible" label="Responsible" minWidth={130} />
             <TH k="due" label="Due Date" minWidth={100} />
             <TH k="status" label="Status" minWidth={130} />
@@ -3433,13 +3553,14 @@ function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortC
                   {isOverdue(a) && <div style={{ fontSize: 10, color: T.red, fontWeight: 600 }}>⚠ {daysOver(a)}d overdue</div>}
                   {a.pendingConfirmation && <div style={{ fontSize: 10, color: T.amber, fontWeight: 600 }}>⏳ Pending confirm</div>}
                 </td>
+                <td style={{ fontSize: 11, color: T.text2, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.reasonOfAction || ""}>{a.reasonOfAction || <span style={{ color: T.border, fontStyle: "italic" }}>—</span>}</td>
                 <td onClick={e => e.stopPropagation()}><div style={{ display: "flex", alignItems: "center", gap: 6 }}><Avatar name={a.responsible} size={24} users={users} /><span style={{ fontSize: 12 }}>{a.responsible}</span></div></td>
                 <td style={{ fontSize: 12, color: isOverdue(a) ? T.red : T.text, whiteSpace: "nowrap" }}>{fmt(a.due)}</td>
                 <td onClick={e => e.stopPropagation()}><SBadge s={a.pendingConfirmation ? "PENDING CONFIRM" : a.status} /></td>
                 <td style={{ textAlign: "center" }}>{(a.revisions || 0) > 0 ? <span style={{ fontWeight: 700, color: T.amber, fontSize: 12 }}>{a.revisions}</span> : <span style={{ color: T.text2, fontSize: 12 }}>—</span>}</td>
               </tr>
             ))}
-            {sorted.length === 0 && <tr><td colSpan={10}><Empty icon="📭" title="No actions found" sub="Adjust filters or add actions via Work." /></td></tr>}
+            {sorted.length === 0 && <tr><td colSpan={11}><Empty icon="📭" title="No actions found" sub="Adjust filters or add actions via Work." /></td></tr>}
           </tbody>
         </table>
       </div>
@@ -3753,7 +3874,8 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
                           <span style={{ fontFamily: "monospace", fontSize: 10, color: T.text2 }}>{a.sn}</span>
                           <div style={{ display: "flex", gap: 6 }}><SBadge s={a.status} /><PBadge p={a.priority} /></div>
                         </div>
-                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, lineHeight: 1.4 }}>{a.text}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, lineHeight: 1.4 }}>{a.text}</div>
+                        {a.reasonOfAction && <div style={{ fontSize: 11, color: T.text2, background: T.amberL, borderRadius: 5, padding: "2px 7px", marginBottom: 6, display: "inline-block" }}>💡 {a.reasonOfAction}</div>}
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <Avatar name={a.responsible} size={22} users={users} />
@@ -3761,6 +3883,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
                           </div>
                           <span style={{ fontSize: 11, fontWeight: 700, color: isOverdue(a) ? T.red : T.amber }}>{isOverdue(a) ? `${daysOver(a)}d overdue` : fmt(a.due)}</span>
                         </div>
+                        <div style={{ fontSize: 10, color: T.navy, marginTop: 6, fontWeight: 600, opacity: .5 }}>Click to edit →</div>
                       </div>
                     ))}
                   </div>
@@ -3809,7 +3932,8 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
                           <span style={{ fontFamily: "monospace", fontSize: 10, color: T.text2 }}>{a.sn}</span>
                           <div style={{ display: "flex", gap: 5 }}><SBadge s={a.pendingConfirmation ? "PENDING CONFIRM" : a.status} /><PBadge p={a.priority} /></div>
                         </div>
-                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, lineHeight: 1.4 }}>{a.text}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, lineHeight: 1.4 }}>{a.text}</div>
+                        {a.reasonOfAction && <div style={{ fontSize: 11, color: T.text2, background: T.amberL, borderRadius: 5, padding: "2px 7px", marginBottom: 6, display: "inline-block" }}>💡 {a.reasonOfAction}</div>}
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <Avatar name={a.responsible} size={22} users={users} />
@@ -3821,6 +3945,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
                             <span style={{ color: isOverdue(a) ? T.red : T.text2, fontWeight: isOverdue(a) ? 700 : 400 }}>{isOverdue(a) ? `${daysOver(a)}d overdue` : fmt(a.due)}</span>
                           </div>
                         </div>
+                        <div style={{ fontSize: 10, color: T.navy, marginTop: 6, fontWeight: 600, opacity: .5 }}>Click to edit →</div>
                       </div>
                     ))}
                   </div>
