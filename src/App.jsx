@@ -3,10 +3,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 /* ===================== GOOGLE SHEET CONFIG ===================== */
 // 1. Deploy Code.gs as a Web App (Apps Script → Deploy → Web App → Anyone)
 // 2. Paste the deployment URL below
-const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbzkxOs7ZMiioyG_gJiG_Vfyv0sJCLG_PZHZZm90G8lfqETVqPoPX5LrNvGLa3OxB7PHzA/exec";
+const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbxpkCtBFKzyGt864Jnq9hK0tBjXRdWLiR_IJemLbt1XAfVyR3nTVRR2G_AgQGWRw3po-Q/exec";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://mcs-action.onrender.com";
 const SHEET_ID = import.meta.env.VITE_SHEET_ID || "1OR4J17WrhQg9rqFV3uIhLCDG9UDCoQ5lc9-8ZXoNSOo";
-const SHEET_ENABLED = SHEET_SCRIPT_URL !== "YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
+const SHEET_ENABLED = SHEET_SCRIPT_URL !== "https://script.google.com/macros/s/AKfycbxpkCtBFKzyGt864Jnq9hK0tBjXRdWLiR_IJemLbt1XAfVyR3nTVRR2G_AgQGWRw3po-Q/exec";
 
 // CSV read URL (no auth needed for publicly shared sheets)
 const csvUrl = (tab) =>
@@ -824,6 +824,7 @@ function AdminNotifManager({ users, onClose }) {
 }
 function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCount, auditCount, activeMtg, onResumeActiveMtg, mtgRunning, mtgElapsed, notifications, onMarkAllRead, unreadCount, users, actions, onShowSupport, onShowProfile, onShowAdminNotifs }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showNotifPanel, setShowNotifPanel] = useState(false);
   const isAdmin = user?.role === "Admin";
   const hms = s => `${String(Math.floor(s / 3600)).padStart(2, "0")}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
@@ -845,7 +846,8 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
               <button key={n.id} onClick={() => setPage(n.id)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px", borderRadius: 10, border: "none", cursor: "pointer", marginBottom: 3, textAlign: "left", fontFamily: "'Inter',sans-serif", fontSize: 13, fontWeight: active ? 600 : 400, background: active ? "rgba(255,255,255,.15)" : "transparent", color: active ? "#fff" : "rgba(255,255,255,.65)", transition: "all .2s", position: "relative" }}>
                 <span style={{ fontSize: 16, width: 22, textAlign: "center", flexShrink: 0 }}>{n.icon}</span>
                 <span style={{ flex: 1 }}>{n.label}</span>
-                {n.id === 2 && pendingCount > 0 && <span style={{ background: T.red, color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{pendingCount}</span>}
+                {n.id
+ === 2 && pendingCount > 0 && <span style={{ background: T.red, color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{pendingCount}</span>}
                 {n.id === 4 && auditCount > 0 && <span style={{ background: T.amber, color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{auditCount}</span>}
                 {active && <span style={{ width: 3, height: 20, borderRadius: 2, background: T.amber, position: "absolute", right: 8 }} />}
               </button>
@@ -853,6 +855,38 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
           })}
         </nav>
         <div style={{ borderTop: "1px solid rgba(255,255,255,.1)" }}>
+          {/* Notification Bell — fixed in sidebar, no overlap with content area */}
+          <div style={{ padding: "8px 18px", borderBottom: "1px solid rgba(255,255,255,.08)", position: "relative" }}>
+            <button onClick={() => { setShowNotifPanel(p => !p); if (!showNotifPanel && onMarkAllRead) onMarkAllRead(); }} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", border: "none", background: showNotifPanel ? "rgba(255,255,255,.12)" : "transparent", cursor: "pointer", borderRadius: 8, padding: "6px 8px", color: "rgba(255,255,255,.75)", fontSize: 12, fontFamily: "'Inter',sans-serif", position: "relative" }}>
+              <span style={{ fontSize: 16, width: 22, textAlign: "center", flexShrink: 0 }}>🔔</span>
+              <span style={{ flex: 1, textAlign: "left", fontWeight: 500 }}>Notifications</span>
+              {unreadCount > 0 && <span style={{ background: T.red, color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{unreadCount}</span>}
+            </button>
+            {showNotifPanel && (
+              <>
+                <div style={{ position: "fixed", inset: 0, zIndex: 180 }} onClick={() => setShowNotifPanel(false)} />
+                <div style={{ position: "absolute", bottom: "100%", left: 10, right: 10, background: "#fff", borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,.2)", padding: 0, zIndex: 190, maxHeight: 380, overflowY: "auto", animation: "slideUp .2s ease" }}>
+                  <div style={{ padding: "12px 14px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: "#fff", borderRadius: "12px 12px 0 0" }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: T.navy }}>🔔 Notifications</div>
+                    {(notifications || []).length > 0 && <button onClick={e => { e.stopPropagation(); onMarkAllRead && onMarkAllRead(); }} style={{ fontSize: 10, color: T.text2, border: "none", background: "transparent", cursor: "pointer", fontWeight: 600 }}>Mark all read</button>}
+                  </div>
+                  {(notifications || []).length === 0
+                    ? <div style={{ padding: "24px 14px", textAlign: "center", color: T.text2, fontSize: 12 }}>No notifications</div>
+                    : (notifications || []).slice(0, 20).map(n => (
+                      <div key={n.id} style={{ padding: "10px 14px", borderBottom: `1px solid ${T.border}`, background: n.read ? "transparent" : "#F0F0FF", display: "flex", gap: 10, alignItems: "flex-start" }}>
+                        <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>{n.icon}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: n.read ? 500 : 700, fontSize: 12, color: T.text, marginBottom: 2 }}>{n.title}</div>
+                          <div style={{ fontSize: 11, color: T.text2, lineHeight: 1.4, wordBreak: "break-word" }}>{n.body}</div>
+                        </div>
+                        {!n.read && <span style={{ width: 8, height: 8, borderRadius: "50%", background: T.navy, flexShrink: 0, marginTop: 4 }} />}
+                      </div>
+                    ))
+                  }
+                </div>
+              </>
+            )}
+          </div>
           {isAdmin && (
             <button onClick={() => setPage(99)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "10px 18px", border: "none", cursor: "pointer", background: page === 99 ? "rgba(255,255,255,.1)" : "transparent", color: "rgba(255,255,255,.45)", fontSize: 12, fontFamily: "'Inter',sans-serif", transition: "all .2s" }}>
               <span style={{ fontSize: 14 }}>⚙</span><span>Master Setup</span>
@@ -2020,6 +2054,8 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   const [showSidePanel, setShowSidePanel] = useState(false);
   const [selAction, setSelAction] = useState(null);
   const [mtgShowMine, setMtgShowMine] = useState(false);
+  const [mtgPendingSearch, setMtgPendingSearch] = useState("");
+  const [mtgFilters, setMtgFilters] = useState({});
   const [exitConfirm, setExitConfirm] = useState(false);
   const [sttStatus, setSttStatus] = useState("idle"); // idle | listening | error | unsupported
   const [sttInterim, setSttInterim] = useState("");
@@ -2471,30 +2507,58 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
         </div>
       </div>
 
-      {/* Pending Actions table */}
+      {/* Pending Actions table — with Action Register ribbon */}
       <div className="card" style={{ padding: 0, overflow: "hidden", marginBottom: 16 }}>
-        <div style={{ padding: "10px 18px", background: T.navy, color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontWeight: 700, fontSize: 13 }}>📋 Pending Actions for this Meeting</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 11, opacity: .7 }}>{mtgShowMine ? myPending.length : pendingRelated.length} shown</span>
-            <div style={{ display: "flex", background: "rgba(255,255,255,.1)", borderRadius: 6, padding: 2 }}>
-              <button onClick={() => setMtgShowMine(false)} style={{ padding: "3px 10px", borderRadius: 4, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: !mtgShowMine ? "rgba(255,255,255,.9)" : "transparent", color: !mtgShowMine ? T.navy : "rgba(255,255,255,.7)" }}>All</button>
-              <button onClick={() => setMtgShowMine(true)} style={{ padding: "3px 10px", borderRadius: 4, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: mtgShowMine ? "rgba(255,255,255,.9)" : "transparent", color: mtgShowMine ? T.navy : "rgba(255,255,255,.7)" }}>Mine</button>
+        <div style={{ background: `linear-gradient(135deg,${T.navy},#3D378C)`, padding: "10px 18px 0", color: "#fff" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>📋 Pending Actions for this Meeting</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 11, opacity: .7 }}>{mtgShowMine ? myPending.length : pendingRelated.length} shown</span>
+              <div style={{ display: "flex", background: "rgba(255,255,255,.15)", borderRadius: 6, padding: 2 }}>
+                <button onClick={() => setMtgShowMine(false)} style={{ padding: "3px 10px", borderRadius: 4, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: !mtgShowMine ? "rgba(255,255,255,.9)" : "transparent", color: !mtgShowMine ? T.navy : "rgba(255,255,255,.7)" }}>All</button>
+                <button onClick={() => setMtgShowMine(true)} style={{ padding: "3px 10px", borderRadius: 4, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: mtgShowMine ? "rgba(255,255,255,.9)" : "transparent", color: mtgShowMine ? T.navy : "rgba(255,255,255,.7)" }}>Mine</button>
+              </div>
             </div>
+          </div>
+          {/* Filter ribbon */}
+          <div style={{ display: "flex", gap: 6, paddingBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <input value={mtgPendingSearch || ""} onChange={e => setMtgPendingSearch && setMtgPendingSearch(e.target.value)} placeholder="🔍 Search…" style={{ width: 140, fontSize: 11, padding: "4px 8px", background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.3)", borderRadius: 6, color: "#fff", height: 26 }} />
+            {[
+              { label: "Status", key: "mtgStatus", opts: STATUS_LIST },
+              { label: "Priority", key: "mtgPriority", opts: PRIORITY_LIST },
+              { label: "Dept", key: "mtgSection", opts: SECTIONS.slice(0, 8) },
+            ].map(({ label, key, opts }) => (
+              <div key={key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 10, color: "rgba(255,255,255,.6)", whiteSpace: "nowrap" }}>{label}:</span>
+                <select value={(mtgFilters || {})[key] || ""} onChange={e => setMtgFilters && setMtgFilters(f => ({ ...f, [key]: e.target.value }))} style={{ fontSize: 10, padding: "2px 6px", background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.3)", borderRadius: 5, color: "#fff", height: 26, minWidth: 80 }}>
+                  <option value="">All</option>{opts.map(o => <option key={o} value={o} style={{ color: T.text, background: "#fff" }}>{o}</option>)}
+                </select>
+              </div>
+            ))}
+            {(Object.values(mtgFilters || {}).some(v => v) || mtgPendingSearch) && (
+              <button onClick={() => { setMtgFilters && setMtgFilters({}); setMtgPendingSearch && setMtgPendingSearch(""); }} style={{ fontSize: 10, padding: "2px 8px", background: "rgba(255,255,255,.2)", border: "1px solid rgba(255,255,255,.3)", borderRadius: 5, color: "#fff", cursor: "pointer", height: 26 }}>Clear</button>
+            )}
           </div>
         </div>
         {pendingRelated.length === 0
           ? <div style={{ padding: "14px 18px", fontSize: 12, color: T.text2 }}>No pending actions linked to this meeting type or project.</div>
-          : <div style={{ overflowX: "auto", maxHeight: 200, overflowY: "auto" }}>
+          : <div style={{ overflowX: "auto", maxHeight: 220, overflowY: "auto" }}>
             <table>
               <thead><tr>
-                <th>SN</th><th style={{ minWidth: 200 }}>Action Point</th><th>Responsible</th><th>Due</th><th>Status</th><th>Priority</th>
+                <th>SN</th><th style={{ minWidth: 200 }}>Action Point</th><th>Reason</th><th>Responsible</th><th>Due</th><th>Status</th><th>Priority</th>
               </tr></thead>
               <tbody>
-                {displayPending.map((a, idx) => (
+                {displayPending.filter(a => {
+                  if (mtgPendingSearch && ![a.text, a.responsible, a.sn].join(" ").toLowerCase().includes((mtgPendingSearch || "").toLowerCase())) return false;
+                  if ((mtgFilters || {}).mtgStatus && a.status !== mtgFilters.mtgStatus) return false;
+                  if ((mtgFilters || {}).mtgPriority && a.priority !== mtgFilters.mtgPriority) return false;
+                  if ((mtgFilters || {}).mtgSection && a.section !== mtgFilters.mtgSection) return false;
+                  return true;
+                }).map((a, idx) => (
                   <tr key={a.id || `mtg-act-${idx}`} style={{ cursor: "pointer", background: isOverdue(a) ? T.redL : "" }} onClick={() => setSelAction(a)}>
                     <td style={{ fontFamily: "monospace", fontSize: 11, color: T.text2 }}>{a.sn}</td>
                     <td><div style={{ fontWeight: 500, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }}>{a.text}</div>{isOverdue(a) && <div style={{ fontSize: 10, color: T.red, fontWeight: 600 }}>⚠ {daysOver(a)}d overdue</div>}</td>
+                    <td style={{ fontSize: 11, color: T.text2, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.reasonOfAction || "—"}</td>
                     <td><div style={{ display: "flex", alignItems: "center", gap: 5 }}><Avatar name={a.responsible} size={20} users={users} /><span style={{ fontSize: 12 }}>{a.responsible || "Unassigned"}</span></div></td>
                     <td style={{ fontSize: 12, color: isOverdue(a) ? T.red : T.text, whiteSpace: "nowrap" }}>{fmt(a.due)}</td>
                     <td><SBadge s={a.status} /></td>
@@ -2685,7 +2749,17 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
 function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projects, onSave, onClose, currentUser }) {
   useEscClose(onClose);
   const [f, setF] = useState({ text: "", responsible: "", due: "", section: "General", plant: defaultPlant || "", src: defaultSrc || "", priority: "NORMAL", remarks: "", project: "", reasonOfAction: "", machineName: "" });
+  const [reasonSuggestions, setReasonSuggestions] = useState([]);
   const up = (k, v) => setF(x => ({ ...x, [k]: v }));
+
+  // Pull reason suggestions from Google Sheet "Reasons" tab
+  useEffect(() => {
+    if (!SHEET_ENABLED) return;
+    sheetGet("Reasons").then(rows => {
+      const reasons = rows.map(r => r.reason || r.Reason || r.text || r.Text || Object.values(r)[0]).filter(Boolean);
+      if (reasons.length) setReasonSuggestions(reasons);
+    }).catch(() => {/* silently ignore */});
+  }, []);
   return (
     <>
       <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", zIndex: 340 }} onClick={onClose} />
@@ -2706,7 +2780,7 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projec
             <div><Lbl t="Priority" /><select value={f.priority} onChange={e => up("priority", e.target.value)}>{PRIORITY_LIST.map(p => <option key={p}>{p}</option>)}</select></div>
             {projects && <div><Lbl t="Link to Project" /><select value={f.project} onChange={e => up("project", e.target.value)}><option value="">None</option>{projects.map(p => <option key={p.id}>{p.name}</option>)}</select></div>}
           </div>
-          <div><Lbl t="Reason of Action" /><input value={f.reasonOfAction} onChange={e => up("reasonOfAction", e.target.value)} placeholder="Why is this action needed? (optional)" /></div>
+          <div><Lbl t="Reason of Action" /><input value={f.reasonOfAction} onChange={e => up("reasonOfAction", e.target.value)} placeholder="Why is this action needed? (optional)" list="reason-suggestions" />{reasonSuggestions.length > 0 && <datalist id="reason-suggestions">{reasonSuggestions.map((r, i) => <option key={i} value={r} />)}</datalist>}</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div><Lbl t="Machine Name" /><input value={f.machineName} onChange={e => up("machineName", e.target.value)} placeholder="Machine or equipment (optional)" /></div>
             <div><Lbl t="Remarks" /><input value={f.remarks} onChange={e => up("remarks", e.target.value)} placeholder="Optional notes…" /></div>
@@ -3809,10 +3883,11 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
                   </div>
                 ))}
               </div>
-              <table><thead><tr><th>SN</th><th>Action</th><th>Responsible</th><th>Status</th><th>Due</th></tr></thead>
+              <table><thead><tr><th>SN</th><th>Action</th><th>Reason</th><th>Responsible</th><th>Status</th><th>Due</th></tr></thead>
                 <tbody>{da.map(a => (
-                  <tr key={a.id}><td style={{ fontFamily: "monospace", fontSize: 11, color: T.text2 }}>{a.sn}</td><td style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.text}</td><td><div style={{ display: "flex", alignItems: "center", gap: 6 }}><Avatar name={a.responsible} size={22} users={users} /><span style={{ fontSize: 12 }}>{a.responsible?.split(" ")[0]}</span></div></td><td><SBadge s={a.status} /></td><td style={{ fontSize: 12, color: isOverdue(a) ? T.red : T.text }}>{fmt(a.due)}</td></tr>
+                  <tr key={a.id} style={{ cursor: "pointer" }} onClick={() => { setActionDetail(a); setDeptDrill(null); }} onMouseEnter={e => { Array.from(e.currentTarget.cells).forEach(c => c.style.background = "#FAFAFE"); }} onMouseLeave={e => { Array.from(e.currentTarget.cells).forEach(c => c.style.background = ""); }}><td style={{ fontFamily: "monospace", fontSize: 11, color: T.text2 }}>{a.sn}</td><td style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>{a.text}</td><td style={{ maxWidth: 140, fontSize: 11, color: T.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.reasonOfAction || "—"}</td><td><div style={{ display: "flex", alignItems: "center", gap: 6 }}><Avatar name={a.responsible} size={22} users={users} /><span style={{ fontSize: 12 }}>{a.responsible?.split(" ")[0]}</span></div></td><td><SBadge s={a.status} /></td><td style={{ fontSize: 12, color: isOverdue(a) ? T.red : T.text }}>{fmt(a.due)}</td></tr>
                 ))}</tbody></table>
+              {da.length > 0 && <div style={{ fontSize: 11, color: T.text2, marginTop: 8, fontStyle: "italic" }}>💡 Click any row to open and edit the action</div>}
             </div>
           </div>
         );
