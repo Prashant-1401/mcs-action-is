@@ -6,7 +6,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbzkxOs7ZMiioyG_gJiG_Vfyv0sJCLG_PZHZZm90G8lfqETVqPoPX5LrNvGLa3OxB7PHzA/exec";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://mcs-action.onrender.com";
 const SHEET_ID = import.meta.env.VITE_SHEET_ID || "1OR4J17WrhQg9rqFV3uIhLCDG9UDCoQ5lc9-8ZXoNSOo";
-const SHEET_ENABLED = SHEET_SCRIPT_URL !== "YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
+const SHEET_ENABLED = SHEET_SCRIPT_URL !== "https://script.google.com/macros/s/AKfycbwV0YC0fYoYCZq1PORjH8svhPeGoLcF_yMQSLEJOBtwYsiu6gMBu4ErNSlIy_qUpmRTXg/exec";
 
 // CSV read URL — fallback only (requires sheet to be publicly shared)
 const csvUrl = (tab) =>
