@@ -1,107 +1,32 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 
 /* ===================== GOOGLE SHEET CONFIG ===================== */
 // 1. Deploy Code.gs as a Web App (Apps Script → Deploy → Web App → Anyone)
 // 2. Paste the deployment URL below
-const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbzkxOs7ZMiioyG_gJiG_Vfyv0sJCLG_PZHZZm90G8lfqETVqPoPX5LrNvGLa3OxB7PHzA/exec";
+const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbwV0YC0fYoYCZq1PORjH8svhPeGoLcF_yMQSLEJOBtwYsiu6gMBu4ErNSlIy_qUpmRTXg/exec";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://mcs-action.onrender.com";
 const SHEET_ID = import.meta.env.VITE_SHEET_ID || "1OR4J17WrhQg9rqFV3uIhLCDG9UDCoQ5lc9-8ZXoNSOo";
 const SHEET_ENABLED = SHEET_SCRIPT_URL !== "https://script.google.com/macros/s/AKfycbwV0YC0fYoYCZq1PORjH8svhPeGoLcF_yMQSLEJOBtwYsiu6gMBu4ErNSlIy_qUpmRTXg/exec";
 
-// CSV read URL — fallback only (requires sheet to be publicly shared)
+// CSV read URL (no auth needed for publicly shared sheets)
 const csvUrl = (tab) =>
   `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
 
-/* ─── Excel serial-date → YYYY-MM-DD ───────────────────────────────────── */
-// Google Sheets / Excel stores dates as days since 30 Dec 1899.
-// Numbers like 46137 mean 2026-04-25. We detect and convert them.
-function excelSerialToDate(n) {
-  if (typeof n !== "number" || n < 1 || n > 99999) return null;
-  // Adjust for Excel's phantom leap day on 28 Feb 1900
-  const d = new Date(Date.UTC(1899, 11, 30) + n * 86400000);
-  return d.toISOString().slice(0, 10); // "YYYY-MM-DD"
-}
-// Date-like columns that should be converted
-const DATE_COLS = new Set(["dateOfAction", "due", "created", "closedOn", "start", "end"]);
-
 /* ─── Sheet API helpers ─────────────────────────────────────────────────── */
-
-/**
- * sheetGet — primary read path via GAS doGet endpoint.
- * Falls back to gviz CSV if GAS URL is not configured or fails.
- */
 async function sheetGet(tab) {
-  // ── Primary: GAS doGet ──────────────────────────────────────────────────
-  if (SHEET_ENABLED) {
-    try {
-      const url = `${SHEET_SCRIPT_URL}?tab=${encodeURIComponent(tab)}`;
-      const res = await fetch(url, { redirect: "follow" });
-      const text = await res.text();
-      // GAS returns JSON {ok, data:[...]}
-      const json = JSON.parse(text);
-      if (json.ok && Array.isArray(json.data)) {
-        return json.data.map(normaliseRow);
-      }
-      // GAS returned ok:false — tab probably doesn't exist yet, return empty
-      console.warn(`GAS read warning for tab "${tab}":`, json.error || "unknown");
-      return [];
-    } catch (e) {
-      console.warn(`GAS read failed for "${tab}", trying CSV fallback:`, e.message);
-    }
-  }
-  // ── Fallback: gviz CSV (works only for publicly shared sheets) ──────────
-  try {
-    const res = await fetch(csvUrl(tab));
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const text = await res.text();
-    // gviz returns HTML when sheet is private — detect and bail
-    if (text.trim().startsWith("<")) throw new Error("Sheet is not public — gviz returned HTML");
-    return parseCsv(text);
-  } catch (e) {
-    console.warn(`CSV fallback also failed for "${tab}":`, e.message);
-    return [];
-  }
-}
-
-/**
- * normaliseRow — cleans a row object coming from GAS doGet.
- * Converts Excel serial dates, coerces booleans and JSON strings.
- */
-function normaliseRow(row) {
-  const out = {};
-  Object.entries(row).forEach(([k, v]) => {
-    if (k === "" || k == null) return;           // skip unnamed columns
-    // Excel serial dates
-    if (DATE_COLS.has(k) && typeof v === "number") {
-      const iso = excelSerialToDate(v);
-      out[k] = iso || v;
-      return;
-    }
-    // Booleans stored as strings
-    if (v === "TRUE" || v === "true")  { out[k] = true;  return; }
-    if (v === "FALSE" || v === "false") { out[k] = false; return; }
-    // JSON fields stored as strings
-    if (typeof v === "string" && (v.startsWith("[") || v.startsWith("{"))) {
-      try { out[k] = JSON.parse(v); return; } catch { /* fall through */ }
-    }
-    out[k] = v;
-  });
-  return out;
+  const res = await fetch(csvUrl(tab));
+  if (!res.ok) throw new Error(`Sheet read failed: ${tab}`);
+  const text = await res.text();
+  return parseCsv(text);
 }
 
 async function sheetPost(action, tab, payload) {
   if (!SHEET_ENABLED) return null;
-  try {
-    const res = await fetch(SHEET_SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" }, // avoid CORS preflight
-      body: JSON.stringify({ action, tab, ...payload }),
-    });
-    return res.json();
-  } catch (e) {
-    console.warn("sheetPost failed:", e.message);
-    return null;
-  }
+  const res = await fetch(SHEET_SCRIPT_URL, {
+    method: "POST",
+    body: JSON.stringify({ action, tab, ...payload }),
+  });
+  return res.json();
 }
 
 function parseCsv(text) {
@@ -112,25 +37,16 @@ function parseCsv(text) {
     const vals = parseCsvRow(line);
     const obj = {};
     headers.forEach((h, i) => {
-      if (!h) return;
       let v = vals[i] ?? "";
-      // JSON fields
-      if (typeof v === "string" && (v.startsWith("[") || v.startsWith("{"))) {
+      // Auto-parse JSON arrays/objects stored in cells
+      if (v.startsWith("[") || v.startsWith("{")) {
         try { v = JSON.parse(v); } catch { /* keep as string */ }
       }
-      if (v === "true" || v === "TRUE")  { obj[h] = true;  return; }
-      if (v === "false" || v === "FALSE") { obj[h] = false; return; }
-      // Pure numbers
-      if (v !== "" && !isNaN(v) && typeof v === "string") {
-        const n = Number(v);
-        // Excel serial date detection
-        if (DATE_COLS.has(h) && n > 40000 && n < 99999) {
-          obj[h] = excelSerialToDate(n) || v;
-          return;
-        }
-        obj[h] = n;
-        return;
-      }
+      // Booleans
+      if (v === "true") v = true;
+      if (v === "false") v = false;
+      // Numerics (only pure numbers, avoid corrupting IDs like "U01" or "007")
+      if (v !== "" && /^-?\d+(\.\d+)?$/.test(v) && typeof v === "string") v = Number(v);
       obj[h] = v;
     });
     return obj;
@@ -170,89 +86,49 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
 
   const fetchData = useCallback(async () => {
     if (!SHEET_ENABLED) { setDbReady(true); return; }
-
-    // Each tab is fetched independently — one missing tab never kills the rest
-    const safe = async (tab) => { try { return await sheetGet(tab); } catch { return []; } };
-    const sanitize = (arr, prefix) => (Array.isArray(arr) ? arr : [])
-      .filter(x => x && (x.id || x.text || x.name || x.label || x.sn))
-      .map((x, i) => ({ ...x, id: (x.id != null && String(x.id).trim()) ? String(x.id).trim() : `${prefix}-${i}` }));
-
-    const [u, p, d, a, m, pr, em, pm, ps] = await Promise.all([
-      safe("Users"), safe("Plants"), safe("Departments"), safe("Actions"),
-      safe("Meetings"), safe("Projects"), safe("EscalationMatrix"),
-      safe("Permissions"), safe("MeetingPresets"),
-    ]);
-
-    // Users
-    if (u.length) setUsersRaw(sanitize(u, "u"));
-
-    // Plants — sheet may have no 'id' column; derive id from name
-    if (p.length) {
-      const plants = p.filter(x => x && (x.name || x.id)).map((x, i) => ({
-        ...x,
-        id: (x.id && String(x.id).trim()) ? String(x.id).trim()
-          : x.name ? `P-${x.name.replace(/\s+/g, "")}` : `p-${i}`
-      }));
-      if (plants.length) setPlantsRaw(plants);
+    try {
+      const [u, p, d, a, m, pr, em, pm, ps] = await Promise.all([
+        sheetGet("Users"),
+        sheetGet("Plants"),
+        sheetGet("Departments"),
+        sheetGet("Actions"),
+        sheetGet("Meetings"),
+        sheetGet("Projects"),
+        sheetGet("EscalationMatrix"),
+        sheetGet("Permissions"),
+        sheetGet("MeetingPresets"),
+      ]);
+      const sanitize = (arr, prefix) => (Array.isArray(arr) ? arr : [])
+        .filter(x => x && Object.values(x).some(v => v !== "" && v !== null && v !== undefined))
+        .map((x, i) => ({ ...x, id: (x.id !== undefined && x.id !== null && String(x.id).trim()) ? x.id : `${prefix}-${i}` }));
+      if (u.length) setUsersRaw(sanitize(u, "u"));
+      if (p.length) setPlantsRaw(sanitize(p, "p"));
+      if (d.length) setDeptsRaw(sanitize(d, "d"));
+      if (a.length) setActionsRaw(sanitize(a, "a"));
+      if (m.length) setMeetingsRaw(sanitize(m, "m"));
+      if (pr.length) setProjectsRaw(sanitize(pr, "pr"));
+      if (em.length) setEscRaw(sanitize(em, "e"));
+      if (pm.length) {
+        const pObj = {};
+        pm.forEach(row => { if (row.id) pObj[row.id] = row; });
+        setPermsRaw(pObj);
+      }
+      if (ps.length) {
+        const pMap = { attendeeMap: {}, instructions: {} };
+        ps.forEach(row => {
+          if (row.type) {
+            pMap.attendeeMap[row.type] = row.attendees || [];
+            pMap.instructions[row.type] = row.instructions || [];
+          }
+        });
+        setPresetsRaw(pMap);
+      }
+      setDbReady(true);
+    } catch (e) {
+      console.warn("Sheet load failed, using seeds:", e.message);
+      setDbError(e.message);
+      setDbReady(true);
     }
-
-    // Departments
-    if (d.length) setDeptsRaw(sanitize(d, "d"));
-
-    // Actions — ensure JSON fields always exist
-    if (a.length) {
-      const clean = a.filter(x => x && (x.id || x.text || x.sn)).map((x, i) => ({
-        revisionHistory: [], messages: [],
-        ...x,
-        id: (x.id != null && String(x.id).trim()) ? String(x.id).trim() : `a-${i}`,
-        revisions: Number(x.revisions) || 0,
-      }));
-      if (clean.length) setActionsRaw(clean);
-    }
-
-    // Meetings
-    if (m.length) {
-      const clean = m.filter(x => x && (x.id || x.type)).map((x, i) => ({
-        completedSessions: [],
-        ...x,
-        id: (x.id != null && String(x.id).trim()) ? String(x.id).trim() : `m-${i}`,
-      }));
-      if (clean.length) setMeetingsRaw(clean);
-    }
-
-    // Projects
-    if (pr.length) {
-      const clean = pr.filter(x => x && (x.id || x.name)).map((x, i) => ({
-        milestones: [], team: [],
-        ...x,
-        id: (x.id != null && String(x.id).trim()) ? String(x.id).trim() : `pr-${i}`,
-      }));
-      if (clean.length) setProjectsRaw(clean);
-    }
-
-    // EscalationMatrix
-    if (em.length) setEscRaw(sanitize(em, "e"));
-
-    // Permissions
-    if (pm.length) {
-      const pObj = {};
-      pm.forEach(row => { if (row.id) pObj[row.id] = row; });
-      setPermsRaw(pObj);
-    }
-
-    // MeetingPresets
-    if (ps.length) {
-      const pMap = { attendeeMap: {}, instructions: {} };
-      ps.forEach(row => {
-        if (row.type) {
-          pMap.attendeeMap[row.type] = Array.isArray(row.attendees) ? row.attendees : [];
-          pMap.instructions[row.type] = Array.isArray(row.instructions) ? row.instructions : [];
-        }
-      });
-      setPresetsRaw(pMap);
-    }
-
-    setDbReady(true);
   }, []);
 
   // ── initial load ──
@@ -260,92 +136,50 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
     fetchData();
   }, [fetchData]);
 
-  // ── write wrappers ──
-  const setUsers = useCallback((fn) => {
-    setUsersRaw(prev => {
-      const next = typeof fn === "function" ? fn(prev) : fn;
-      if (SHEET_ENABLED) sheetPost("replace_all", "Users", { rows: next });
-      return next;
-    });
-  }, []);
+  // ── write wrappers (side-effect-free updaters) ──
+  const setUsers = useCallback((fn) => { setUsersRaw(fn); }, []);
+  const setPlants = useCallback((fn) => { setPlantsRaw(fn); }, []);
+  const setDepts = useCallback((fn) => { setDeptsRaw(fn); }, []);
+  const setActions = useCallback((fn) => { setActionsRaw(fn); }, []);
+  const setMeetings = useCallback((fn) => { setMeetingsRaw(fn); }, []);
+  const setProjects = useCallback((fn) => { setProjectsRaw(fn); }, []);
+  const setEscMatrix = useCallback((fn) => { setEscRaw(fn); }, []);
+  const setPermissions = useCallback((fn) => { setPermsRaw(fn); }, []);
+  const setMtgPresets = useCallback((fn) => { setPresetsRaw(fn); }, []);
 
-  const setPlants = useCallback((fn) => {
-    setPlantsRaw(prev => {
-      const next = typeof fn === "function" ? fn(prev) : fn;
-      if (SHEET_ENABLED) sheetPost("replace_all", "Plants", { rows: next });
-      return next;
-    });
+  // ── Sync state changes to sheet via effects (only after initial load) ──
+  // fetchDoneRef is set true only after a delay post-load, preventing the
+  // sync effects from firing during the same render cycle as fetchData().
+  // This stops seed/default data from overwriting the sheet on mount.
+  const fetchDoneRef = useRef(false);
+  useEffect(() => {
+    if (dbReady) {
+      const t = setTimeout(() => { fetchDoneRef.current = true; }, 1000);
+      return () => clearTimeout(t);
+    }
+  }, [dbReady]);
+  const syncToSheet = useCallback((tab, data) => {
+    if (!SHEET_ENABLED || !fetchDoneRef.current) return;
+    sheetPost("replace_all", tab, { rows: data });
   }, []);
-
-  const setDepts = useCallback((fn) => {
-    setDeptsRaw(prev => {
-      const next = typeof fn === "function" ? fn(prev) : fn;
-      if (SHEET_ENABLED) sheetPost("replace_all", "Departments", { rows: next });
-      return next;
-    });
-  }, []);
-
-  const setActions = useCallback((fn) => {
-    setActionsRaw(prev => {
-      const next = typeof fn === "function" ? fn(prev) : fn;
-      if (SHEET_ENABLED) sheetPost("replace_all", "Actions", { rows: next });
-      return next;
-    });
-  }, []);
-
-  const setMeetings = useCallback((fn) => {
-    setMeetingsRaw(prev => {
-      const next = typeof fn === "function" ? fn(prev) : fn;
-      if (SHEET_ENABLED) sheetPost("replace_all", "Meetings", { rows: next });
-      return next;
-    });
-  }, []);
-
-  const setProjects = useCallback((fn) => {
-    setProjectsRaw(prev => {
-      const next = typeof fn === "function" ? fn(prev) : fn;
-      if (SHEET_ENABLED) sheetPost("replace_all", "Projects", { rows: next });
-      return next;
-    });
-  }, []);
-
-  const setEscMatrix = useCallback((fn) => {
-    setEscRaw(prev => {
-      const next = typeof fn === "function" ? fn(prev) : fn;
-      if (SHEET_ENABLED) sheetPost("replace_all", "EscalationMatrix", { rows: next });
-      return next;
-    });
-  }, []);
-
-  const setPermissions = useCallback((fn) => {
-    setPermsRaw(prev => {
-      const next = typeof fn === "function" ? fn(prev) : fn;
-      if (SHEET_ENABLED) {
-        // Convert object {U01: {id: "U01", ...}} to array for sheet
-        const rows = Object.values(next);
-        sheetPost("replace_all", "Permissions", { rows });
-      }
-      return next;
-    });
-  }, []);
-
-  const setMtgPresets = useCallback((fn) => {
-    setPresetsRaw(prev => {
-      const next = typeof fn === "function" ? fn(prev) : fn;
-      if (SHEET_ENABLED) {
-        // next is { attendeeMap: {...}, instructions: {...} }
-        // Convert back to flat array for sheet
-        const allTypes = Array.from(new Set([...Object.keys(next.attendeeMap), ...Object.keys(next.instructions)]));
-        const rows = allTypes.map(t => ({
-          type: t,
-          attendees: next.attendeeMap[t] || [],
-          instructions: next.instructions[t] || []
-        }));
-        sheetPost("replace_all", "MeetingPresets", { rows });
-      }
-      return next;
-    });
-  }, []);
+  useEffect(() => { syncToSheet("Users", users); }, [users, syncToSheet]);
+  useEffect(() => { syncToSheet("Plants", plants); }, [plants, syncToSheet]);
+  useEffect(() => { syncToSheet("Departments", depts); }, [depts, syncToSheet]);
+  useEffect(() => { syncToSheet("Actions", actions); }, [actions, syncToSheet]);
+  useEffect(() => { syncToSheet("Meetings", meetings); }, [meetings, syncToSheet]);
+  useEffect(() => { syncToSheet("Projects", projects); }, [projects, syncToSheet]);
+  useEffect(() => { syncToSheet("EscalationMatrix", escMatrix); }, [escMatrix, syncToSheet]);
+  useEffect(() => {
+    if (!SHEET_ENABLED || !fetchDoneRef.current) return;
+    const rows = Object.values(permissions);
+    sheetPost("replace_all", "Permissions", { rows });
+  }, [permissions]);
+  useEffect(() => {
+    if (!SHEET_ENABLED || !fetchDoneRef.current) return;
+    const allTypes = Array.from(new Set([...Object.keys(mtgPresets.attendeeMap), ...Object.keys(mtgPresets.instructions)]));
+    const rows = allTypes.map(t => ({ type: t, attendees: mtgPresets.attendeeMap[t] || [], instructions: mtgPresets.instructions[t] || [] }));
+    sheetPost("replace_all", "MeetingPresets", { rows });
+  }, [mtgPresets]);
 
   return {
     dbReady, dbError, fetchData,
@@ -362,44 +196,11 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
 }
 
 /* ===================== DATA LAYER ===================== */
-const AUTH_ACCOUNTS = [
-  { id: "A1", username: "admin", password: "admin123", role: "Admin", name: "Jitendra Kumar", dept: "Management", plant: "All", superior: "", initials: "JK", color: "#272262", phone: "+91-98000-00000", email: "jitendra@adroit.in" },
-  { id: "A2", username: "rajiv", password: "pass123", role: "User", name: "Rajiv Sharma", dept: "Management", plant: "All", superior: "Jitendra Kumar", initials: "RS", color: "#5B56A6", phone: "+91-98000-00001", email: "rajiv@adroit.in" },
-  { id: "A3", username: "meena", password: "pass123", role: "User", name: "Meena Joshi", dept: "Production", plant: "Adroit 1", superior: "Anil Kumar", initials: "MJ", color: "#E69903", phone: "+91-98000-00005", email: "meena@adroit.in" },
-  { id: "A4", username: "ravi", password: "pass123", role: "User", name: "Ravi Gupta", dept: "Maintenance", plant: "Adroit 2", superior: "Suresh Patel", initials: "RG", color: "#7C80B0", phone: "+91-98000-00006", email: "ravi@adroit.in" },
-  { id: "A5", username: "priya", password: "pass123", role: "User", name: "Priya Singh", dept: "Quality", plant: "Adroit 3", superior: "Deepak Verma", initials: "PS", color: "#1E8449", phone: "+91-98000-00007", email: "priya@adroit.in" },
-  { id: "A6", username: "guest", password: "guest", role: "Guest", name: "Guest User", dept: "All", plant: "All", superior: "", initials: "GU", color: "#95A5A6", phone: "", email: "" },
-];
-const DEFAULT_PLANTS = [
-  { id: "P1", name: "Adroit 1", location: "Unit 1 — Raipur", head: "Anil Kumar" },
-  { id: "P2", name: "Adroit 2", location: "Unit 2 — Bhilai", head: "Suresh Patel" },
-  { id: "P3", name: "Adroit 3", location: "Unit 3 — Durg", head: "Deepak Verma" },
-];
-const DEFAULT_DEPTS = [
-  { id: "D1", name: "Production", icon: "⚙", head: "Meena Joshi" },
-  { id: "D2", name: "Maintenance", icon: "🔧", head: "Ravi Gupta" },
-  { id: "D3", name: "Quality", icon: "✅", head: "Priya Singh" },
-  { id: "D4", name: "Safety", icon: "🦺", head: "Amit Tiwari" },
-  { id: "D5", name: "Electrical", icon: "⚡", head: "Neha Yadav" },
-  { id: "D6", name: "Mechanical", icon: "🔩", head: "Sanjay Mishra" },
-  { id: "D7", name: "Instrumentation", icon: "📡", head: "Kavita Rawat" },
-  { id: "D8", name: "Stores & Logistics", icon: "📦", head: "Vijay Pandey" },
-];
-const DEFAULT_USERS = [
-  { id: "U01", name: "Rajiv Sharma", role: "MD", plant: "All", dept: "Management", superior: "", initials: "RS", color: "#272262", phone: "+91-98000-00001", email: "rajiv@adroit.in" },
-  { id: "U02", name: "Anil Kumar", role: "Plant Head", plant: "Adroit 1", dept: "Management", superior: "Rajiv Sharma", initials: "AK", color: "#5B56A6", phone: "+91-98000-00002", email: "anil@adroit.in" },
-  { id: "U03", name: "Suresh Patel", role: "Plant Head", plant: "Adroit 2", dept: "Management", superior: "Rajiv Sharma", initials: "SP", color: "#E69903", phone: "+91-98000-00003", email: "suresh@adroit.in" },
-  { id: "U04", name: "Deepak Verma", role: "Plant Head", plant: "Adroit 3", dept: "Management", superior: "Rajiv Sharma", initials: "DV", color: "#7C80B0", phone: "+91-98000-00004", email: "deepak@adroit.in" },
-  { id: "U05", name: "Meena Joshi", role: "HOD", plant: "Adroit 1", dept: "Production", superior: "Anil Kumar", initials: "MJ", color: "#272262", phone: "+91-98000-00005", email: "meena@adroit.in" },
-  { id: "U06", name: "Ravi Gupta", role: "HOD", plant: "Adroit 2", dept: "Maintenance", superior: "Suresh Patel", initials: "RG", color: "#5B56A6", phone: "+91-98000-00006", email: "ravi@adroit.in" },
-  { id: "U07", name: "Priya Singh", role: "HOD", plant: "Adroit 3", dept: "Quality", superior: "Deepak Verma", initials: "PS", color: "#E69903", phone: "+91-98000-00007", email: "priya@adroit.in" },
-  { id: "U08", name: "Amit Tiwari", role: "Shift Engineer", plant: "Adroit 1", dept: "Safety", superior: "Anil Kumar", initials: "AT", color: "#7C80B0", phone: "+91-98000-00008", email: "amit@adroit.in" },
-  { id: "U09", name: "Neha Yadav", role: "Shift Engineer", plant: "Adroit 2", dept: "Electrical", superior: "Suresh Patel", initials: "NY", color: "#272262", phone: "+91-98000-00009", email: "neha@adroit.in" },
-  { id: "U10", name: "Sanjay Mishra", role: "Supervisor", plant: "Adroit 1", dept: "Mechanical", superior: "Meena Joshi", initials: "SM", color: "#5B56A6", phone: "+91-98000-00010", email: "sanjay@adroit.in" },
-  { id: "U11", name: "Kavita Rawat", role: "Supervisor", plant: "Adroit 2", dept: "Instrumentation", superior: "Ravi Gupta", initials: "KR", color: "#E69903", phone: "+91-98000-00011", email: "kavita@adroit.in" },
-  { id: "U12", name: "Vijay Pandey", role: "Operator", plant: "Adroit 1", dept: "Stores & Logistics", superior: "Sanjay Mishra", initials: "VP", color: "#7C80B0", phone: "+91-98000-00012", email: "vijay@adroit.in" },
-  { id: "U13", name: "Rekha Nair", role: "Operator", plant: "Adroit 3", dept: "Production", superior: "Priya Singh", initials: "RN", color: "#272262", phone: "+91-98000-00013", email: "rekha@adroit.in" },
-];
+// All user/plant/dept/action/meeting data is loaded exclusively from Google Sheets.
+// No hardcoded seed data — sheet is the single source of truth.
+const DEFAULT_PLANTS = [];
+const DEFAULT_DEPTS = [];
+const DEFAULT_USERS = [];
 const MEETING_TYPES = ["Furnace Daily Review", "Daily Problem-Solving", "Daily Plant Head Review", "Weekly Plant Head", "Safety Review"];
 const STATUS_LIST = ["IN PROCESS", "NOT STARTED", "COMPLETED", "DROPPED"];
 const PRIORITY_LIST = ["CRITICAL", "WARNING", "NORMAL"];
@@ -419,43 +220,11 @@ const MTG_INSTRUCTIONS = {
   "Safety Review": ["Start with near-miss and incident recap", "PPE compliance check results", "Assign corrective actions for each unsafe condition observed", "Set next review date before closing"],
 };
 const SEED_PROJECTS = [];
-const SEED_MEETINGS = [
-  { id: "M1", type: "Furnace Daily Review", plant: "Adroit 1", time: "08:00", dur: 45, facilitator: "Anil Kumar", recurring: true, project: "Q2 OEE Improvement", completedSessions: [{ date: "2025-06-04", duration: 42 }, { date: "2025-06-05", duration: 45 }] },
-  { id: "M2", type: "Daily Problem-Solving", plant: "Adroit 2", time: "09:30", dur: 30, facilitator: "Suresh Patel", recurring: true, project: "Q2 OEE Improvement", completedSessions: [{ date: "2025-06-04", duration: 28 }] },
-  { id: "M3", type: "Safety Review", plant: "Adroit 3", time: "10:00", dur: 60, facilitator: "Amit Tiwari", recurring: false, project: "PPE Compliance Drive", completedSessions: [] },
-  { id: "M4", type: "Daily Plant Head Review", plant: "Adroit 1", time: "14:00", dur: 45, facilitator: "Anil Kumar", recurring: true, project: "LED Bay Upgrade", completedSessions: [{ date: "2025-06-05", duration: 50 }] },
-  { id: "M5", type: "Weekly Plant Head", plant: "All", time: "16:00", dur: 90, facilitator: "Rajiv Sharma", recurring: false, project: "Q2 OEE Improvement", completedSessions: [{ date: "2025-05-30", duration: 85 }] },
-];
-const SEED_ACTIONS = [
-  { id: 1, sn: "ACT-001", src: "Furnace Daily Review", section: "Production", plant: "Adroit 1", dateOfAction: "2025-06-01", text: "Calibrate pressure sensors on Line 3", responsible: "Amit Tiwari", allocatedBy: "Anil Kumar", due: "2025-06-10", status: "IN PROCESS", remarks: "Sensor kit ordered", priority: "CRITICAL", revisions: 1, revisionHistory: [{ date: "2025-06-03", from: "2025-06-08", to: "2025-06-10", by: "Anil Kumar" }], created: "2025-06-01", closedOn: null, project: "Q2 OEE Improvement", messages: [], pendingConfirmation: false },
-  { id: 2, sn: "ACT-002", src: "Gemba Walk", section: "Maintenance", plant: "Adroit 2", dateOfAction: "2025-06-02", text: "Replace conveyor belt B-12", responsible: "Neha Yadav", allocatedBy: "Suresh Patel", due: "2025-06-15", status: "NOT STARTED", remarks: "", priority: "WARNING", revisions: 0, revisionHistory: [], created: "2025-06-02", closedOn: null, project: null, messages: [], pendingConfirmation: false },
-  { id: 3, sn: "ACT-003", src: "Daily Problem-Solving", section: "Quality", plant: "Adroit 1", dateOfAction: "2025-06-01", text: "Update QC checklist for manganese batch", responsible: "Meena Joshi", allocatedBy: "Anil Kumar", due: "2025-06-08", status: "COMPLETED", remarks: "v2 uploaded", priority: "NORMAL", revisions: 0, revisionHistory: [], created: "2025-06-01", closedOn: "2025-06-07", project: null, messages: [], pendingConfirmation: false },
-  { id: 4, sn: "ACT-004", src: "Safety Review", section: "Safety", plant: "Adroit 3", dateOfAction: "2025-06-03", text: "Install guardrails near press station P-3", responsible: "Priya Singh", allocatedBy: "Deepak Verma", due: "2025-06-12", status: "IN PROCESS", remarks: "Civil team engaged", priority: "CRITICAL", revisions: 2, revisionHistory: [{ date: "2025-06-05", from: "2025-06-08", to: "2025-06-10", by: "Deepak Verma" }, { date: "2025-06-07", from: "2025-06-10", to: "2025-06-12", by: "Deepak Verma" }], created: "2025-06-03", closedOn: null, project: "PPE Compliance Drive", messages: [], pendingConfirmation: false },
-  { id: 5, sn: "ACT-005", src: "Furnace Daily Review", section: "Electrical", plant: "Adroit 2", dateOfAction: "2025-05-28", text: "Inspect main switchboard connections Bay-2", responsible: "Ravi Gupta", allocatedBy: "Suresh Patel", due: "2025-05-30", status: "IN PROCESS", remarks: "Partial done", priority: "WARNING", revisions: 1, revisionHistory: [{ date: "2025-05-29", from: "2025-05-29", to: "2025-05-30", by: "Suresh Patel" }], created: "2025-05-28", closedOn: null, project: null, messages: [], pendingConfirmation: false },
-  { id: 6, sn: "ACT-006", src: "Weekly Plant Head", section: "Mechanical", plant: "Adroit 1", dateOfAction: "2025-06-04", text: "Lubricate bearings on crusher unit CU-07", responsible: "Sanjay Mishra", allocatedBy: "Anil Kumar", due: "2025-06-20", status: "NOT STARTED", remarks: "", priority: "NORMAL", revisions: 0, revisionHistory: [], created: "2025-06-04", closedOn: null, project: "Q2 OEE Improvement", messages: [], pendingConfirmation: false },
-  { id: 7, sn: "ACT-007", src: "Gemba Walk", section: "Instrumentation", plant: "Adroit 2", dateOfAction: "2025-06-02", text: "Fix flow meter reading discrepancy FM-28", responsible: "Kavita Rawat", allocatedBy: "Suresh Patel", due: "2025-06-11", status: "DROPPED", remarks: "Design limitation", priority: "NORMAL", revisions: 0, revisionHistory: [], created: "2025-06-02", closedOn: null, project: null, messages: [], pendingConfirmation: false },
-  { id: 8, sn: "ACT-008", src: "Daily Plant Head Review", section: "Production", plant: "Adroit 3", dateOfAction: "2025-06-03", text: "Optimize MPM target for shift 2", responsible: "Vijay Pandey", allocatedBy: "Deepak Verma", due: "2025-06-14", status: "IN PROCESS", remarks: "Trial run done", priority: "WARNING", revisions: 1, revisionHistory: [{ date: "2025-06-05", from: "2025-06-12", to: "2025-06-14", by: "Deepak Verma" }], created: "2025-06-03", closedOn: null, project: null, messages: [], pendingConfirmation: false },
-  { id: 9, sn: "ACT-009", src: "Furnace Daily Review", section: "Production", plant: "Adroit 1", dateOfAction: "2025-06-01", text: "Review heat-wise recipe compliance logs", responsible: "Amit Tiwari", allocatedBy: "Anil Kumar", due: "2025-06-07", status: "COMPLETED", remarks: "", priority: "NORMAL", revisions: 0, revisionHistory: [], created: "2025-06-01", closedOn: "2025-06-06", project: null, messages: [], pendingConfirmation: false },
-  { id: 10, sn: "ACT-010", src: "Daily Problem-Solving", section: "Maintenance", plant: "Adroit 2", dateOfAction: "2025-06-01", text: "Crane availability check — bay 3", responsible: "Ravi Gupta", allocatedBy: "Suresh Patel", due: "2025-06-06", status: "COMPLETED", remarks: "", priority: "NORMAL", revisions: 0, revisionHistory: [], created: "2025-06-01", closedOn: "2025-06-05", project: null, messages: [], pendingConfirmation: false },
-  { id: 11, sn: "ACT-011", src: "Safety Review", section: "Safety", plant: "Adroit 1", dateOfAction: "2025-06-04", text: "PPE audit for furnace operators", responsible: "Meena Joshi", allocatedBy: "Anil Kumar", due: "2025-06-13", status: "NOT STARTED", remarks: "", priority: "CRITICAL", revisions: 0, revisionHistory: [], created: "2025-06-04", closedOn: null, project: "PPE Compliance Drive", messages: [], pendingConfirmation: false },
-  { id: 12, sn: "ACT-012", src: "Daily Plant Head Review", section: "Quality", plant: "Adroit 3", dateOfAction: "2025-06-05", text: "Root cause analysis — surface defect batch 44", responsible: "Priya Singh", allocatedBy: "Deepak Verma", due: "2025-06-16", status: "IN PROCESS", remarks: "Fishbone initiated", priority: "WARNING", revisions: 0, revisionHistory: [], created: "2025-06-05", closedOn: null, project: null, messages: [], pendingConfirmation: false },
-  { id: 13, sn: "ACT-013", src: "Gemba Walk", section: "Electrical", plant: "Adroit 1", dateOfAction: "2025-06-05", text: "Upgrade lighting in bay 7 to LED", responsible: "Neha Yadav", allocatedBy: "Anil Kumar", due: "2025-06-25", status: "NOT STARTED", remarks: "", priority: "NORMAL", revisions: 0, revisionHistory: [], created: "2025-06-05", closedOn: null, project: null, messages: [], pendingConfirmation: false },
-  { id: 14, sn: "ACT-014", src: "Weekly Plant Head", section: "Mechanical", plant: "Adroit 2", dateOfAction: "2025-06-02", text: "Vibration analysis on main gearbox G-02", responsible: "Sanjay Mishra", allocatedBy: "Suresh Patel", due: "2025-06-08", status: "COMPLETED", remarks: "Report submitted", priority: "NORMAL", revisions: 0, revisionHistory: [], created: "2025-06-02", closedOn: "2025-06-08", project: "Q2 OEE Improvement", messages: [], pendingConfirmation: false },
-  { id: 15, sn: "ACT-015", src: "Furnace Daily Review", section: "Maintenance", plant: "Adroit 3", dateOfAction: "2025-06-03", text: "Preventive maintenance on ladle transfer car", responsible: "Kavita Rawat", allocatedBy: "Deepak Verma", due: "2025-06-11", status: "IN PROCESS", remarks: "In progress", priority: "WARNING", revisions: 1, revisionHistory: [{ date: "2025-06-07", from: "2025-06-09", to: "2025-06-11", by: "Deepak Verma" }], created: "2025-06-03", closedOn: null, project: null, messages: [], pendingConfirmation: false },
-];
-// Default permissions for all users (by user id)
-const DEFAULT_PERMISSIONS_SEED = () => {
-  const perms = {};
-  DEFAULT_USERS.forEach(u => {
-    perms[u.id] = { canEditMeetings: false, canCreateProjects: false, canEditActions: false, canViewDashboard: true, canManageEscalations: false };
-  });
-  // Admins/senior users get more by default
-  perms["U01"] = { canEditMeetings: true, canCreateProjects: true, canEditActions: true, canViewDashboard: true, canManageEscalations: true };
-  perms["U02"] = { canEditMeetings: true, canCreateProjects: true, canEditActions: true, canViewDashboard: true, canManageEscalations: false };
-  perms["U03"] = { canEditMeetings: true, canCreateProjects: true, canEditActions: true, canViewDashboard: true, canManageEscalations: false };
-  perms["U04"] = { canEditMeetings: true, canCreateProjects: true, canEditActions: true, canViewDashboard: true, canManageEscalations: false };
-  return perms;
-};
+const SEED_MEETINGS = [];
+const SEED_ACTIONS = [];
+// Permissions are managed entirely from the Google Sheet (Permissions tab).
+// This returns an empty object so the sheet is always the source of truth.
+const DEFAULT_PERMISSIONS_SEED = () => ({});
 
 const SAMPLE_TRANSCRIPT_LINES = [
   "Good morning everyone. Let's start with yesterday's production numbers.",
@@ -469,9 +238,10 @@ const SAMPLE_TRANSCRIPT_LINES = [
 ];
 const todayStr = () => new Date().toISOString().split("T")[0];
 const fmt = s => { if (!s) return "—"; const d = new Date(s); return isNaN(d) ? s : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }); };
-const isOverdue = a => a.due && new Date(a.due) < new Date() && a.status !== "COMPLETED" && a.status !== "DROPPED";
-const daysOver = a => { if (!isOverdue(a)) return 0; return Math.floor((new Date() - new Date(a.due)) / 86400000); };
-const getU = (name, users = []) => (users || DEFAULT_USERS).find(u => u.name === name) || { initials: (name || "?").slice(0, 2).toUpperCase(), color: "#7C80B0", name: name || "Unknown" };
+const todayLocal = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); };
+const isOverdue = a => { if (!a.due || a.status === "COMPLETED" || a.status === "DROPPED") return false; const due = new Date(a.due + "T23:59:59"); return due < todayLocal(); };
+const daysOver = a => { if (!isOverdue(a)) return 0; const due = new Date(a.due + "T23:59:59"); return Math.floor((todayLocal() - due) / 86400000); };
+const getU = (name, users = []) => (users || []).find(u => u.name === name) || { initials: (name || "?").slice(0, 2).toUpperCase(), color: "#7C80B0", name: name || "Unknown" };
 const nextSN = arr => "ACT-" + String(arr.length + 1).padStart(3, "0");
 // Get all superiors of a user walking up the chain
 const getSuperiors = (userName, allUsers) => {
@@ -612,9 +382,12 @@ function LoginPage({ onLogin }) {
   useEffect(() => {
     (async () => {
       try {
-        const rows = await sheetGet("Users");
+        const res = await fetch(csvUrl("Users"));
+        if (!res.ok) throw new Error("bad response");
+        const text = await res.text();
+        const rows = parseCsv(text);
         setUserCount(rows.length);
-        setConnStatus(rows.length > 0 ? "connected" : "offline");
+        setConnStatus("connected");
       } catch (e) {
         setConnStatus("offline");
       }
@@ -623,8 +396,10 @@ function LoginPage({ onLogin }) {
   const tryLogin = async () => {
     setLoading(true); setErrMsg("");
     try {
-      // Fetch Users tab from sheet and match credentials
-      const sheetUsers = await sheetGet("Users");
+      const res = await fetch(csvUrl("Users"));
+      if (!res.ok) throw new Error("Sheet unreachable");
+      const text = await res.text();
+      const sheetUsers = parseCsv(text);
       const uname = u.trim().toLowerCase();
       const pwval = pw.current.value;
       const acc = sheetUsers.find(a =>
@@ -632,18 +407,10 @@ function LoginPage({ onLogin }) {
         String(a.username).trim().toLowerCase() === uname &&
         String(a.password).trim() === pwval
       );
-      if (acc) {
-        onLogin(acc);
-      } else {
-        // Fallback to hardcoded accounts if sheet has no credentials
-        const fallback = AUTH_ACCOUNTS.find(a => a.username === uname && a.password === pwval);
-        if (fallback) onLogin(fallback);
-        else setErrMsg("Invalid username or password");
-      }
+      if (acc) onLogin(acc);
+      else setErrMsg("Invalid username or password");
     } catch (err) {
-      // Sheet unreachable — fallback to hardcoded
-      const acc = AUTH_ACCOUNTS.find(a => a.username === u.trim().toLowerCase() && a.password === pw.current.value);
-      if (acc) onLogin(acc); else setErrMsg("Invalid username or password");
+      setErrMsg("Cannot reach Google Sheet. Check your connection or Sheet URL.");
     }
     setLoading(false);
   };
@@ -984,7 +751,7 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
             {showNotifPanel && (
               <>
                 <div style={{ position: "fixed", inset: 0, zIndex: 180 }} onClick={() => setShowNotifPanel(false)} />
-                <div style={{ position: "fixed", bottom: 120, left: 14, width: 310, background: "#fff", borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,.2)", padding: 0, zIndex: 999, maxHeight: 380, overflowY: "auto", animation: "slideUp .2s ease" }}>
+                <div style={{ position: "absolute", bottom: "100%", left: 10, right: 10, background: "#fff", borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,.2)", padding: 0, zIndex: 190, maxHeight: 380, overflowY: "auto", animation: "slideUp .2s ease" }}>
                   <div style={{ padding: "12px 14px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: "#fff", borderRadius: "12px 12px 0 0" }}>
                     <div style={{ fontWeight: 700, fontSize: 13, color: T.navy }}>🔔 Notifications</div>
                     {(notifications || []).length > 0 && <button onClick={e => { e.stopPropagation(); onMarkAllRead && onMarkAllRead(); }} style={{ fontSize: 10, color: T.text2, border: "none", background: "transparent", cursor: "pointer", fontWeight: 600 }}>Mark all read</button>}
@@ -1138,10 +905,12 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, setGlob
   const myPlantActions = user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant);
 
   // Fix 3: Dashboard scope — actions assigned to me, or assigned to my subordinates, or in my department
-  const getSubordinates = (name, allUsers) => {
+  const getSubordinates = (name, allUsers, visited = new Set()) => {
+    if (visited.has(name)) return [];
+    visited.add(name);
     const directs = allUsers.filter(u => u.superior === name);
     const all = [...directs];
-    directs.forEach(d => { all.push(...getSubordinates(d.name, allUsers)); });
+    directs.forEach(d => { all.push(...getSubordinates(d.name, allUsers, visited)); });
     return all;
   };
   const subs = user ? getSubordinates(user.name, users) : [];
@@ -1627,14 +1396,14 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
               <div style={{ fontSize: 11, fontWeight: 700, color: T.navy }}>👥 Project Team</div>
               {editMode && <select defaultValue="" onChange={e => { const v = e.target.value; if (v && !draft.team.includes(v)) setDraft(d => ({ ...d, team: [...d.team, v] })) }}>
                 <option value="" disabled>+ Add member</option>
-                {(allUsers || DEFAULT_USERS).filter(u => !draft.team.includes(u.name)).map(u => <option key={u.id} value={u.name}>{u.name} ({u.role})</option>)}
+                {(allUsers || []).filter(u => !draft.team.includes(u.name)).map(u => <option key={u.id} value={u.name}>{u.name} ({u.role})</option>)}
               </select>}
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               {(editMode ? draft : pr).team.map(name => (
                 <div key={name} style={{ display: "flex", alignItems: "center", gap: 8, background: T.bg, borderRadius: 8, padding: "6px 12px", position: "relative" }}>
-                  <Avatar name={name} size={28} users={allUsers || DEFAULT_USERS} />
-                  <div><div style={{ fontSize: 12, fontWeight: 600 }}>{name}</div><div style={{ fontSize: 10, color: T.text2 }}>{(allUsers || DEFAULT_USERS).find(u => u.name === name)?.role || "Member"}</div></div>
+                  <Avatar name={name} size={28} users={allUsers || []} />
+                  <div><div style={{ fontSize: 12, fontWeight: 600 }}>{name}</div><div style={{ fontSize: 10, color: T.text2 }}>{(allUsers || []).find(u => u.name === name)?.role || "Member"}</div></div>
                   {editMode && <button onClick={() => setDraft(d => ({ ...d, team: d.team.filter(n => n !== name) }))} style={{ marginLeft: 4, background: "transparent", border: "none", cursor: "pointer", color: T.red, fontSize: 14, lineHeight: 1, padding: "0 2px" }} title="Remove">×</button>}
                 </div>
               ))}
@@ -1684,7 +1453,7 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
                     <td style={{ fontSize: 12, fontWeight: 500 }}>{m.type}</td>
                     <td style={{ fontSize: 12 }}>{m.plant}</td>
                     <td style={{ fontSize: 12 }}>{m.time} · {m.dur}min</td>
-                    <td><div style={{ display: "flex", alignItems: "center", gap: 6 }}><Avatar name={m.facilitator} size={22} users={allUsers || DEFAULT_USERS} /><span style={{ fontSize: 12 }}>{m.facilitator}</span></div></td>
+                    <td><div style={{ display: "flex", alignItems: "center", gap: 6 }}><Avatar name={m.facilitator} size={22} users={allUsers || []} /><span style={{ fontSize: 12 }}>{m.facilitator}</span></div></td>
                     <td style={{ fontSize: 12, color: T.text2 }}>{(m.completedSessions || []).length} done</td>
                   </tr>
                 ))}</tbody>
@@ -1722,15 +1491,11 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, user, onProjec
   // Use App-level meetings so they persist across page navigation
   const meetings = allMeetings;
   const setMeetings = setMeetingsUp;
-  // Projects: local state + sync up to App when changed
-  const [projects, setProjectsLocal] = useState(allProjects);
+  // Projects: single source of truth from App level
+  const projects = allProjects;
   const setProjects = (updater) => {
-    setProjectsLocal(updater);
-    // Also propagate to App so projects persist across page switches
     setProjectsUp && setProjectsUp(updater);
   };
-  // Sync local projects with App if they diverge
-  useEffect(() => setProjectsLocal(allProjects), [allProjects]);
   const [charter, setCharter] = useState(null);
   const [showAddMtg, setShowAddMtg] = useState(false);
   const [showAddProject, setShowAddProject] = useState(false);
@@ -1930,7 +1695,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, user, onProjec
       {/* Feature 3: Add Project Modal */}
       {showAddProject && <AddProjectModal plants={plants} users={users} onSave={p => { setProjects(prev => [...prev, { ...p, id: "PR" + Date.now(), milestones: [], risks: "", team: [] }]); showAddProject && setShowAddProject(false); }} onClose={() => setShowAddProject(false)} />}
       {/* Feature 4: Meeting Plan Side Panel */}
-      {mtgPlan && <MeetingPlanPanel mtg={mtgPlan} canEdit={canEditMeetings} projects={projects} users={users} plants={plants} onSave={updated => { setMeetings(p => p.map(m => m.id === updated.id ? updated : m)); setMtgPlan(updated); }} onClose={() => setMtgPlan(null)} mtgPresets={mtgPresets} />}
+      {mtgPlan && <MeetingPlanPanel key={mtgPlan.id} mtg={mtgPlan} canEdit={canEditMeetings} projects={projects} users={users} plants={plants} onSave={updated => { setMeetings(p => p.map(m => m.id === updated.id ? updated : m)); setMtgPlan(updated); }} onClose={() => setMtgPlan(null)} mtgPresets={mtgPresets} />}
     </div>
   );
 }
@@ -2060,7 +1825,7 @@ function MeetingPlanPanel({ mtg, canEdit, projects, users, plants, onSave, onClo
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {attendees.map((name, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, background: T.bg, borderRadius: 8, padding: "5px 10px" }}>
-                  <Avatar name={name} size={22} users={users || DEFAULT_USERS} /><span style={{ fontSize: 12 }}>{name}</span>
+                  <Avatar name={name} size={22} users={users || []} /><span style={{ fontSize: 12 }}>{name}</span>
                   {editMode && <button onClick={() => up("attendees", attendees.filter((_, idx) => idx !== i))} style={{ background: "transparent", border: "none", cursor: "pointer", color: T.red, fontSize: 14, lineHeight: 1, padding: "0 2px", marginLeft: 2 }}>×</button>}
                 </div>
               ))}
@@ -2189,7 +1954,6 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   const insightsRef = useRef(null);
   const recognitionRef = useRef(null);
   const paraBufferRef = useRef(""); // accumulates words between silences
-  const silenceTimerRef = useRef(null);
   // 2-minute batch analysis refs
   const batchTimerRef = useRef(null);
   const lastAnalyzedIdxRef = useRef(0); // tracks which txLines were already analyzed
@@ -2348,7 +2112,6 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
 
   // ── Stop STT ──────────────────────────────────────────────────────────────
   const stopSTT = useCallback(() => {
-    clearTimeout(silenceTimerRef.current);
     if (recognitionRef.current) {
       recognitionRef.current.onend = null; // prevent auto-restart
       try { recognitionRef.current.stop(); } catch (ex) { }
@@ -3311,10 +3074,12 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const changeView = v => { setView(v); userViewPref[userKey] = v; };
 
   // Scope: current user + all subordinates (recursive)
-  const getSubTree = (name, allUsers) => {
+  const getSubTree = (name, allUsers, visited = new Set()) => {
+    if (visited.has(name)) return [];
+    visited.add(name);
     const directs = allUsers.filter(u => u.superior === name);
     const all = [name, ...directs.map(d => d.name)];
-    directs.forEach(d => { all.push(...getSubTree(d.name, allUsers).filter(n => !all.includes(n))); });
+    directs.forEach(d => { all.push(...getSubTree(d.name, allUsers, visited).filter(n => !all.includes(n))); });
     return all;
   };
   const scopedNames = user ? getSubTree(user.name, users) : [];
@@ -3534,7 +3299,6 @@ function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortC
             <TH k="plant" label="Plant" minWidth={90} />
             <TH k="dateOfAction" label="Date" minWidth={100} />
             <TH k="text" label="Action Point" minWidth={280} />
-            <TH k="reasonOfAction" label="Action Reason" minWidth={160} />
             <TH k="responsible" label="Responsible" minWidth={130} />
             <TH k="due" label="Due Date" minWidth={100} />
             <TH k="status" label="Status" minWidth={130} />
@@ -3553,14 +3317,13 @@ function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortC
                   {isOverdue(a) && <div style={{ fontSize: 10, color: T.red, fontWeight: 600 }}>⚠ {daysOver(a)}d overdue</div>}
                   {a.pendingConfirmation && <div style={{ fontSize: 10, color: T.amber, fontWeight: 600 }}>⏳ Pending confirm</div>}
                 </td>
-                <td style={{ fontSize: 11, color: T.text2, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.reasonOfAction || ""}>{a.reasonOfAction || <span style={{ color: T.border, fontStyle: "italic" }}>—</span>}</td>
                 <td onClick={e => e.stopPropagation()}><div style={{ display: "flex", alignItems: "center", gap: 6 }}><Avatar name={a.responsible} size={24} users={users} /><span style={{ fontSize: 12 }}>{a.responsible}</span></div></td>
                 <td style={{ fontSize: 12, color: isOverdue(a) ? T.red : T.text, whiteSpace: "nowrap" }}>{fmt(a.due)}</td>
                 <td onClick={e => e.stopPropagation()}><SBadge s={a.pendingConfirmation ? "PENDING CONFIRM" : a.status} /></td>
                 <td style={{ textAlign: "center" }}>{(a.revisions || 0) > 0 ? <span style={{ fontWeight: 700, color: T.amber, fontSize: 12 }}>{a.revisions}</span> : <span style={{ color: T.text2, fontSize: 12 }}>—</span>}</td>
               </tr>
             ))}
-            {sorted.length === 0 && <tr><td colSpan={11}><Empty icon="📭" title="No actions found" sub="Adjust filters or add actions via Work." /></td></tr>}
+            {sorted.length === 0 && <tr><td colSpan={10}><Empty icon="📭" title="No actions found" sub="Adjust filters or add actions via Work." /></td></tr>}
           </tbody>
         </table>
       </div>
@@ -3586,7 +3349,7 @@ function BoardView({ fa, setSel, users }) {
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, gap: 4 }}><SBadge s={a.pendingConfirmation ? "PENDING CONFIRM" : a.status} /><PBadge p={a.priority} /></div>
                   <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.4, marginBottom: 8 }}>{a.text.slice(0, 70)}{a.text.length > 70 ? "…" : ""}</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <Avatar name={a.responsible} size={22} users={users || DEFAULT_USERS} />
+                    <Avatar name={a.responsible} size={22} users={users || []} />
                     <span style={{ fontSize: 10, color: isOverdue(a) ? T.red : T.text2 }}>{fmt(a.due)}</span>
                   </div>
                 </div>
@@ -3630,7 +3393,7 @@ function KanbanView({ fa, upStatus, canEdit, users, setSel }) {
                   </div>
                   <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.4, marginBottom: 8 }}>{a.text.slice(0, 65)}{a.text.length > 65 ? "…" : ""}</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <Avatar name={a.responsible} size={22} users={users || DEFAULT_USERS} />
+                    <Avatar name={a.responsible} size={22} users={users || []} />
                     <span style={{ fontSize: 10, color: isOverdue(a) ? T.red : T.text2 }}>{fmt(a.due)}</span>
                   </div>
                   {a.pendingConfirmation && <div style={{ fontSize: 10, color: T.amber, marginTop: 4, fontWeight: 600 }}>⏳ Pending confirm</div>}
@@ -3874,8 +3637,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
                           <span style={{ fontFamily: "monospace", fontSize: 10, color: T.text2 }}>{a.sn}</span>
                           <div style={{ display: "flex", gap: 6 }}><SBadge s={a.status} /><PBadge p={a.priority} /></div>
                         </div>
-                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, lineHeight: 1.4 }}>{a.text}</div>
-                        {a.reasonOfAction && <div style={{ fontSize: 11, color: T.text2, background: T.amberL, borderRadius: 5, padding: "2px 7px", marginBottom: 6, display: "inline-block" }}>💡 {a.reasonOfAction}</div>}
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, lineHeight: 1.4 }}>{a.text}</div>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <Avatar name={a.responsible} size={22} users={users} />
@@ -3883,7 +3645,6 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
                           </div>
                           <span style={{ fontSize: 11, fontWeight: 700, color: isOverdue(a) ? T.red : T.amber }}>{isOverdue(a) ? `${daysOver(a)}d overdue` : fmt(a.due)}</span>
                         </div>
-                        <div style={{ fontSize: 10, color: T.navy, marginTop: 6, fontWeight: 600, opacity: .5 }}>Click to edit →</div>
                       </div>
                     ))}
                   </div>
@@ -3932,8 +3693,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
                           <span style={{ fontFamily: "monospace", fontSize: 10, color: T.text2 }}>{a.sn}</span>
                           <div style={{ display: "flex", gap: 5 }}><SBadge s={a.pendingConfirmation ? "PENDING CONFIRM" : a.status} /><PBadge p={a.priority} /></div>
                         </div>
-                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, lineHeight: 1.4 }}>{a.text}</div>
-                        {a.reasonOfAction && <div style={{ fontSize: 11, color: T.text2, background: T.amberL, borderRadius: 5, padding: "2px 7px", marginBottom: 6, display: "inline-block" }}>💡 {a.reasonOfAction}</div>}
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, lineHeight: 1.4 }}>{a.text}</div>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <Avatar name={a.responsible} size={22} users={users} />
@@ -3945,7 +3705,6 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
                             <span style={{ color: isOverdue(a) ? T.red : T.text2, fontWeight: isOverdue(a) ? 700 : 400 }}>{isOverdue(a) ? `${daysOver(a)}d overdue` : fmt(a.due)}</span>
                           </div>
                         </div>
-                        <div style={{ fontSize: 10, color: T.navy, marginTop: 6, fontWeight: 600, opacity: .5 }}>Click to edit →</div>
                       </div>
                     ))}
                   </div>
@@ -4029,13 +3788,15 @@ function EscalationsPage({ actions, audit, user, setPage, users, plants, setActi
   const [actionDetail, setActionDetail] = useState(null);
 
   // Get subordinates recursively
-  const getSubTree = (name, allUsers) => {
+  const getSubTree = (name, allUsers, visited = new Set()) => {
+    if (visited.has(name)) return [];
+    visited.add(name);
     const directs = allUsers.filter(u => u.superior === name);
     const all = [name, ...directs.map(d => d.name)];
-    directs.forEach(d => { all.push(...getSubTree(d.name, allUsers).filter(n => !all.includes(n))); });
+    directs.forEach(d => { all.push(...getSubTree(d.name, allUsers, visited).filter(n => !all.includes(n))); });
     return all;
   };
-  const mySubTree = user ? getSubTree(user.name, users || DEFAULT_USERS) : [];
+  const mySubTree = user ? getSubTree(user.name, users || []) : [];
 
   // Deduplicate audit: one entry per action SN (keep highest level)
   const dedupedAudit = Object.values(
@@ -4113,9 +3874,9 @@ function EscalationsPage({ actions, audit, user, setPage, users, plants, setActi
               const levelBg = maxLevel >= 3 ? T.redL : maxLevel === 2 ? "#FDEBD0" : T.amberL;
               const isExpanded = sel?.name === p.name;
               return (
-                <>
-                  <tr key={p.name} style={{ cursor: "pointer", background: isExpanded ? T.bg : "" }} onClick={() => setSel(isExpanded ? null : p)}>
-                    <td><div style={{ display: "flex", alignItems: "center", gap: 8 }}><Avatar name={p.name} size={30} users={users || DEFAULT_USERS} /><div><div style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</div><div style={{ fontSize: 11, color: T.text2 }}>{(users || DEFAULT_USERS).find(u => u.name === p.name)?.role || "—"}</div></div></div></td>
+                <React.Fragment key={p.name}>
+                  <tr style={{ cursor: "pointer", background: isExpanded ? T.bg : "" }} onClick={() => setSel(isExpanded ? null : p)}>
+                    <td><div style={{ display: "flex", alignItems: "center", gap: 8 }}><Avatar name={p.name} size={30} users={users || []} /><div><div style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</div><div style={{ fontSize: 11, color: T.text2 }}>{(users || []).find(u => u.name === p.name)?.role || "—"}</div></div></div></td>
                     <td><span style={{ background: T.redL, color: T.red, padding: "3px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700 }}>{p.count}</span></td>
                     <td style={{ fontWeight: 600, fontSize: 13, color: p.actions.filter(a => a.status !== "COMPLETED" && a.status !== "DROPPED").length > 0 ? T.amber : T.green }}>{p.actions.filter(a => a.status !== "COMPLETED" && a.status !== "DROPPED").length}</td>
                     <td><span style={{ background: levelBg, color: levelColor, padding: "3px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700 }}>Level {maxLevel}</span></td>
@@ -4149,7 +3910,7 @@ function EscalationsPage({ actions, audit, user, setPage, users, plants, setActi
                       </td>
                     </tr>
                   )}
-                </>
+                </React.Fragment>
               );
             })}
           </tbody>
@@ -4175,7 +3936,7 @@ function EscMatrixTab({ escMatrix, setEscMatrix }) {
   const addTier = () => {
     const matrix = escMatrix || DEFAULT_ESC_MATRIX;
     const maxLvl = Math.max(...matrix.map(t => t.level), 0);
-    const newTier = { id: "E" + Date.now(), level: maxLvl + 1, label: `Level ${maxLvl + 1} — New Tier`, overdueDays: maxLvl * 3 + 3, overdueHrs: (maxLvl * 3 + 3) * 24, target: "HOD", notifyMethod: "In-App", priorities: ["CRITICAL"], applicableTo: "All", color: T.slate, active: true, description: "" };
+    const newTier = { id: "E" + crypto.randomUUID().slice(0, 8), level: maxLvl + 1, label: `Level ${maxLvl + 1} — New Tier`, overdueDays: maxLvl * 3 + 3, overdueHrs: (maxLvl * 3 + 3) * 24, target: "HOD", notifyMethod: "In-App", priorities: ["CRITICAL"], applicableTo: "All", color: T.slate, active: true, description: "" };
     setEscMatrix(m => [...m, newTier]);
     setEditRow(newTier.id); setEditDraft({ ...newTier, priorities: [...newTier.priorities] });
   };
@@ -4587,6 +4348,25 @@ function useAPIBridge(actions, setActions, projects) {
   }, [setActions, projects]);
 }
 
+/* ===================== ERROR BOUNDARY ===================== */
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#F5F5FB", padding: 20, textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+          <h1 style={{ fontFamily: "'Sora',sans-serif", fontSize: 20, color: "#272262", marginBottom: 8 }}>Something went wrong</h1>
+          <p style={{ color: "#636E72", fontSize: 13, maxWidth: 400, marginBottom: 20, lineHeight: 1.5 }}>{this.state.error?.message || "An unexpected error occurred."}</p>
+          <button className="btn btn-navy" onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}>Reload Application</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /* ===================== ROOT APP ===================== */
 export default function App() {
   const [user, setUser] = useState(() => {
@@ -4670,8 +4450,10 @@ export default function App() {
   }, [actions]);
 
   const commitFinal = rows => {
-    const withSN = rows.map((r, i) => ({ ...r, sn: nextSN([...actions, ...rows.slice(0, i)]), id: Date.now() + i, messages: r.messages || [], revisionHistory: r.revisionHistory || [], pendingConfirmation: false, allocatedBy: r.allocatedBy || user?.name || "" }));
-    setActions(p => [...p, ...withSN]);
+    setActions(p => {
+      const withSN = rows.map((r, i) => ({ ...r, sn: nextSN([...p, ...rows.slice(0, i)]), id: Date.now() + i, messages: r.messages || [], revisionHistory: r.revisionHistory || [], pendingConfirmation: false, allocatedBy: r.allocatedBy || user?.name || "" }));
+      return [...p, ...withSN];
+    });
   };
   const updateAction = (id, patch) => setActions(p => p.map(a => {
     if (a.id !== id) return a;
@@ -4699,7 +4481,7 @@ export default function App() {
 
   // Loading screen while sheet initializes
   if (!dbReady) return (
-    <>
+    <ErrorBoundary>
       <style>{CSS}</style>
       <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg,${T.navy} 0%,#3D378C 100%)`, gap: 16 }}>
         <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 22, color: "#fff" }}>Management Control System</div>
@@ -4709,13 +4491,13 @@ export default function App() {
         </div>
         {dbError && <div style={{ fontSize: 11, color: "#FEF3CD", marginTop: 4 }}>⚠ Sheet unavailable — using local data</div>}
       </div>
-    </>
+    </ErrorBoundary>
   );
 
-  if (!user) return (<><style>{CSS}</style><LoginPage onLogin={acc => { setUser(acc); setPage(0); }} /></>);
+  if (!user) return (<ErrorBoundary><style>{CSS}</style><LoginPage onLogin={acc => { setUser(acc); setPage(0); }} /></ErrorBoundary>);
 
   return (
-    <>
+    <ErrorBoundary>
       <style>{CSS}</style>
       <Shell page={page} setPage={setPage} user={user} onLogout={() => { setUser(null); setPage(0); clearMeetingState(); }} onQuickAdd={() => setShowQuickAdd(true)} pendingCount={pendingForMe} auditCount={audit.length} activeMtg={globalActiveMtg} onResumeActiveMtg={() => setPage(1)} mtgRunning={mtgRunning} mtgElapsed={mtgElapsed} notifications={notifs} unreadCount={unreadNotifs} onMarkAllRead={markAllRead} users={users} actions={actions} onShowSupport={() => setShowSupport(true)} onShowProfile={() => setShowProfile(true)} onShowAdminNotifs={() => setShowAdminNotifs(true)}>
         {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} />}
