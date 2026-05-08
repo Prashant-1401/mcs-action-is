@@ -3,10 +3,11 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 /* ===================== GOOGLE SHEET CONFIG ===================== */
 // 1. Deploy Code.gs as a Web App (Apps Script → Deploy → Web App → Anyone)
 // 2. Paste the deployment URL below
-const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbwV0YC0fYoYCZq1PORjH8svhPeGoLcF_yMQSLEJOBtwYsiu6gMBu4ErNSlIy_qUpmRTXg/exec";
+const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbzkxOs7ZMiioyG_gJiG_Vfyv0sJCLG_PZHZZm90G8lfqETVqPoPX5LrNvGLa3OxB7PHzA/exec";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://mcs-action.onrender.com";
+
 const SHEET_ID = import.meta.env.VITE_SHEET_ID || "1OR4J17WrhQg9rqFV3uIhLCDG9UDCoQ5lc9-8ZXoNSOo";
-const SHEET_ENABLED = SHEET_SCRIPT_URL !== "https://script.google.com/macros/s/AKfycbwV0YC0fYoYCZq1PORjH8svhPeGoLcF_yMQSLEJOBtwYsiu6gMBu4ErNSlIy_qUpmRTXg/exec";
+const SHEET_ENABLED = SHEET_SCRIPT_URL !== "https://script.google.com/macros/s/AKfycbwA23TKT-62SutIeThFAEBGnDrzSXO5tuhgaUsrIZKXjV5sp0eoP7FvfQnMUdJ1t9Z3uQ/exec";
 
 // CSV read URL (no auth needed for publicly shared sheets)
 const csvUrl = (tab) =>
@@ -283,7 +284,7 @@ function runEscalation(actions, setAudit, matrix) {
   if (alerts.length) setAudit(p => [...alerts.slice(0, 5), ...p].slice(0, 100));
 
   Object.values(emailPayloads).forEach(payload => {
-    if (payload.actions.length > 0) {
+    if (payload.actions.length > 0 && API_BASE_URL) {
       fetch(`${API_BASE_URL}/api/email/escalate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1505,7 +1506,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, user, onProjec
   const isAdmin = user?.role === "Admin";
   const userPerms = permissions?.[user?.id] || {};
   // Feature 3: can create projects if admin or has permission
-  const canCreateProject = isAdmin || userPerms.canCreateProjects;
+  const canCreateProject = isAdmin || userPerms.canCreateProjects || user?.role !== "Guest";
   // Feature 4: can edit meetings if admin or has permission
   const canEditMeetings = isAdmin || userPerms.canEditMeetings;
 
@@ -1535,7 +1536,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, user, onProjec
     });
   });
 
-  if (activeMtg) return <MeetingRoom mtg={activeMtg} plants={plants} depts={depts} users={users} onCommit={rows => { onCommitFinal(rows); }} onCloseMeeting={() => { clearMeetingState && clearMeetingState(); setPage(0); }} onBack={() => setPage(0)} prevActions={actions} relatedActions={actions.filter(a => (a.src === activeMtg.type) || (activeMtg.project && a.project === activeMtg.project))} running={mtgRunning} setRunning={setMtgRunning} elapsed={mtgElapsed} txLines={mtgTxLines} setTxLines={setMtgTxLines} fastActions={mtgFastActions} setFastActions={setMtgFastActions} insights={mtgInsights} setInsights={setMtgInsights} currentUser={user} mtgPresets={mtgPresets} />;
+  if (activeMtg) return <MeetingRoom mtg={activeMtg} plants={plants} depts={depts} users={users} onCommit={rows => { onCommitFinal(rows); }} onCloseMeeting={() => { clearMeetingState && clearMeetingState(); setPage(0); }} onBack={() => setPage(0)} prevActions={actions} relatedActions={actions.filter(a => a.src === activeMtg.type || (activeMtg.project && a.project === activeMtg.project))} running={mtgRunning} setRunning={setMtgRunning} elapsed={mtgElapsed} txLines={mtgTxLines} setTxLines={setMtgTxLines} fastActions={mtgFastActions} setFastActions={setMtgFastActions} insights={mtgInsights} setInsights={setMtgInsights} currentUser={user} mtgPresets={mtgPresets} />;
 
   return (
     <div className="fade-in">
@@ -1946,9 +1947,12 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   const [analyzingPara, setAnalyzingPara] = useState(false);
   const [sttLang, setSttLang] = useState("hi-IN"); // "en-IN" or "hi-IN" — hi-IN works better for Hinglish/Indian accents
   const [translating, setTranslating] = useState(false);
-  // Track consecutive API failures to back off when backend unavailable
-  const apiFailCountRef = useRef(0);
+  const [apiLimitPopup, setApiLimitPopup] = useState(null); // null | "translate" | "insights"
+  // Separate fail counters so translate failures don't block Gemini insights
+  const translateFailRef = useRef(0);
+  const analyzeFailRef = useRef(0);
   const API_FAIL_LIMIT = 3;
+  const apiFailCountRef = analyzeFailRef; // alias kept for any other usages
 
   const txRef = useRef(null);
   const insightsRef = useRef(null);
@@ -1981,10 +1985,13 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
       return rawTxt.trim();
     }
 
-    // Back off if backend repeatedly unavailable
-    if (apiFailCountRef.current >= API_FAIL_LIMIT) {
+    // Back off if backend repeatedly unavailable (translate-specific counter)
+    if (translateFailRef.current >= API_FAIL_LIMIT) {
+      if (translateFailRef.current === API_FAIL_LIMIT) setApiLimitPopup("translate");
       return rawTxt.trim();
     }
+
+    if (!API_BASE_URL) return rawTxt.trim();
 
     try {
       setTranslating(true);
@@ -1995,22 +2002,23 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
       });
       const data = await res.json();
       setTranslating(false);
-      apiFailCountRef.current = 0; // reset on success
+      translateFailRef.current = 0; // reset on success
       return data.translated || rawTxt;
-    } catch (e) { console.warn("Translation failed:", e); setTranslating(false); apiFailCountRef.current++; return rawTxt; }
+    } catch (e) { console.warn("Translation failed (backend offline?):", e); setTranslating(false); translateFailRef.current++; if (translateFailRef.current >= API_FAIL_LIMIT) setApiLimitPopup("translate"); return rawTxt; }
   }, [/* no deps */]);
 
   // ── Analyze a paragraph via backend Gemini ───────────────────────────────
-  // Auto-detects if text contains Hindi (Devanagari) to set source_lang appropriately
   const analyzeParagraph = useCallback(async (para) => {
     if (!para || para.trim().length < 20) return;
-    // Back off if backend repeatedly unavailable
-    if (apiFailCountRef.current >= API_FAIL_LIMIT) {
+    if (!API_BASE_URL) { console.warn("Insights skipped: VITE_API_BASE_URL not set in .env"); return; }
+    // Back off only if Gemini/analyze endpoint itself is repeatedly failing
+    if (analyzeFailRef.current >= API_FAIL_LIMIT) {
+      if (analyzeFailRef.current === API_FAIL_LIMIT) setApiLimitPopup("insights");
+      console.warn("Insights paused: backend analyze endpoint failed 3 times. Is the server running?");
       return;
     }
     setAnalyzingPara(true);
     try {
-      // Detect script: if Devanagari present → Hindi, else English/Hinglish Roman
       const hasDevanagari = /[\u0900-\u097F]/.test(para);
       const source_lang = hasDevanagari ? "hi" : "en";
 
@@ -2024,7 +2032,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
         })
       });
       const parsed = await res.json();
-      apiFailCountRef.current = 0; // reset on success
+      analyzeFailRef.current = 0; // reset on success
       const insight = {
         id: Date.now(),
         para: para.trim(),
@@ -2046,7 +2054,11 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
         }
         return p;
       });
-    } catch (e) { console.warn("Insight analysis failed:", e); apiFailCountRef.current++; }
+    } catch (e) {
+      analyzeFailRef.current++;
+      if (analyzeFailRef.current >= API_FAIL_LIMIT) setApiLimitPopup("insights");
+      console.warn(`Insight analysis failed (attempt ${analyzeFailRef.current}/${API_FAIL_LIMIT}). Is the backend running at ${API_BASE_URL}?`, e);
+    }
     setAnalyzingPara(false);
   }, [mtg.type, setInsights]);
 
@@ -2351,7 +2363,31 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
 
   return (
     <div className="fade-in">
-      {/* Header */}
+      {/* API Limit Popup */}
+      {apiLimitPopup && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 600, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: "28px 32px", maxWidth: 400, width: "90%", boxShadow: "0 20px 60px rgba(0,0,0,.25)", textAlign: "center" }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>{apiLimitPopup === "translate" ? "🔇" : "🤖"}</div>
+            <div style={{ fontFamily: "'Sora',sans-serif", fontSize: 17, fontWeight: 800, color: T.red, marginBottom: 8 }}>
+              {apiLimitPopup === "translate" ? "Translation Limit Reached" : "AI Insights Limit Reached"}
+            </div>
+            <div style={{ fontSize: 13, color: T.text2, lineHeight: 1.6, marginBottom: 20 }}>
+              {apiLimitPopup === "translate"
+                ? "The translation service failed 3 times and has been paused. Transcription will continue in the original language. Please check your backend server at"
+                : "The AI insights service failed 3 times and has been paused. Transcription will continue without live insights. Please check your backend server at"}
+              <br /><b style={{ color: T.navy }}>{API_BASE_URL || "localhost:8000"}</b>
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+              <button className="btn btn-ghost" onClick={() => {
+                if (apiLimitPopup === "translate") translateFailRef.current = 0;
+                else analyzeFailRef.current = 0;
+                setApiLimitPopup(null);
+              }} style={{ fontSize: 13 }}>🔄 Retry</button>
+              <button className="btn btn-navy" onClick={() => setApiLimitPopup(null)} style={{ fontSize: 13 }}>Dismiss</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button className="btn btn-ghost btn-sm" onClick={onBack}>← Back</button>
@@ -2393,7 +2429,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
       <div className="card" style={{ padding: 0, overflow: "hidden", marginBottom: 16 }}>
         <div style={{ background: `linear-gradient(135deg,${T.navy},#3D378C)`, padding: "10px 18px 0", color: "#fff" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <div style={{ fontWeight: 700, fontSize: 13 }}>📋 Pending Actions for this Meeting</div>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>📋 {mtg.type} — Action Points</div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ fontSize: 11, opacity: .7 }}>{mtgShowMine ? myPending.length : pendingRelated.length} shown</span>
               <div style={{ display: "flex", background: "rgba(255,255,255,.15)", borderRadius: 6, padding: 2 }}>
@@ -2715,6 +2751,7 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
 
   const runSmartSync = async () => {
     if (!txLines || txLines.length === 0) return;
+    if (!API_BASE_URL) return;
     setAnalyzingSmart(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/meetings/extract-insights`, {
@@ -2914,8 +2951,8 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
 
   return (
     <>
-      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", zIndex: 340 }} onClick={onClose} />
-      <div className="side-panel" style={{ width: 580, display: "flex", flexDirection: "column" }}>
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", zIndex: 405 }} onClick={onClose} />
+      <div className="side-panel" style={{ width: 580, display: "flex", flexDirection: "column", zIndex: 410 }}>
         {/* Header */}
         <div style={{ padding: "20px 24px", borderBottom: `1.5px solid ${T.border}`, flexShrink: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
@@ -2999,11 +3036,11 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
                   </div>
                 );
                 return (
-                  <div key={m.id} style={{ display: "flex", flexDirection: "row", gap: 8, alignItems: "flex-end" }}>
+                  <div key={m.id} style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", gap: 8, alignItems: "flex-end" }}>
                     <div style={{ width: 28, height: 28, borderRadius: "50%", background: m.authorColor + "20", color: m.authorColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, flexShrink: 0, border: `1.5px solid ${m.authorColor}30` }}>{m.authorInitials}</div>
                     <div style={{ maxWidth: "72%" }}>
-                      <div style={{ fontSize: 10, color: T.text2, marginBottom: 3, textAlign: "left" }}>{m.author}{isMe ? " (You)" : ""} · {fmtTime(m.ts)}</div>
-                      <div style={{ background: isMe ? "#EEF0FF" : T.bg, border: `1px solid ${isMe ? T.navy + "20" : T.border}`, borderRadius: "12px 12px 12px 2px", padding: "9px 13px", fontSize: 13, lineHeight: 1.5, color: T.text }}>{m.text}</div>
+                      <div style={{ fontSize: 10, color: T.text2, marginBottom: 3, textAlign: isMe ? "right" : "left" }}>{m.author}{isMe ? " (You)" : ""} · {fmtTime(m.ts)}</div>
+                      <div style={{ background: isMe ? T.navy : T.bg, border: `1px solid ${isMe ? T.navy : T.border}`, borderRadius: isMe ? "12px 12px 2px 12px" : "12px 12px 12px 2px", padding: "9px 13px", fontSize: 13, lineHeight: 1.5, color: isMe ? "#fff" : T.text }}>{m.text}</div>
                     </div>
                   </div>
                 );
@@ -3632,7 +3669,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
                 {critOverdue.length === 0 ? <Empty icon="✅" title="All clear!" sub="No critical or overdue actions." /> :
                   <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     {critOverdue.map(a => (
-                      <div key={a.id} style={{ background: T.bg, borderRadius: 10, padding: "14px 16px", border: `1.5px solid ${a.priority === "CRITICAL" ? T.red : T.amber}30`, cursor: "pointer", transition: "transform .15s" }} onClick={() => setActionDetail(a)} onMouseEnter={e => e.currentTarget.style.transform = "translateY(-1px)"} onMouseLeave={e => e.currentTarget.style.transform = "none"}>
+                      <div key={a.id} style={{ background: T.bg, borderRadius: 10, padding: "14px 16px", border: `1.5px solid ${a.priority === "CRITICAL" ? T.red : T.amber}30`, cursor: "pointer", transition: "transform .15s" }} onClick={() => { setDrill(null); setActionDetail(a); }} onMouseEnter={e => e.currentTarget.style.transform = "translateY(-1px)"} onMouseLeave={e => e.currentTarget.style.transform = "none"}>
                         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
                           <span style={{ fontFamily: "monospace", fontSize: 10, color: T.text2 }}>{a.sn}</span>
                           <div style={{ display: "flex", gap: 6 }}><SBadge s={a.status} /><PBadge p={a.priority} /></div>
@@ -3688,7 +3725,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
                 {d.rows.length === 0 ? <Empty icon="📭" title="No records" sub="Nothing to show for this filter." /> :
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {d.rows.slice(0, 30).map(a => (
-                      <div key={a.id} style={{ background: T.bg, borderRadius: 10, padding: "12px 14px", border: `1.5px solid ${isOverdue(a) ? T.red + "40" : T.border}`, cursor: "pointer", transition: "transform .15s" }} onClick={() => setActionDetail(a)} onMouseEnter={e => e.currentTarget.style.transform = "translateY(-1px)"} onMouseLeave={e => e.currentTarget.style.transform = "none"}>
+                      <div key={a.id} style={{ background: T.bg, borderRadius: 10, padding: "12px 14px", border: `1.5px solid ${isOverdue(a) ? T.red + "40" : T.border}`, cursor: "pointer", transition: "transform .15s" }} onClick={() => { setDrill(null); setActionDetail(a); }} onMouseEnter={e => e.currentTarget.style.transform = "translateY(-1px)"} onMouseLeave={e => e.currentTarget.style.transform = "none"}>
                         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
                           <span style={{ fontFamily: "monospace", fontSize: 10, color: T.text2 }}>{a.sn}</span>
                           <div style={{ display: "flex", gap: 5 }}><SBadge s={a.pendingConfirmation ? "PENDING CONFIRM" : a.status} /><PBadge p={a.priority} /></div>
@@ -4525,6 +4562,6 @@ export default function App() {
           onClose={() => setShowQuickAdd(false)}
         />
       )}
-    </>
+    </ErrorBoundary>
   );
 }
