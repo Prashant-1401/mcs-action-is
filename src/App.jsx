@@ -945,7 +945,9 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, setGlob
   // ── Compute truly upcoming meetings ────────────────────────────────────────
   const getNextOccurrence = (mtg) => {
     const mtgTimeStr = mtg.time; // "HH:MM"
-    const [mtgH, mtgM] = mtgTimeStr.split(":").map(Number);
+    if (!mtgTimeStr || !String(mtgTimeStr).includes(":")) return null;
+    const [mtgH, mtgM] = String(mtgTimeStr).split(":").map(Number);
+    if (isNaN(mtgH) || isNaN(mtgM)) return null;
     const today = new Date();
     const todayDateStr = today.toISOString().split("T")[0];
 
