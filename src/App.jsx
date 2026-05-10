@@ -465,7 +465,8 @@ const NAV = [{ id: 0, icon: "🏠", label: "Home" }, { id: 1, icon: "📋", labe
 // Generates in-app notifications from audit, actions and user context
 function useNotifications(actions, audit, user) {
   const [notifs, setNotifs] = useState([]);
-  const [lastSeen, setLastSeen] = useState(Date.now());
+  // Track dismissed IDs for this session — cleared notifications won't reappear
+  const dismissedIds = useRef(new Set());
 
   useEffect(() => {
     if (!user) return;
@@ -519,15 +520,23 @@ function useNotifications(actions, audit, user) {
       });
     });
 
-    // Deduplicate by id and limit
+    // Deduplicate, exclude dismissed, and limit
     const deduped = Object.values(newNotifs.reduce((acc, n) => { acc[n.id] = n; return acc; }, {}))
+      .filter(n => !dismissedIds.current.has(n.id))
       .sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 50);
     setNotifs(deduped);
   }, [actions, audit, user]);
 
   const unread = notifs.filter(n => !n.read).length;
-  const markAllRead = () => setNotifs(p => p.map(n => ({ ...n, read: true })));
-  const markRead = (id) => setNotifs(p => p.map(n => n.id === id ? { ...n, read: true } : n));
+  const markAllRead = () => {
+    // Add all current IDs to dismissed set so they don't come back this session
+    notifs.forEach(n => dismissedIds.current.add(n.id));
+    setNotifs([]);
+  };
+  const markRead = (id) => {
+    dismissedIds.current.add(id);
+    setNotifs(p => p.filter(n => n.id !== id));
+  };
   return { notifs, unread, markAllRead, markRead };
 }
 
@@ -744,7 +753,7 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
         <div style={{ borderTop: "1px solid rgba(255,255,255,.1)" }}>
           {/* Notification Bell — fixed in sidebar, no overlap with content area */}
           <div style={{ padding: "8px 18px", borderBottom: "1px solid rgba(255,255,255,.08)", position: "relative" }}>
-            <button onClick={() => { setShowNotifPanel(p => !p); if (!showNotifPanel && onMarkAllRead) onMarkAllRead(); }} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", border: "none", background: showNotifPanel ? "rgba(255,255,255,.12)" : "transparent", cursor: "pointer", borderRadius: 8, padding: "6px 8px", color: "rgba(255,255,255,.75)", fontSize: 12, fontFamily: "'Inter',sans-serif", position: "relative" }}>
+            <button onClick={() => { setShowNotifPanel(p => !p); }} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", border: "none", background: showNotifPanel ? "rgba(255,255,255,.12)" : "transparent", cursor: "pointer", borderRadius: 8, padding: "6px 8px", color: "rgba(255,255,255,.75)", fontSize: 12, fontFamily: "'Inter',sans-serif", position: "relative" }}>
               <span style={{ fontSize: 16, width: 22, textAlign: "center", flexShrink: 0 }}>🔔</span>
               <span style={{ flex: 1, textAlign: "left", fontWeight: 500 }}>Notifications</span>
               {unreadCount > 0 && <span style={{ background: T.red, color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{unreadCount}</span>}
@@ -2327,21 +2336,9 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
 
           {/* Exit option */}
           <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16, marginTop: 8 }}>
-            {!exitConfirm
-              ? <button onClick={() => setExitConfirm(true)} style={{ border: "none", background: "transparent", color: T.red, cursor: "pointer", fontSize: 12, fontWeight: 600, opacity: .7 }}>
-                🚪 Exit without saving
-              </button>
-              : <div className="card" style={{ padding: 16, border: `1.5px solid ${T.red}40`, background: T.redL, textAlign: "left", animation: "fadeIn .2s ease" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: T.red, marginBottom: 6 }}>⚠ Are you sure?</div>
-                <div style={{ fontSize: 12, color: T.text, marginBottom: 12, lineHeight: 1.5 }}>
-                  All session data will be <b>permanently lost</b> — {wordCount} words of transcript, {actionCount} action(s), and {insights.length} AI insight(s).
-                </div>
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => setExitConfirm(false)}>Cancel</button>
-                  <button className="btn btn-red btn-sm" onClick={() => { try { stopSTT(); } catch (e) { } onCloseMeeting && onCloseMeeting(); }}>Yes, Exit & Discard</button>
-                </div>
-              </div>
-            }
+            <button onClick={() => { try { stopSTT(); } catch (e) { } onCloseMeeting && onCloseMeeting(); }} style={{ border: "none", background: "transparent", color: T.red, cursor: "pointer", fontSize: 12, fontWeight: 600, opacity: .7 }}>
+              🚪 Exit without saving
+            </button>
           </div>
         </div>
       </div>
@@ -2424,6 +2421,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
             {running && <span style={{ fontSize: 9, opacity: .8, fontWeight: 700, letterSpacing: 1 }}>LIVE</span>}
           </div>
           <button className="btn btn-red" style={{ fontWeight: 700 }} onClick={stopAndStage}>⏹ Stop & Review</button>
+          <button onClick={() => { try { stopSTT(); } catch (e) { } onCloseMeeting && onCloseMeeting(); }} style={{ border: `1.5px solid ${T.red}`, background: "transparent", color: T.red, borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontSize: 12, fontWeight: 700 }} title="Exit meeting immediately">🚪 Exit</button>
         </div>
       </div>
 
@@ -2433,7 +2431,8 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <div style={{ fontWeight: 700, fontSize: 13 }}>📋 {mtg.type} — Action Points</div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 11, opacity: .7 }}>{mtgShowMine ? myPending.length : pendingRelated.length} shown</span>
+              <span style={{ fontSize: 11, opacity: .7 }}>{mtgShowMine ? myPending.length : pendingRelated.length} existing</span>
+              {insights.flatMap(i => i.actions).length > 0 && <span style={{ background: T.amber, color: T.navy, borderRadius: 10, padding: "1px 8px", fontSize: 10, fontWeight: 700 }}>+{insights.flatMap(i => i.actions).length} from this meeting</span>}
               <div style={{ display: "flex", background: "rgba(255,255,255,.15)", borderRadius: 6, padding: 2 }}>
                 <button onClick={() => setMtgShowMine(false)} style={{ padding: "3px 10px", borderRadius: 4, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: !mtgShowMine ? "rgba(255,255,255,.9)" : "transparent", color: !mtgShowMine ? T.navy : "rgba(255,255,255,.7)" }}>All</button>
                 <button onClick={() => setMtgShowMine(true)} style={{ padding: "3px 10px", borderRadius: 4, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: mtgShowMine ? "rgba(255,255,255,.9)" : "transparent", color: mtgShowMine ? T.navy : "rgba(255,255,255,.7)" }}>Mine</button>
@@ -2460,6 +2459,25 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
             )}
           </div>
         </div>
+        {/* AI-identified actions from current meeting */}
+        {insights.flatMap(ins => ins.actions).length > 0 && (
+          <div style={{ padding: "10px 18px", background: T.amber + "10", borderBottom: `1.5px solid ${T.amber}30` }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: T.amber, marginBottom: 6, textTransform: "uppercase", letterSpacing: .4 }}>⚡ Discussed in This Meeting (AI-Identified)</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {insights.flatMap(ins => ins.actions).filter((a, idx, arr) => arr.findIndex(x => x.text === a.text) === idx).map((a, i) => (
+                <div key={a.id || i} style={{ display: "flex", alignItems: "flex-start", gap: 8, background: a._staged ? T.greenL : "#fff", borderRadius: 7, padding: "6px 10px", border: `1px solid ${a._staged ? T.green + "50" : T.amber + "40"}` }}>
+                  <span style={{ fontSize: 11, color: T.amber, fontWeight: 700, flexShrink: 0, marginTop: 1 }}>•</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: T.text }}>{a.text}</div>
+                    {a.responsible && <div style={{ fontSize: 10, color: T.text2, marginTop: 1 }}>→ {a.responsible}</div>}
+                  </div>
+                  <PBadge p={a.priority || "NORMAL"} />
+                  {a._staged && <span style={{ fontSize: 10, color: T.green, fontWeight: 700, whiteSpace: "nowrap" }}>✓ Staged</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {pendingRelated.length === 0
           ? <div style={{ padding: "14px 18px", fontSize: 12, color: T.text2 }}>No pending actions linked to this meeting type or project.</div>
           : <div style={{ overflowX: "auto", maxHeight: 220, overflowY: "auto" }}>
@@ -2930,18 +2948,18 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
         <div style={{ fontSize: 10, color: T.text2, fontWeight: 700, textTransform: "uppercase", letterSpacing: .4, marginBottom: 3 }}>{label}</div>
         {isEditing
           ? <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            {type === "select" ? <select value={fieldVal} onChange={e => setFieldVal(e.target.value)} style={{ fontSize: 12, padding: "4px 8px", flex: 1 }} autoFocus>
+            {type === "select" ? <select value={fieldVal} onChange={e => setFieldVal(e.target.value)} style={{ fontSize: 12, padding: "4px 8px", flex: 1, border: `1.5px solid ${T.navy}`, borderRadius: 8 }} autoFocus>
               {opts.map(o => <option key={o}>{o}</option>)}
             </select>
-              : type === "textarea" ? <textarea value={fieldVal} onChange={e => setFieldVal(e.target.value)} style={{ flex: 1, fontSize: 12, height: 52, resize: "none" }} autoFocus />
-                : <input type={type || "text"} value={fieldVal} onChange={e => setFieldVal(e.target.value)} style={{ flex: 1, fontSize: 12, padding: "4px 8px" }} autoFocus />
+              : type === "textarea" ? <textarea value={fieldVal} onChange={e => setFieldVal(e.target.value)} style={{ flex: 1, fontSize: 12, height: 52, resize: "none", border: `1.5px solid ${T.navy}`, borderRadius: 8 }} autoFocus />
+                : <input type={type || "text"} value={fieldVal} onChange={e => setFieldVal(e.target.value)} style={{ flex: 1, fontSize: 12, padding: "4px 8px", border: `1.5px solid ${T.navy}`, borderRadius: 8 }} autoFocus />
             }
             <button onClick={() => commitEdit(field)} style={{ background: T.green, border: "none", color: "#fff", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>✓</button>
             <button onClick={() => setEditingField(null)} style={{ background: T.border, border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 11 }}>✕</button>
           </div>
-          : <div style={{ display: "flex", alignItems: "center", gap: 6, cursor: editable ? "pointer" : "default", padding: "3px 6px", borderRadius: 6, transition: "background .15s", background: "transparent" }}
-            onMouseEnter={e => { if (editable) e.currentTarget.style.background = T.bg; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+          : <div style={{ display: "flex", alignItems: "center", gap: 6, cursor: editable ? "pointer" : "default", padding: "5px 8px", borderRadius: 6, border: editable ? `1.5px solid ${T.border}` : "1.5px solid transparent", transition: "border-color .15s, background .15s", background: "transparent" }}
+            onMouseEnter={e => { if (editable) { e.currentTarget.style.background = T.bg; e.currentTarget.style.borderColor = T.navy; } }}
+            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; if (editable) e.currentTarget.style.borderColor = T.border; }}
             onClick={() => { if (editable) startEdit(field, value); }}>
             <span style={{ fontSize: 12, flex: 1 }}>{value || "—"}</span>
             {editable && <span style={{ fontSize: 10, color: T.text2, opacity: .5 }}>✏</span>}
@@ -3146,7 +3164,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     : scoped;
 
   const fa = displayScope.filter(a => {
-    if (filters.plant.length && !filters.plant.includes(a.plant)) return false;
+    if (filters.plant.length && !filters.plant.includes("All") && !filters.plant.includes(a.plant)) return false;
     if (filters.section.length && !filters.section.includes(a.section)) return false;
     if (filters.responsible.length && !filters.responsible.includes(a.responsible)) return false;
     const aStatus = a.pendingConfirmation ? "PENDING CONFIRM" : a.status;
@@ -3227,7 +3245,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 10 }}>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 Search actions…" style={{ width: 200 }} />
           {[
-            { label: "Plant", key: "plant", opts: plants.map(p => p.name) },
+            { label: "Plant", key: "plant", opts: plants.map(p => p.name).filter(n => n !== "All") },
             { label: "Department", key: "section", opts: allSections },
             { label: "Responsible", key: "responsible", opts: allResponsible },
             { label: "Status", key: "status", opts: [...STATUS_LIST, "PENDING CONFIRM"] },
@@ -3522,8 +3540,13 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
   return (
     <div className="fade-in">
       <PageHeader title="Dashboard" sub="Live accountability snapshot">
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {refreshData && <button className="btn btn-ghost" onClick={refreshData} style={{ border: `1px solid ${T.border}`, background: "#fff", fontSize: 13, padding: "6px 14px" }}>🔄 Refresh Data</button>}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          {refreshData && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: T.text2, textTransform: "uppercase", letterSpacing: .4 }}>&nbsp;</span>
+              <button className="btn btn-ghost" onClick={refreshData} style={{ border: `1px solid ${T.border}`, background: "#fff", fontSize: 13, padding: "6px 14px" }}>🔄 Refresh</button>
+            </div>
+          )}
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             <span style={{ fontSize: 10, fontWeight: 700, color: T.text2, textTransform: "uppercase", letterSpacing: .4 }}>Plant</span>
             <select value={plantF} onChange={e => setPlantF(e.target.value)} style={{ padding: "6px 10px" }}>
