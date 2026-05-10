@@ -909,7 +909,7 @@ function ActionSidePanel({ action, onClose, onUpdate, users, plants, depts }) {
   );
 }
 
-function HomePage({ actions, setActions, user, setPage, users, meetings, setGlobalActiveMtg }) {
+function HomePage({ actions, setActions, user, setPage, users, meetings, plants, depts, setGlobalActiveMtg }) {
   const now = new Date();
   // Scope: my plant OR all
   const myPlantActions = user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant);
@@ -2935,7 +2935,15 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
   };
   const startEdit = (field, val) => { setEditingField(field); setFieldVal(val || ""); };
   const commitEdit = (field) => {
-    if (field === editingField) { onUpdate(action.id, { [field]: fieldVal, closedOn: field === "status" && fieldVal === "COMPLETED" ? todayStr() : action.closedOn }); setEditingField(null); }
+    if (field === editingField) {
+      const isCompletedStatus = field === "status" && fieldVal === "COMPLETED";
+      onUpdate(action.id, {
+        [field]: fieldVal,
+        closedOn: isCompletedStatus ? todayStr() : action.closedOn,
+        ...(isCompletedStatus ? { pendingConfirmation: false } : {})
+      });
+      setEditingField(null);
+    }
   };
   const fmtTime = ts => { const d = new Date(ts); return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" }) + ", " + d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }); };
 
@@ -3167,7 +3175,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     if (filters.plant.length && !filters.plant.includes("All") && !filters.plant.includes(a.plant)) return false;
     if (filters.section.length && !filters.section.includes(a.section)) return false;
     if (filters.responsible.length && !filters.responsible.includes(a.responsible)) return false;
-    const aStatus = a.pendingConfirmation ? "PENDING CONFIRM" : a.status;
+    const aStatus = a.pendingConfirmation && a.status !== "COMPLETED" && a.status !== "DROPPED" ? "PENDING CONFIRM" : a.status;
     if (filters.status.length && !filters.status.includes(aStatus)) return false;
     if (filters.priority.length && !filters.priority.includes(a.priority)) return false;
     const aProj = a.project || "None";
@@ -3187,7 +3195,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const upStatus = (id, status) => upAction(id, { status, closedOn: status === "COMPLETED" ? todayStr() : null, pendingConfirmation: false });
   const allSections = [...new Set(scoped.map(a => a.section))].filter(Boolean);
   const allResponsible = [...new Set(scoped.map(a => a.responsible))].filter(Boolean);
-  const pendingConf = scoped.filter(a => a.pendingConfirmation);
+  const pendingConf = scoped.filter(a => a.pendingConfirmation && a.status !== "COMPLETED" && a.status !== "DROPPED");
 
   // Feature 7: Export functions
   const exportCSV = () => {
@@ -3376,7 +3384,7 @@ function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortC
                 </td>
                 <td onClick={e => e.stopPropagation()}><div style={{ display: "flex", alignItems: "center", gap: 6 }}><Avatar name={a.responsible} size={24} users={users} /><span style={{ fontSize: 12 }}>{a.responsible}</span></div></td>
                 <td style={{ fontSize: 12, color: isOverdue(a) ? T.red : T.text, whiteSpace: "nowrap" }}>{fmt(a.due)}</td>
-                <td onClick={e => e.stopPropagation()}><SBadge s={a.pendingConfirmation ? "PENDING CONFIRM" : a.status} /></td>
+                <td onClick={e => e.stopPropagation()}><SBadge s={a.pendingConfirmation && a.status !== "COMPLETED" && a.status !== "DROPPED" ? "PENDING CONFIRM" : a.status} /></td>
                 <td style={{ textAlign: "center" }}>{(a.revisions || 0) > 0 ? <span style={{ fontWeight: 700, color: T.amber, fontSize: 12 }}>{a.revisions}</span> : <span style={{ color: T.text2, fontSize: 12 }}>—</span>}</td>
               </tr>
             ))}
@@ -3403,7 +3411,7 @@ function BoardView({ fa, setSel, users }) {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 12, padding: 14 }}>
               {ga.map((a, idx) => (
                 <div key={a.id || `board-${idx}`} style={{ background: T.bg, borderRadius: 10, padding: 12, border: `1.5px solid ${a.pendingConfirmation ? T.amber : isOverdue(a) ? T.red : T.border}`, cursor: "pointer" }} onClick={() => setSel(a)}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, gap: 4 }}><SBadge s={a.pendingConfirmation ? "PENDING CONFIRM" : a.status} /><PBadge p={a.priority} /></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, gap: 4 }}><SBadge s={a.pendingConfirmation && a.status !== "COMPLETED" && a.status !== "DROPPED" ? "PENDING CONFIRM" : a.status} /><PBadge p={a.priority} /></div>
                   <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.4, marginBottom: 8 }}>{a.text.slice(0, 70)}{a.text.length > 70 ? "…" : ""}</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <Avatar name={a.responsible} size={22} users={users || []} />
@@ -3753,7 +3761,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
                       <div key={a.id} style={{ background: T.bg, borderRadius: 10, padding: "12px 14px", border: `1.5px solid ${isOverdue(a) ? T.red + "40" : T.border}`, cursor: "pointer", transition: "transform .15s" }} onClick={() => { setDrill(null); setActionDetail(a); }} onMouseEnter={e => e.currentTarget.style.transform = "translateY(-1px)"} onMouseLeave={e => e.currentTarget.style.transform = "none"}>
                         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
                           <span style={{ fontFamily: "monospace", fontSize: 10, color: T.text2 }}>{a.sn}</span>
-                          <div style={{ display: "flex", gap: 5 }}><SBadge s={a.pendingConfirmation ? "PENDING CONFIRM" : a.status} /><PBadge p={a.priority} /></div>
+                          <div style={{ display: "flex", gap: 5 }}><SBadge s={a.pendingConfirmation && a.status !== "COMPLETED" && a.status !== "DROPPED" ? "PENDING CONFIRM" : a.status} /><PBadge p={a.priority} /></div>
                         </div>
                         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, lineHeight: 1.4 }}>{a.text}</div>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -4562,7 +4570,7 @@ export default function App() {
     <ErrorBoundary>
       <style>{CSS}</style>
       <Shell page={page} setPage={setPage} user={user} onLogout={() => { setUser(null); setPage(0); clearMeetingState(); }} onQuickAdd={() => setShowQuickAdd(true)} pendingCount={pendingForMe} auditCount={audit.length} activeMtg={globalActiveMtg} onResumeActiveMtg={() => setPage(1)} mtgRunning={mtgRunning} mtgElapsed={mtgElapsed} notifications={notifs} unreadCount={unreadNotifs} onMarkAllRead={markAllRead} users={users} actions={actions} onShowSupport={() => setShowSupport(true)} onShowProfile={() => setShowProfile(true)} onShowAdminNotifs={() => setShowAdminNotifs(true)}>
-        {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} />}
+        {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} plants={plants} depts={depts} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} />}
         {page === 1 && <WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows => { commitFinal(rows); clearMeetingState(); }} actions={actions} user={user} onProjectUpdate={updated => setProjects(p => p.map(x => x.id === updated.id ? updated : x))} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} permissions={permissions} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); }} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState} />}
         {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} />}
         {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} />}
