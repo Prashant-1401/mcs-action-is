@@ -2425,38 +2425,62 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
         </div>
       </div>
 
-      {/* Pending Actions table — with Action Register ribbon */}
+      {/* Pending Actions table — clean Actions Register style ribbon */}
       <div className="card" style={{ padding: 0, overflow: "hidden", marginBottom: 16 }}>
-        <div style={{ background: `linear-gradient(135deg,${T.navy},#3D378C)`, padding: "10px 18px 0", color: "#fff" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <div style={{ fontWeight: 700, fontSize: 13 }}>📋 {mtg.type} — Action Points</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 11, opacity: .7 }}>{mtgShowMine ? myPending.length : pendingRelated.length} existing</span>
-              {insights.flatMap(i => i.actions).length > 0 && <span style={{ background: T.amber, color: T.navy, borderRadius: 10, padding: "1px 8px", fontSize: 10, fontWeight: 700 }}>+{insights.flatMap(i => i.actions).length} from this meeting</span>}
-              <div style={{ display: "flex", background: "rgba(255,255,255,.15)", borderRadius: 6, padding: 2 }}>
-                <button onClick={() => setMtgShowMine(false)} style={{ padding: "3px 10px", borderRadius: 4, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: !mtgShowMine ? "rgba(255,255,255,.9)" : "transparent", color: !mtgShowMine ? T.navy : "rgba(255,255,255,.7)" }}>All</button>
-                <button onClick={() => setMtgShowMine(true)} style={{ padding: "3px 10px", borderRadius: 4, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: mtgShowMine ? "rgba(255,255,255,.9)" : "transparent", color: mtgShowMine ? T.navy : "rgba(255,255,255,.7)" }}>Mine</button>
-              </div>
+        {/* Header bar */}
+        <div style={{ padding: "12px 16px", borderBottom: `1.5px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fff" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontWeight: 700, fontSize: 13, color: T.navy }}>📋 {mtg.type} — Action Points</span>
+            {insights.flatMap(i => i.actions).length > 0 && (
+              <span style={{ background: T.amber + "20", color: T.amber, border: `1px solid ${T.amber}40`, borderRadius: 10, padding: "2px 10px", fontSize: 10, fontWeight: 700 }}>
+                +{insights.flatMap(i => i.actions).length} from this meeting
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 11, color: T.text2 }}>{mtgShowMine ? myPending.length : pendingRelated.length} existing</span>
+            <div style={{ display: "flex", background: T.bg, borderRadius: 8, padding: 3, border: `1.5px solid ${T.border}` }}>
+              <button onClick={() => setMtgShowMine(false)} style={{ padding: "4px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: !mtgShowMine ? T.navy : "transparent", color: !mtgShowMine ? "#fff" : T.text2, transition: "all .18s" }}>All</button>
+              <button onClick={() => setMtgShowMine(true)} style={{ padding: "4px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: mtgShowMine ? T.navy : "transparent", color: mtgShowMine ? "#fff" : T.text2, transition: "all .18s" }}>Mine</button>
             </div>
           </div>
-          {/* Filter ribbon */}
-          <div style={{ display: "flex", gap: 6, paddingBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <input value={mtgPendingSearch || ""} onChange={e => setMtgPendingSearch && setMtgPendingSearch(e.target.value)} placeholder="🔍 Search…" style={{ width: 140, fontSize: 11, padding: "4px 8px", background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.3)", borderRadius: 6, color: "#fff", height: 26 }} />
-            {[
-              { label: "Status", key: "mtgStatus", opts: STATUS_LIST },
-              { label: "Priority", key: "mtgPriority", opts: PRIORITY_LIST },
-              { label: "Dept", key: "mtgSection", opts: SECTIONS.slice(0, 8) },
-            ].map(({ label, key, opts }) => (
-              <div key={key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <span style={{ fontSize: 10, color: "rgba(255,255,255,.6)", whiteSpace: "nowrap" }}>{label}:</span>
-                <select value={(mtgFilters || {})[key] || ""} onChange={e => setMtgFilters && setMtgFilters(f => ({ ...f, [key]: e.target.value }))} style={{ fontSize: 10, padding: "2px 6px", background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.3)", borderRadius: 5, color: "#fff", height: 26, minWidth: 80 }}>
-                  <option value="">All</option>{opts.map(o => <option key={o} value={o} style={{ color: T.text, background: "#fff" }}>{o}</option>)}
-                </select>
-              </div>
-            ))}
-            {(Object.values(mtgFilters || {}).some(v => v) || mtgPendingSearch) && (
-              <button onClick={() => { setMtgFilters && setMtgFilters({}); setMtgPendingSearch && setMtgPendingSearch(""); }} style={{ fontSize: 10, padding: "2px 8px", background: "rgba(255,255,255,.2)", border: "1px solid rgba(255,255,255,.3)", borderRadius: 5, color: "#fff", cursor: "pointer", height: 26 }}>Clear</button>
-            )}
+        </div>
+
+        {/* Filter ribbon — matches Actions Register style */}
+        <div style={{ padding: "10px 16px", background: "#fff", borderBottom: `1px solid ${T.border}`, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <input
+              value={mtgPendingSearch || ""}
+              onChange={e => setMtgPendingSearch && setMtgPendingSearch(e.target.value)}
+              placeholder="🔍 Search actions…"
+              style={{ width: 180, fontSize: 12, padding: "5px 10px", border: `1px solid ${T.border}`, borderRadius: 6, outline: "none", fontFamily: "inherit" }}
+            />
+          </div>
+          {[
+            { label: "STATUS", key: "mtgStatus", opts: STATUS_LIST },
+            { label: "PRIORITY", key: "mtgPriority", opts: PRIORITY_LIST },
+            { label: "DEPT", key: "mtgSection", opts: SECTIONS.slice(0, 8) },
+          ].map(({ label, key, opts }) => (
+            <div key={key} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: T.text2, textTransform: "uppercase", letterSpacing: .4 }}>{label}</span>
+              <select
+                value={(mtgFilters || {})[key] || ""}
+                onChange={e => setMtgFilters && setMtgFilters(f => ({ ...f, [key]: e.target.value }))}
+                style={{ fontSize: 12, padding: "5px 10px", border: `1px solid ${T.border}`, borderRadius: 6, background: "#fff", color: T.text, minWidth: 110, fontFamily: "inherit" }}
+              >
+                <option value="">{label === "STATUS" ? "All" : label === "PRIORITY" ? "All" : "All"}</option>
+                {opts.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+          ))}
+          {(Object.values(mtgFilters || {}).some(v => v) || mtgPendingSearch) && (
+            <button
+              onClick={() => { setMtgFilters && setMtgFilters({}); setMtgPendingSearch && setMtgPendingSearch(""); }}
+              style={{ alignSelf: "flex-end", fontSize: 12, padding: "5px 14px", background: "transparent", border: `1px solid ${T.border}`, borderRadius: 6, color: T.text2, cursor: "pointer", fontFamily: "inherit" }}
+            >✕ Clear</button>
+          )}
+          <div style={{ marginLeft: "auto", alignSelf: "flex-end", fontSize: 12, color: T.text2, fontWeight: 500 }}>
+            {pendingRelated.length}/{pendingRelated.length} shown
           </div>
         </div>
         {/* AI-identified actions from current meeting */}
