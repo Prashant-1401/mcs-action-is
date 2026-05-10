@@ -2528,14 +2528,14 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
           });
           const mtgUpStatus = (id, status) => {
             if (!setActions) return;
-            setActions(prev => prev.map(a => a.id === id
+            setActions(prev => prev.map(a => String(a.id) === String(id)
               ? { ...a, status, closedOn: status === "COMPLETED" ? todayStr() : null, pendingConfirmation: false }
               : a
             ));
           };
           const mtgUpAction = (id, patch) => {
             if (!setActions) return;
-            setActions(prev => prev.map(a => a.id === id ? { ...a, ...patch } : a));
+            setActions(prev => prev.map(a => String(a.id) === String(id) ? { ...a, ...patch } : a));
           };
           const canDrag = !!setActions;
           if (filteredPending.length === 0) return (
@@ -3184,7 +3184,12 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const userKey = user?.id || "guest";
   const [view, setView] = useState(userViewPref[userKey] || "table");
   // Multi-select filters: persistent across page changes
-  const [filters, setFilters] = useState(userFilterPref[userKey] || { plant: [], section: [], responsible: [], status: [], priority: [], project: [] });
+  const [filters, setFilters] = useState(userFilterPref[userKey] || { 
+    plant: user?.plant && user.plant !== "All" ? [user.plant] : [], 
+    section: user?.department ? [user.department] : [], 
+    responsible: user?.name ? [user.name] : [], 
+    status: [], priority: [], project: [] 
+  });
   const [myActionsOnly, setMyActionsOnly] = useState(false);
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(null);
@@ -3241,7 +3246,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   });
 
   const upAction = (id, patch) => setActions(p => p.map(a => {
-    if (a.id !== id) return a;
+    if (String(a.id) !== String(id)) return a;
     if (patch.due && patch.due !== a.due) {
       const rev = { date: todayStr(), from: a.due, to: patch.due, by: user?.name || "Unknown" };
       return { ...a, ...patch, revisions: (a.revisions || 0) + 1, revisionHistory: [...(a.revisionHistory || []), rev] };
@@ -3321,7 +3326,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
             return (
               <div key={key} style={{ position: "relative" }}>
                 <span style={{ fontSize: 10, fontWeight: 700, color: T.text2, letterSpacing: .4, textTransform: "uppercase", display: "block", marginBottom: 2 }}>{label}</span>
-                <button onClick={() => setOpenFilter(isOpen ? null : key)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", border: `1.5px solid ${sel2.length ? T.navy : T.border}`, borderRadius: 7, background: sel2.length ? "#EEF0FF" : "#fff", cursor: "pointer", fontSize: 12, fontWeight: 500, minWidth: 110, whiteSpace: "nowrap" }}>
+                <button onClick={() => setOpenFilter(isOpen ? null : key)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", border: `1.5px solid ${sel2.length ? T.navy : T.border}`, borderRadius: 7, background: sel2.length ? "#EEF0FF" : "#fff", color: sel2.length ? T.navy : T.text, cursor: "pointer", fontSize: 12, fontWeight: 500, minWidth: 110, whiteSpace: "nowrap" }}>
                   <span style={{ flex: 1, textAlign: "left" }}>{sel2.length === 0 ? "All" : sel2.length === 1 ? sel2[0] : `${sel2.length} selected`}</span>
                   {sel2.length > 0 && <span onClick={e => { e.stopPropagation(); clearFilter(key); }} style={{ color: T.text2, fontWeight: 700, fontSize: 14, lineHeight: 1 }}>×</span>}
                   <span style={{ fontSize: 9, color: T.text2 }}>{isOpen ? "▲" : "▼"}</span>
