@@ -1952,6 +1952,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   const [mtgShowMine, setMtgShowMine] = useState(false);
   const [mtgPendingSearch, setMtgPendingSearch] = useState("");
   const [mtgFilters, setMtgFilters] = useState({});
+  const [mtgActionView, setMtgActionView] = useState("table");
   const [exitConfirm, setExitConfirm] = useState(false);
   const [sttStatus, setSttStatus] = useState("idle"); // idle | listening | error | unsupported
   const [sttInterim, setSttInterim] = useState("");
@@ -2428,7 +2429,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
       {/* Pending Actions table — clean Actions Register style ribbon */}
       <div className="card" style={{ padding: 0, overflow: "hidden", marginBottom: 16 }}>
         {/* Header bar */}
-        <div style={{ padding: "12px 16px", borderBottom: `1.5px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fff" }}>
+        <div style={{ padding: "12px 16px", borderBottom: `1.5px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fff", flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontWeight: 700, fontSize: 13, color: T.navy }}>📋 {mtg.type} — Action Points</span>
             {insights.flatMap(i => i.actions).length > 0 && (
@@ -2437,11 +2438,26 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
               </span>
             )}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontSize: 11, color: T.text2 }}>{mtgShowMine ? myPending.length : pendingRelated.length} existing</span>
+            {/* All / Mine toggle */}
             <div style={{ display: "flex", background: T.bg, borderRadius: 8, padding: 3, border: `1.5px solid ${T.border}` }}>
               <button onClick={() => setMtgShowMine(false)} style={{ padding: "4px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: !mtgShowMine ? T.navy : "transparent", color: !mtgShowMine ? "#fff" : T.text2, transition: "all .18s" }}>All</button>
               <button onClick={() => setMtgShowMine(true)} style={{ padding: "4px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: mtgShowMine ? T.navy : "transparent", color: mtgShowMine ? "#fff" : T.text2, transition: "all .18s" }}>Mine</button>
+            </div>
+            {/* View toggle — matches Actions Register */}
+            <div style={{ display: "flex", gap: 3, borderLeft: `1px solid ${T.border}`, paddingLeft: 8 }}>
+              {[
+                { v: "table", icon: "☰", l: "Table" },
+                { v: "board", icon: "⊞", l: "Board" },
+                { v: "kanban", icon: "▦", l: "Kanban" },
+                { v: "timeline", icon: "━", l: "Timeline" },
+              ].map(x => (
+                <button key={x.v} onClick={() => setMtgActionView(x.v)}
+                  style={{ padding: "4px 11px", borderRadius: 7, border: `1.5px solid ${mtgActionView === x.v ? T.navy : T.border}`, background: mtgActionView === x.v ? T.navy : "transparent", color: mtgActionView === x.v ? "#fff" : T.text2, fontSize: 11, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, transition: "all .15s" }}>
+                  {x.icon} {x.l}
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -2502,35 +2518,41 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
             </div>
           </div>
         )}
-        {pendingRelated.length === 0
-          ? <div style={{ padding: "14px 18px", fontSize: 12, color: T.text2 }}>No pending actions linked to this meeting type or project.</div>
-          : <div style={{ overflowX: "auto", maxHeight: 220, overflowY: "auto" }}>
-            <table>
-              <thead><tr>
-                <th>SN</th><th style={{ minWidth: 200 }}>Action Point</th><th>Reason</th><th>Responsible</th><th>Due</th><th>Status</th><th>Priority</th>
-              </tr></thead>
-              <tbody>
-                {displayPending.filter(a => {
-                  if (mtgPendingSearch && ![a.text, a.responsible, a.sn].join(" ").toLowerCase().includes((mtgPendingSearch || "").toLowerCase())) return false;
-                  if ((mtgFilters || {}).mtgStatus && a.status !== mtgFilters.mtgStatus) return false;
-                  if ((mtgFilters || {}).mtgPriority && a.priority !== mtgFilters.mtgPriority) return false;
-                  if ((mtgFilters || {}).mtgSection && a.section !== mtgFilters.mtgSection) return false;
-                  return true;
-                }).map((a, idx) => (
-                  <tr key={a.id || `mtg-act-${idx}`} style={{ cursor: "pointer", background: isOverdue(a) ? T.redL : "" }} onClick={() => setSelAction(a)}>
-                    <td style={{ fontFamily: "monospace", fontSize: 11, color: T.text2 }}>{a.sn}</td>
-                    <td><div style={{ fontWeight: 500, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }}>{a.text}</div>{isOverdue(a) && <div style={{ fontSize: 10, color: T.red, fontWeight: 600 }}>⚠ {daysOver(a)}d overdue</div>}</td>
-                    <td style={{ fontSize: 11, color: T.text2, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.reasonOfAction || "—"}</td>
-                    <td><div style={{ display: "flex", alignItems: "center", gap: 5 }}><Avatar name={a.responsible} size={20} users={users} /><span style={{ fontSize: 12 }}>{a.responsible || "Unassigned"}</span></div></td>
-                    <td style={{ fontSize: 12, color: isOverdue(a) ? T.red : T.text, whiteSpace: "nowrap" }}>{fmt(a.due)}</td>
-                    <td><SBadge s={a.status} /></td>
-                    <td><PBadge p={a.priority} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        }
+        {(() => {
+          const filteredPending = displayPending.filter(a => {
+            if (mtgPendingSearch && ![a.text, a.responsible, a.sn].join(" ").toLowerCase().includes((mtgPendingSearch || "").toLowerCase())) return false;
+            if ((mtgFilters || {}).mtgStatus && a.status !== mtgFilters.mtgStatus) return false;
+            if ((mtgFilters || {}).mtgPriority && a.priority !== mtgFilters.mtgPriority) return false;
+            if ((mtgFilters || {}).mtgSection && a.section !== mtgFilters.mtgSection) return false;
+            return true;
+          });
+          const mtgUpAction = (id, patch) => { /* read-only in meeting room — handled via ActionDetailPanel */ };
+          const mtgUpStatus = (id, status) => { /* read-only in meeting room */ };
+          if (filteredPending.length === 0) return (
+            <div style={{ padding: "14px 18px", fontSize: 12, color: T.text2 }}>No pending actions linked to this meeting type or project.</div>
+          );
+          if (mtgActionView === "table") return (
+            <div style={{ maxHeight: 280, overflowY: "auto" }}>
+              <TableView fa={filteredPending} upStatus={mtgUpStatus} setSel={a => setSelAction(a)} canEdit={false} upAction={mtgUpAction} users={users} />
+            </div>
+          );
+          if (mtgActionView === "board") return (
+            <div style={{ maxHeight: 340, overflowY: "auto", padding: 12 }}>
+              <BoardView fa={filteredPending} setSel={a => setSelAction(a)} users={users} />
+            </div>
+          );
+          if (mtgActionView === "kanban") return (
+            <div style={{ maxHeight: 340, overflowY: "auto", padding: 12 }}>
+              <KanbanView fa={filteredPending} upStatus={mtgUpStatus} canEdit={false} users={users} setSel={a => setSelAction(a)} />
+            </div>
+          );
+          if (mtgActionView === "timeline") return (
+            <div style={{ maxHeight: 340, overflowY: "auto", padding: 12 }}>
+              <TimelineView fa={filteredPending} />
+            </div>
+          );
+          return null;
+        })()}
       </div>
 
       {/* 3-col: Transcript | Insights | Guidelines */}
