@@ -2552,7 +2552,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
             </div>
           );
           if (mtgActionView === "kanban") return (
-            <div style={{ maxHeight: 340, overflowY: "auto", padding: 12 }}>
+            <div style={{ padding: 12, overflowX: "auto" }}>
               <KanbanView fa={filteredPending} upStatus={mtgUpStatus} canEdit={canDrag} users={users} setSel={a => setSelAction(a)} />
             </div>
           );
@@ -3484,19 +3484,29 @@ function BoardView({ fa, setSel, users }) {
 }
 
 function KanbanView({ fa, upStatus, canEdit, users, setSel }) {
-  const [dragId, setDragId] = useState(null);
+  const dragIdRef = useRef(null);
   const [overCol, setOverCol] = useState(null);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, alignItems: "start" }}>
       {STATUS_LIST.map(col => {
-        const colA = fa.filter(a => a.status === col || a.status === "PENDING CONFIRM" && col === "IN PROCESS" && false);
         const c = SC[col] || { bg: "#eee", text: "#333", dot: "#aaa" };
         const isDragOver = overCol === col;
         return (
-          <div key={col} className={isDragOver ? "drag-over" : ""} style={{ background: c.bg, borderRadius: 12, padding: 12, minHeight: 200, transition: "background .15s" }}
-            onDragOver={e => { e.preventDefault(); setOverCol(col); }}
-            onDragLeave={() => setOverCol(null)}
-            onDrop={e => { e.preventDefault(); if (dragId) upStatus(dragId, col); setDragId(null); setOverCol(null); }}>
+          <div key={col}
+            className={isDragOver ? "drag-over" : ""}
+            style={{ background: isDragOver ? c.dot + "30" : c.bg, borderRadius: 12, padding: 12, minHeight: 200, transition: "background .15s", outline: isDragOver ? `2px dashed ${c.dot}` : "none" }}
+            onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (overCol !== col) setOverCol(col); }}
+            onDragLeave={e => {
+              // Only clear if leaving the column div itself, not a child element
+              if (!e.currentTarget.contains(e.relatedTarget)) setOverCol(null);
+            }}
+            onDrop={e => {
+              e.preventDefault();
+              const id = dragIdRef.current;
+              if (id != null) upStatus(id, col);
+              dragIdRef.current = null;
+              setOverCol(null);
+            }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: c.text }}>{col}</span>
               <span style={{ background: "#fff", color: c.text, borderRadius: 10, padding: "1px 8px", fontSize: 11, fontWeight: 700 }}>{fa.filter(a => a.status === col).length}</span>
@@ -3505,9 +3515,13 @@ function KanbanView({ fa, upStatus, canEdit, users, setSel }) {
               {fa.filter(a => a.status === col).map((a, idx) => (
                 <div key={a.id || `kanban-${idx}`}
                   draggable={canEdit && !a.pendingConfirmation}
-                  onDragStart={e => { setDragId(a.id); e.dataTransfer.effectAllowed = "move"; }}
-                  onDragEnd={() => setDragId(null)}
-                  style={{ background: "#fff", borderRadius: 10, padding: "10px 12px", boxShadow: "0 1px 4px rgba(0,0,0,.06)", cursor: canEdit ? "grab" : "default", opacity: dragId === a.id ? .5 : 1, border: `1.5px solid ${a.pendingConfirmation ? T.amber : isOverdue(a) ? T.red : "transparent"}` }}
+                  onDragStart={e => {
+                    dragIdRef.current = a.id;
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", String(a.id));
+                  }}
+                  onDragEnd={e => { dragIdRef.current = null; setOverCol(null); }}
+                  style={{ background: "#fff", borderRadius: 10, padding: "10px 12px", boxShadow: "0 1px 4px rgba(0,0,0,.06)", cursor: canEdit && !a.pendingConfirmation ? "grab" : "default", border: `1.5px solid ${a.pendingConfirmation ? T.amber : isOverdue(a) ? T.red : "transparent"}`, userSelect: "none", WebkitUserSelect: "none" }}
                   onClick={() => setSel(a)}>
                   <div style={{ fontSize: 11, color: T.text2, marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
                     <span style={{ fontFamily: "monospace" }}>{a.sn}</span><PBadge p={a.priority} />
@@ -3521,7 +3535,11 @@ function KanbanView({ fa, upStatus, canEdit, users, setSel }) {
                   {(a.messages || []).length > 0 && <div style={{ fontSize: 10, color: T.text2, marginTop: 4 }}>💬 {a.messages.length}</div>}
                 </div>
               ))}
-              {fa.filter(a => a.status === col).length === 0 && !isDragOver && <div style={{ textAlign: "center", padding: "20px 0", fontSize: 12, color: c.text, opacity: .4, border: `2px dashed ${c.dot}30`, borderRadius: 8 }}>Drop here</div>}
+              {fa.filter(a => a.status === col).length === 0 && (
+                <div style={{ textAlign: "center", padding: "28px 0", fontSize: 12, color: c.text, opacity: isDragOver ? 1 : .4, border: `2px dashed ${c.dot}${isDragOver ? "99" : "30"}`, borderRadius: 8, transition: "all .15s" }}>
+                  {isDragOver ? "⬇ Drop here" : "Drop here"}
+                </div>
+              )}
             </div>
           </div>
         );
