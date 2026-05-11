@@ -334,6 +334,10 @@ tbody tr:hover td{background:#FAFAFE;}tbody tr:last-child td{border-bottom:none;
 .fab{position:fixed;bottom:28px;right:28px;width:52px;height:52px;border-radius:50%;background:#272262;color:#fff;border:none;font-size:26px;cursor:pointer;box-shadow:0 6px 24px rgba(39,34,98,.35);display:flex;align-items:center;justify-content:center;z-index:200;transition:all .2s;}
 .fab:hover{background:#1A1653;transform:scale(1.08);}
 .drag-over{background:#EAE7F8!important;border:2px dashed #272262!important;}
+.kanban-card{transition:transform .15s,box-shadow .15s,opacity .15s;}
+.kanban-card:active{cursor:grabbing!important;}
+.kanban-card.is-dragging{opacity:.45;transform:scale(.97);box-shadow:none!important;}
+.kanban-card.is-lifted{transform:rotate(2deg) scale(1.04);box-shadow:0 16px 40px rgba(39,34,98,.22)!important;cursor:grabbing!important;z-index:10;}
 .confirm-banner{background:linear-gradient(90deg,#FEF9E7,#FFFDE0);border:1.5px solid #E69903;border-radius:10px;padding:12px 16px;animation:pulse 2s ease-in-out infinite;}
 `;
 /* ===================== MICRO COMPONENTS ===================== */
@@ -3491,58 +3495,150 @@ function BoardView({ fa, setSel, users }) {
 function KanbanView({ fa, upStatus, canEdit, users, setSel }) {
   const dragIdRef = useRef(null);
   const [overCol, setOverCol] = useState(null);
+  const [draggingId, setDraggingId] = useState(null);
+  const [heldId, setHeldId] = useState(null);
+  const holdTimerRef = useRef(null);
+
+  const HOLD_GLOW = {
+    "IN PROCESS":  { border: "#E69903", shadow: "0 0 0 3px rgba(230,153,3,.25), 0 8px 24px rgba(230,153,3,.18)",    bg: "#FFFBEF" },
+    "NOT STARTED": { border: "#7C80B0", shadow: "0 0 0 3px rgba(124,128,176,.25), 0 8px 24px rgba(124,128,176,.18)", bg: "#F4F3FB" },
+    "COMPLETED":   { border: "#27AE60", shadow: "0 0 0 3px rgba(39,174,96,.25),   0 8px 24px rgba(39,174,96,.18)",   bg: "#F0FBF5" },
+    "DROPPED":     { border: "#BDC3C7", shadow: "0 0 0 3px rgba(189,195,199,.25), 0 8px 24px rgba(189,195,199,.18)", bg: "#F8F9FA" },
+  };
+
+  const handleDragStart = (e, a) => {
+    clearTimeout(holdTimerRef.current);
+    setHeldId(null);
+    dragIdRef.current = a.id;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(a.id));
+    const ghost = e.currentTarget.cloneNode(true);
+    Object.assign(ghost.style, {
+      position: "fixed", top: "-1000px", left: "-1000px",
+      width: e.currentTarget.offsetWidth + "px",
+      transform: "rotate(2deg) scale(1.06)",
+      boxShadow: "0 20px 48px rgba(39,34,98,.30)",
+      borderRadius: "10px", opacity: "1",
+      border: "2px solid #272262",
+      background: "#fff", pointerEvents: "none",
+    });
+    document.body.appendChild(ghost);
+    e.dataTransfer.setDragImage(ghost, ghost.offsetWidth / 2, 28);
+    requestAnimationFrame(() => { ghost.remove(); setDraggingId(a.id); });
+  };
+
+  const handleMouseDown = (a) => {
+    if (!canEdit) return;
+    holdTimerRef.current = setTimeout(() => setHeldId(a.id), 120);
+  };
+  const handleMouseUp = () => { clearTimeout(holdTimerRef.current); setHeldId(null); };
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, alignItems: "start" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, alignItems: "start" }}>
       {STATUS_LIST.map(col => {
         const c = SC[col] || { bg: "#eee", text: "#333", dot: "#aaa" };
+        const glow = HOLD_GLOW[col] || { border: T.navy, shadow: "0 0 0 3px rgba(39,34,98,.2), 0 8px 24px rgba(39,34,98,.15)", bg: "#F4F3FB" };
         const isDragOver = overCol === col;
+        const colCards = fa.filter(a => a.status === col);
+
         return (
           <div key={col}
-            className={isDragOver ? "drag-over" : ""}
-            style={{ background: isDragOver ? c.dot + "30" : c.bg, borderRadius: 12, padding: 12, minHeight: 200, transition: "background .15s", outline: isDragOver ? `2px dashed ${c.dot}` : "none" }}
             onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (overCol !== col) setOverCol(col); }}
-            onDragLeave={e => {
-              // Only clear if leaving the column div itself, not a child element
-              if (!e.currentTarget.contains(e.relatedTarget)) setOverCol(null);
-            }}
+            onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setOverCol(null); }}
             onDrop={e => {
               e.preventDefault();
-              const id = dragIdRef.current;
-              if (id != null) upStatus(id, col);
+              const raw = e.dataTransfer.getData("text/plain");
+              const id = dragIdRef.current ?? (raw !== "" ? Number(raw) : null);
+              if (id != null && !isNaN(id)) upStatus(id, col);
               dragIdRef.current = null;
               setOverCol(null);
+            }}
+            style={{
+              borderRadius: 12,
+              border: isDragOver ? `2px dashed ${c.dot}` : "2px solid transparent",
+              background: isDragOver ? c.dot + "18" : c.bg,
+              transition: "background .18s, border-color .18s",
+              minHeight: 220,
             }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: c.text }}>{col}</span>
-              <span style={{ background: "#fff", color: c.text, borderRadius: 10, padding: "1px 8px", fontSize: 11, fontWeight: 700 }}>{fa.filter(a => a.status === col).length}</span>
+
+            {/* Column header */}
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "10px 12px 8px",
+              borderBottom: `2px solid ${c.dot}33`,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{
+                  width: 10, height: 10, borderRadius: "50%", background: c.dot,
+                  display: "inline-block", flexShrink: 0,
+                  boxShadow: isDragOver ? `0 0 0 3px ${c.dot}44` : "none",
+                  transition: "box-shadow .18s",
+                }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: c.text, letterSpacing: .3 }}>{col}</span>
+              </div>
+              <span style={{ background: "#fff", color: c.text, borderRadius: 20, padding: "1px 9px", fontSize: 11, fontWeight: 700 }}>{colCards.length}</span>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {fa.filter(a => a.status === col).map((a, idx) => (
-                <div key={a.id || `kanban-${idx}`}
-                  draggable={canEdit && !a.pendingConfirmation}
-                  onDragStart={e => {
-                    dragIdRef.current = a.id;
-                    e.dataTransfer.effectAllowed = "move";
-                    e.dataTransfer.setData("text/plain", String(a.id));
-                  }}
-                  onDragEnd={e => { dragIdRef.current = null; setOverCol(null); }}
-                  style={{ background: "#fff", borderRadius: 10, padding: "10px 12px", boxShadow: "0 1px 4px rgba(0,0,0,.06)", cursor: canEdit && !a.pendingConfirmation ? "grab" : "default", border: `1.5px solid ${a.pendingConfirmation ? T.amber : isOverdue(a) ? T.red : "transparent"}`, userSelect: "none", WebkitUserSelect: "none" }}
-                  onClick={() => setSel(a)}>
-                  <div style={{ fontSize: 11, color: T.text2, marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ fontFamily: "monospace" }}>{a.sn}</span><PBadge p={a.priority} />
+
+            {/* Drop indicator when dragging over an empty column */}
+            {isDragOver && colCards.length === 0 && (
+              <div style={{ margin: "10px 10px 0", padding: "18px 0", borderRadius: 8, border: `2px dashed ${c.dot}88`, textAlign: "center", fontSize: 12, color: c.dot, fontWeight: 600 }}>
+                ⬇ Drop here
+              </div>
+            )}
+
+            {/* Cards */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 10px 10px" }}>
+              {colCards.map((a, idx) => {
+                const isDragging = draggingId === a.id;
+                const isHeld = heldId === a.id;
+                const draggable = canEdit; // pendingConfirmation does not block dragging
+                return (
+                  <div key={a.id || `kanban-${idx}`}
+                    draggable={draggable}
+                    onMouseDown={() => handleMouseDown(a)}
+                    onMouseUp={handleMouseUp}
+                    onMouseLeave={handleMouseUp}
+                    onDragStart={e => handleDragStart(e, a)}
+                    onDragEnd={e => { dragIdRef.current = null; setOverCol(null); setDraggingId(null); setHeldId(null); }}
+                    onClick={() => { if (!isDragging) setSel(a); }}
+                    style={{
+                      background: isHeld ? glow.bg : "#fff",
+                      borderRadius: 10,
+                      padding: "10px 12px",
+                      cursor: draggable ? (isHeld ? "grabbing" : "grab") : "default",
+                      border: isHeld
+                        ? `1.5px solid ${glow.border}`
+                        : `1.5px solid ${a.pendingConfirmation ? T.amber : isOverdue(a) ? T.red : "transparent"}`,
+                      userSelect: "none", WebkitUserSelect: "none",
+                      position: "relative",
+                      opacity: isDragging ? 0.3 : 1,
+                      transform: isDragging ? "scale(0.95)" : isHeld ? "scale(1.025) translateY(-2px)" : "none",
+                      boxShadow: isDragging ? "none" : isHeld ? glow.shadow : "0 1px 6px rgba(0,0,0,.07)",
+                      transition: "opacity .15s, transform .18s, box-shadow .18s, border-color .15s, background .15s",
+                      zIndex: isHeld ? 2 : 1,
+                    }}>
+                    {/* Hold accent stripe */}
+                    {isHeld && (
+                      <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 3, borderRadius: "10px 10px 0 0", background: `linear-gradient(90deg,${glow.border},${glow.border}66)` }} />
+                    )}
+                    <div style={{ fontSize: 11, marginBottom: 5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontFamily: "monospace", fontSize: 10, color: isHeld ? glow.border : T.text2, fontWeight: isHeld ? 700 : 500, transition: "color .15s" }}>{a.sn}</span>
+                      <PBadge p={a.priority} />
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.45, marginBottom: 9, color: T.text }}>{a.text.slice(0, 65)}{a.text.length > 65 ? "…" : ""}</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <Avatar name={a.responsible} size={20} users={users || []} />
+                      <span style={{ fontSize: 10, color: isOverdue(a) ? T.red : T.text2 }}>{fmt(a.due)}</span>
+                    </div>
+                    {a.pendingConfirmation && <div style={{ fontSize: 10, color: T.amber, marginTop: 5, fontWeight: 600 }}>⏳ Pending</div>}
+                    {(a.messages || []).length > 0 && <div style={{ fontSize: 10, color: T.text2, marginTop: 4 }}>💬 {a.messages.length}</div>}
                   </div>
-                  <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.4, marginBottom: 8 }}>{a.text.slice(0, 65)}{a.text.length > 65 ? "…" : ""}</div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <Avatar name={a.responsible} size={22} users={users || []} />
-                    <span style={{ fontSize: 10, color: isOverdue(a) ? T.red : T.text2 }}>{fmt(a.due)}</span>
-                  </div>
-                  {a.pendingConfirmation && <div style={{ fontSize: 10, color: T.amber, marginTop: 4, fontWeight: 600 }}>⏳ Pending confirm</div>}
-                  {(a.messages || []).length > 0 && <div style={{ fontSize: 10, color: T.text2, marginTop: 4 }}>💬 {a.messages.length}</div>}
-                </div>
-              ))}
-              {fa.filter(a => a.status === col).length === 0 && (
-                <div style={{ textAlign: "center", padding: "28px 0", fontSize: 12, color: c.text, opacity: isDragOver ? 1 : .4, border: `2px dashed ${c.dot}${isDragOver ? "99" : "30"}`, borderRadius: 8, transition: "all .15s" }}>
-                  {isDragOver ? "⬇ Drop here" : "Drop here"}
+                );
+              })}
+              {/* Empty column drop zone when not dragging over */}
+              {colCards.length === 0 && !isDragOver && (
+                <div style={{ textAlign: "center", padding: "24px 0", fontSize: 12, color: c.dot, opacity: .35, border: `2px dashed ${c.dot}44`, borderRadius: 8 }}>
+                  Empty
                 </div>
               )}
             </div>
@@ -4499,181 +4595,4 @@ function useAPIBridge(actions, setActions, projects) {
 
 /* ===================== ERROR BOUNDARY ===================== */
 class ErrorBoundary extends React.Component {
-  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
-  static getDerivedStateFromError(error) { return { hasError: true, error }; }
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#F5F5FB", padding: 20, textAlign: "center" }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
-          <h1 style={{ fontFamily: "'Sora',sans-serif", fontSize: 20, color: "#272262", marginBottom: 8 }}>Something went wrong</h1>
-          <p style={{ color: "#636E72", fontSize: 13, maxWidth: 400, marginBottom: 20, lineHeight: 1.5 }}>{this.state.error?.message || "An unexpected error occurred."}</p>
-          <button className="btn btn-navy" onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}>Reload Application</button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-/* ===================== ROOT APP ===================== */
-export default function App() {
-  const [user, setUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem("mcs_session_user");
-      return saved ? JSON.parse(saved) : null;
-    } catch (e) { return null; }
-  });
-  const [audit, setAudit] = useState([]);
-  const [page, setPage] = useState(() => {
-    const saved = localStorage.getItem("mcs_session_page");
-    return saved ? parseInt(saved, 10) || 0 : 0;
-  });
-  const [showQuickAdd, setShowQuickAdd] = useState(false);
-
-  // ── Google Sheet live database ──
-  const {
-    dbReady, dbError, fetchData,
-    users, setUsers,
-    plants, setPlants,
-    depts, setDepts,
-    actions, setActions,
-    meetings, setMeetings,
-    projects, setProjects,
-    escMatrix, setEscMatrix,
-    permissions, setPermissions,
-    mtgPresets, setMtgPresets
-  } = useSheetDB({
-    defaultUsers: DEFAULT_USERS,
-    defaultPlants: DEFAULT_PLANTS,
-    defaultDepts: DEFAULT_DEPTS,
-    defaultActions: SEED_ACTIONS,
-    defaultMeetings: SEED_MEETINGS,
-    defaultProjects: SEED_PROJECTS,
-    defaultEscMatrix: DEFAULT_ESC_MATRIX,
-    defaultPermissions: DEFAULT_PERMISSIONS_SEED(),
-    defaultPresets: { attendeeMap: ATTENDEE_MAP, instructions: MTG_INSTRUCTIONS }
-  });
-  // Global active meeting — persists across page navigation
-  const [globalActiveMtg, setGlobalActiveMtg] = useState(null);
-  // Global meeting runtime state — persists when user navigates away from Work page
-  const [mtgRunning, setMtgRunning] = useState(false);
-  const [mtgElapsed, setMtgElapsed] = useState(0);
-  const [mtgTxLines, setMtgTxLines] = useState([]);
-  const [mtgFastActions, setMtgFastActions] = useState([]);
-  const [mtgInsights, setMtgInsights] = useState([]);
-  const mtgTxLineNo = useRef(0);
-  const mtgTimerRef = useRef(null);
-  const mtgTxRef = useRef(null);
-
-  // Persist session
-  useEffect(() => {
-    if (user) localStorage.setItem("mcs_session_user", JSON.stringify(user));
-    else localStorage.removeItem("mcs_session_user");
-  }, [user]);
-  useEffect(() => {
-    localStorage.setItem("mcs_session_page", page);
-  }, [page]);
-
-  // Global timer only — transcript now driven by real STT inside MeetingRoom
-  useEffect(() => {
-    if (mtgRunning && globalActiveMtg) {
-      mtgTimerRef.current = setInterval(() => setMtgElapsed(e => e + 1), 1000);
-    } else {
-      clearInterval(mtgTimerRef.current);
-    }
-    return () => clearInterval(mtgTimerRef.current);
-  }, [mtgRunning, globalActiveMtg]);
-
-  // Reset meeting state when meeting ends
-  const clearMeetingState = () => {
-    setGlobalActiveMtg(null); setMtgRunning(false); setMtgElapsed(0);
-    setMtgTxLines([]); setMtgFastActions([]); setMtgInsights([]); mtgTxLineNo.current = 0;
-  };
-
-  useAPIBridge(actions, setActions, projects);
-
-  useEffect(() => {
-    const t = setTimeout(() => runEscalation(actions, setAudit, escMatrix), 1500);
-    return () => clearTimeout(t);
-  }, [actions]);
-
-  const commitFinal = rows => {
-    setActions(p => {
-      const withSN = rows.map((r, i) => ({ ...r, sn: nextSN([...p, ...rows.slice(0, i)]), id: Date.now() + i, messages: r.messages || [], revisionHistory: r.revisionHistory || [], pendingConfirmation: false, allocatedBy: r.allocatedBy || user?.name || "" }));
-      return [...p, ...withSN];
-    });
-  };
-  const updateAction = (id, patch) => setActions(p => p.map(a => {
-    if (a.id !== id) return a;
-    if (patch.due && patch.due !== a.due) {
-      const rev = { date: todayStr(), from: a.due, to: patch.due, by: user?.name || "Unknown" };
-      return { ...a, ...patch, revisions: (a.revisions || 0) + 1, revisionHistory: [...(a.revisionHistory || []), rev] };
-    }
-    return { ...a, ...patch };
-  }));
-
-  const pendingForMe = actions.filter(a => {
-    if (!a.pendingConfirmation) return false;
-    const allocatorU = users.find(u => u.name === a.allocatedBy);
-    const allocSuperior = allocatorU?.superior ? users.find(u => u.name === allocatorU.superior) : null;
-    return user?.name === a.allocatedBy || user?.name === allocSuperior?.name || user?.role === "Admin";
-  }).length;
-
-  // Notification system
-  const { notifs, unread: unreadNotifs, markAllRead, markRead } = useNotifications(actions, audit, user);
-
-  // UI modals/panels
-  const [showSupport, setShowSupport] = useState(false);
-  const [showProfile, setShowProfile] = useState(false);
-  const [showAdminNotifs, setShowAdminNotifs] = useState(false);
-
-  // Loading screen while sheet initializes
-  if (!dbReady) return (
-    <ErrorBoundary>
-      <style>{CSS}</style>
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg,${T.navy} 0%,#3D378C 100%)`, gap: 16 }}>
-        <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 22, color: "#fff" }}>Management Control System</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, color: "rgba(255,255,255,.7)", fontSize: 13 }}>
-          <span style={{ width: 18, height: 18, border: "2px solid rgba(255,255,255,.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} />
-          {SHEET_ENABLED ? "Connecting to Google Sheet…" : "Loading…"}
-        </div>
-        {dbError && <div style={{ fontSize: 11, color: "#FEF3CD", marginTop: 4 }}>⚠ Sheet unavailable — using local data</div>}
-      </div>
-    </ErrorBoundary>
-  );
-
-  if (!user) return (<ErrorBoundary><style>{CSS}</style><LoginPage onLogin={acc => { setUser(acc); setPage(0); }} /></ErrorBoundary>);
-
-  return (
-    <ErrorBoundary>
-      <style>{CSS}</style>
-      <Shell page={page} setPage={setPage} user={user} onLogout={() => { setUser(null); setPage(0); clearMeetingState(); }} onQuickAdd={() => setShowQuickAdd(true)} pendingCount={pendingForMe} auditCount={audit.length} activeMtg={globalActiveMtg} onResumeActiveMtg={() => setPage(1)} mtgRunning={mtgRunning} mtgElapsed={mtgElapsed} notifications={notifs} unreadCount={unreadNotifs} onMarkAllRead={markAllRead} users={users} actions={actions} onShowSupport={() => setShowSupport(true)} onShowProfile={() => setShowProfile(true)} onShowAdminNotifs={() => setShowAdminNotifs(true)}>
-        {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} plants={plants} depts={depts} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} />}
-        {page === 1 && <WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows => { commitFinal(rows); clearMeetingState(); }} actions={actions} setActions={setActions} user={user} onProjectUpdate={updated => setProjects(p => p.map(x => x.id === updated.id ? updated : x))} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} permissions={permissions} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); }} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState} />}
-        {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} />}
-        {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} />}
-        {page === 4 && <EscalationsPage actions={actions} audit={audit} user={user} setPage={setPage} users={users} plants={plants} setActions={setActions} />}
-        {page === 99 && user?.role === "Admin" && <MasterPage plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} permissions={permissions} setPermissions={setPermissions} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets} />}
-      </Shell>
-      {showSupport && <SupportModal user={user} onClose={() => setShowSupport(false)} />}
-      {showProfile && <UserProfilePanel user={user} users={users} actions={actions} onClose={() => setShowProfile(false)} />}
-      {showAdminNotifs && user?.role === "Admin" && <AdminNotifManager users={users} onClose={() => setShowAdminNotifs(false)} />}
-      {showQuickAdd && (
-        <AddActionPanel
-          users={users} plants={plants} depts={depts}
-          defaultPlant={user?.plant === "All" ? "" : user?.plant}
-          defaultSrc="Quick Add"
-          projects={projects}
-          currentUser={user}
-          onSave={a => {
-            const newAction = { ...a, id: Date.now(), sn: nextSN(actions), dateOfAction: todayStr(), revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null, status: "IN PROCESS", messages: [], pendingConfirmation: false, allocatedBy: user?.name || "" };
-            setActions(p => [...p, newAction]);
-            setShowQuickAdd(false);
-          }}
-          onClose={() => setShowQuickAdd(false)}
-        />
-      )}
-    </ErrorBoundary>
-  );
-}
+  constructor(props) { super(props); this.state = { hasError: false, error: null
