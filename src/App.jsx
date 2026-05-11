@@ -448,10 +448,12 @@ function LoginPage({ onLogin }) {
           </span>
         </div>
         <div style={{ marginBottom: 14 }}><Lbl t="Username" req /><input value={u} onChange={e => setU(e.target.value)} placeholder="Enter your username" onKeyDown={e => e.key === "Enter" && tryLogin()} /></div>
-        <div style={{ marginBottom: 20, position: "relative" }}>
+        <div style={{ marginBottom: 20 }}>
           <Lbl t="Password" req />
-          <input ref={pw} type={showPw ? "text" : "password"} placeholder="••••••••" onKeyDown={e => e.key === "Enter" && tryLogin()} style={{ paddingRight: 44 }} />
-          <button onClick={() => setShowPw(p => !p)} style={{ position: "absolute", right: 12, top: 26, border: "none", background: "transparent", cursor: "pointer", fontSize: 16, color: T.text2 }}>{showPw ? "🙈" : "👁"}</button>
+          <div style={{ position: "relative" }}>
+            <input ref={pw} type={showPw ? "text" : "password"} placeholder="••••••••" onKeyDown={e => e.key === "Enter" && tryLogin()} style={{ paddingRight: 44 }} />
+            <button onClick={() => setShowPw(p => !p)} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", cursor: "pointer", fontSize: 16, color: T.text2, lineHeight: 1, padding: 0, display: "flex", alignItems: "center" }}>{showPw ? "🙈" : "👁"}</button>
+          </div>
         </div>
         {errMsg && <div style={{ background: T.redL, color: T.red, padding: "8px 12px", borderRadius: 8, fontSize: 12, marginBottom: 14, fontWeight: 500 }}>{errMsg}</div>}
         <button className="btn btn-navy" style={{ width: "100%", justifyContent: "center", fontSize: 14, padding: "12px 0" }} onClick={tryLogin} disabled={loading}>
@@ -1551,7 +1553,14 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
     });
   });
 
-  if (activeMtg) return <MeetingRoom mtg={activeMtg} plants={plants} depts={depts} users={users} onCommit={rows => { onCommitFinal(rows); }} onCloseMeeting={() => { clearMeetingState && clearMeetingState(); setPage(0); }} onBack={() => setPage(0)} prevActions={actions} relatedActions={actions.filter(a => a.src === activeMtg.type || (activeMtg.project && a.project === activeMtg.project))} running={mtgRunning} setRunning={setMtgRunning} elapsed={mtgElapsed} txLines={mtgTxLines} setTxLines={setMtgTxLines} fastActions={mtgFastActions} setFastActions={setMtgFastActions} insights={mtgInsights} setInsights={setMtgInsights} currentUser={user} mtgPresets={mtgPresets} setActions={setActions} />;
+  if (activeMtg) return <MeetingRoom mtg={activeMtg} plants={plants} depts={depts} users={users} onCommit={rows => { onCommitFinal(rows); }} onCloseMeeting={() => { clearMeetingState && clearMeetingState(); setPage(0); }} onBack={() => setPage(0)} prevActions={actions} relatedActions={actions.filter(a => {
+          // Match by specific meeting instance (srcId) when available, else fall back to type match
+          const matchesMeeting = activeMtg.id
+            ? (a.srcId === activeMtg.id || (!a.srcId && a.src === activeMtg.type))
+            : a.src === activeMtg.type;
+          const matchesProject = activeMtg.project && a.project === activeMtg.project;
+          return matchesMeeting || matchesProject;
+        })} running={mtgRunning} setRunning={setMtgRunning} elapsed={mtgElapsed} txLines={mtgTxLines} setTxLines={setMtgTxLines} fastActions={mtgFastActions} setFastActions={setMtgFastActions} insights={mtgInsights} setInsights={setMtgInsights} currentUser={user} mtgPresets={mtgPresets} setActions={setActions} />;
 
   return (
     <div className="fade-in">
@@ -2262,6 +2271,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
         priority: a.priority || "NORMAL",
         section: a.section || "General",
         src: mtg.type,
+        srcId: mtg.id || null,
         plant: mtg.plant,
         status: "IN PROCESS",
         revisions: 0, revisionHistory: [],
@@ -2276,7 +2286,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
     );
     // Also include manually fast-logged actions
     const fromFast = (Array.isArray(fastActions) ? fastActions : []).filter(a => a.text?.trim()).map((a, i) => ({
-      ...a, id: Date.now() + 1000 + i, src: mtg.type, plant: mtg.plant,
+      ...a, id: Date.now() + 1000 + i, src: mtg.type, srcId: mtg.id || null, plant: mtg.plant,
       section: a.section || "General", status: "IN PROCESS", priority: a.priority || "NORMAL",
       revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null,
       dateOfAction: todayStr(), project: mtg.project || null, messages: [], pendingConfirmation: false
@@ -3257,7 +3267,19 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     }
     return { ...a, ...patch };
   }));
-  const upStatus = (id, status) => upAction(id, { status, closedOn: status === "COMPLETED" ? todayStr() : null, pendingConfirmation: false });
+  const upStatus = (id, status) => {
+    // If moving a pendingConfirmation action to COMPLETED, clear any
+    // PENDING CONFIRM-only status filter so the card stays visible in COMPLETED column.
+    if (status === "COMPLETED") {
+      setFiltersPersist(f => {
+        if (f.status.length > 0 && f.status.includes("PENDING CONFIRM") && !f.status.includes("COMPLETED")) {
+          return { ...f, status: [...f.status, "COMPLETED"] };
+        }
+        return f;
+      });
+    }
+    upAction(id, { status, closedOn: status === "COMPLETED" ? todayStr() : null, pendingConfirmation: false });
+  };
   const allSections = [...new Set(scoped.map(a => a.section))].filter(Boolean);
   const allResponsible = [...new Set(scoped.map(a => a.responsible))].filter(Boolean);
   const pendingConf = scoped.filter(a => a.pendingConfirmation && a.status !== "COMPLETED" && a.status !== "DROPPED");
@@ -4473,126 +4495,4 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
                   <Lbl t="Default Attendees" />
                   <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 150, overflowY: "auto", padding: 8, background: "#fff", border: `1px solid ${T.border}`, borderRadius: 8 }}>
                     {users.map(u => (
-                      <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, cursor: "pointer" }}>
-                        <input type="checkbox" checked={(mtgPresets?.attendeeMap?.[type] || []).includes(u.name)}
-                          onChange={e => {
-                            const cur = mtgPresets?.attendeeMap?.[type] || [];
-                            const next = e.target.checked ? [...cur, u.name] : cur.filter(n => n !== u.name);
-                            setMtgPresets(prev => ({ ...prev, attendeeMap: { ...prev.attendeeMap, [type]: next } }));
-                          }} />
-                        {u.name}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <Lbl t="Default Guidelines / Instructions (one per line)" />
-                  <textarea value={(mtgPresets?.instructions?.[type] || []).join("\n")}
-                    onChange={e => {
-                      const next = e.target.value.split("\n").filter(l => l.trim() !== "");
-                      setMtgPresets(prev => ({ ...prev, instructions: { ...prev.instructions, [type]: next } }));
-                    }}
-                    style={{ fontSize: 12, height: 150, resize: "none" }} />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>}
-
-      {modal && <div className="overlay" onClick={close}><div className="modal" style={{ width: 520, padding: 28 }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-          <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 16, fontWeight: 800, color: T.navy }}>{modal.mode === "add" ? "Add" : "Edit"} {modal.type === "users" ? "User" : modal.type === "plants" ? "Plant" : "Department"}</h2>
-          <button onClick={close} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 22, color: T.text2 }}>x</button>
-        </div>
-        {modal.type === "users" && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div style={{ gridColumn: "1/-1" }}><Lbl t="Full Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-          <div><Lbl t="Role" req /><select value={form.role || ""} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}><option value="">Select</option>{["MD", "Plant Head", "HOD", "Shift Engineer", "Supervisor", "Operator"].map(r => <option key={r}>{r}</option>)}</select></div>
-          <div><Lbl t="Plant" req /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value }))}><option value="">Select</option><option>All</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
-          <div><Lbl t="Department" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select</option>{depts.map(d => <option key={d.id}>{d.name}</option>)}</select></div>
-          <div><Lbl t="Superior (Reports To)" /><select value={form.superior || ""} onChange={e => setForm(f => ({ ...f, superior: e.target.value }))}><option value="">None (Top level)</option>{users.filter(u => u.id !== form.id).map(u => <option key={u.id} value={u.name}>{u.name} ({u.role})</option>)}</select></div>
-          <div style={{ gridColumn: "1/-1" }}><Lbl t="Phone Number" /><input value={form.phone || ""} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+91-98000-00000" /></div>
-          <div style={{ gridColumn: "1/-1" }}><Lbl t="Email Address" /><input type="email" value={form.email || ""} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@company.com" /></div>
-          <div style={{ gridColumn: "1/-1", display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={saveUser}>Save</button></div>
-        </div>}
-        {modal.type === "plants" && <div style={{ display: "grid", gap: 12 }}>
-          <div><Lbl t="Plant Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-          <div><Lbl t="Location" /><input value={form.location || ""} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} /></div>
-          <div><Lbl t="Plant Head" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
-          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const p = { ...form, id: form.id || "P" + String(plants.length + 1) }; if (modal.mode === "edit") setPlants(pp => pp.map(x => x.id === p.id ? p : x)); else setPlants(pp => [...pp, p]); close(); }}>Save</button></div>
-        </div>}
-        {modal.type === "depts" && <div style={{ display: "grid", gap: 12 }}>
-          <div><Lbl t="Dept Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-          <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 10 }}>
-            <div><Lbl t="Icon" /><input value={form.icon || ""} onChange={e => setForm(f => ({ ...f, icon: e.target.value }))} /></div>
-            <div><Lbl t="HOD" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
-          </div>
-          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const d = { ...form, id: form.id || "D" + String(depts.length + 1), icon: form.icon || "🔹" }; if (modal.mode === "edit") setDepts(pp => pp.map(x => x.id === d.id ? d : x)); else setDepts(pp => [...pp, d]); close(); }}>Save</button></div>
-        </div>}
-      </div></div>}
-    </div>
-  );
-}
-
-/* ===================== API BRIDGE ===================== */
-/* Minimal REST-like API bridge — exposes actions data via a global object
-   that external apps can read/write via postMessage or window.MCS_API.
-   Usage:
-     window.MCS_API.getActions()         → all current actions
-     window.MCS_API.getAction(id)        → specific action
-     window.MCS_API.updateAction(id, patch) → update an action
-     window.MCS_API.addAction(action)    → add a new action
-   
-   Via postMessage (iframe integration):
-     window.postMessage({type:"MCS_GET_ACTIONS"},"*")
-     → response: {type:"MCS_ACTIONS_RESULT",data:[...]}
-   
-   This satisfies requirement #6 — API/MCP integration option.
-*/
-function useAPIBridge(actions, setActions, projects) {
-  const actionsRef = useRef(actions);
-  useEffect(() => { actionsRef.current = actions; }, [actions]);
-
-  useEffect(() => {
-    // Expose global API
-    window.MCS_API = {
-      version: "1.0.0",
-      getActions: () => actionsRef.current,
-      getAction: (id) => actionsRef.current.find(a => a.id === id || a.sn === id),
-      updateAction: (id, patch) => setActions(p => p.map(a => a.id === id ? { ...a, ...patch } : a)),
-      addAction: (action) => setActions(p => [...p, { ...action, id: Date.now(), sn: nextSN(p), created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false }]),
-      getProjects: () => projects,
-    };
-    // postMessage bridge
-    const handler = (e) => {
-      if (!e.data || typeof e.data !== "object") return;
-      switch (e.data.type) {
-        case "MCS_GET_ACTIONS":
-          e.source?.postMessage({ type: "MCS_ACTIONS_RESULT", data: actionsRef.current, ok: true }, "*");
-          break;
-        case "MCS_GET_ACTION":
-          e.source?.postMessage({ type: "MCS_ACTION_RESULT", data: actionsRef.current.find(a => a.id === e.data.id), ok: true }, "*");
-          break;
-        case "MCS_UPDATE_ACTION":
-          setActions(p => p.map(a => a.id === e.data.id ? { ...a, ...e.data.patch } : a));
-          e.source?.postMessage({ type: "MCS_UPDATE_OK", id: e.data.id, ok: true }, "*");
-          break;
-        case "MCS_ADD_ACTION":
-          const newA = { ...e.data.action, id: Date.now(), sn: nextSN(actionsRef.current), created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false };
-          setActions(p => [...p, newA]);
-          e.source?.postMessage({ type: "MCS_ADD_OK", action: newA, ok: true }, "*");
-          break;
-        case "MCS_GET_PROJECTS":
-          e.source?.postMessage({ type: "MCS_PROJECTS_RESULT", data: projects, ok: true }, "*");
-          break;
-        default: break;
-      }
-    };
-    window.addEventListener("message", handler);
-    return () => { window.removeEventListener("message", handler); delete window.MCS_API; };
-  }, [setActions, projects]);
-}
-
-/* ===================== ERROR BOUNDARY ===================== */
-class ErrorBoundary extends React.Component {
-  constructor(props) { super(props); this.state = { hasError: false, error: null
+                      <label key={u.id}
