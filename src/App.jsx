@@ -4495,4 +4495,303 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
                   <Lbl t="Default Attendees" />
                   <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 150, overflowY: "auto", padding: 8, background: "#fff", border: `1px solid ${T.border}`, borderRadius: 8 }}>
                     {users.map(u => (
-                      <label key={u.id}
+                      <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, cursor: "pointer" }}>
+                        <input type="checkbox" checked={(mtgPresets?.attendeeMap?.[type] || []).includes(u.name)}
+                          onChange={e => {
+                            const cur = mtgPresets?.attendeeMap?.[type] || [];
+                            const next = e.target.checked ? [...cur, u.name] : cur.filter(n => n !== u.name);
+                            setMtgPresets(prev => ({ ...prev, attendeeMap: { ...prev.attendeeMap, [type]: next } }));
+                          }} />
+                        {u.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <Lbl t="Default Guidelines / Instructions (one per line)" />
+                  <textarea value={(mtgPresets?.instructions?.[type] || []).join("\n")}
+                    onChange={e => {
+                      const next = e.target.value.split("\n").filter(l => l.trim() !== "");
+                      setMtgPresets(prev => ({ ...prev, instructions: { ...prev.instructions, [type]: next } }));
+                    }}
+                    style={{ fontSize: 12, height: 150, resize: "none" }} />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>}
+
+      {modal && <div className="overlay" onClick={close}><div className="modal" style={{ width: 520, padding: 28 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+          <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 16, fontWeight: 800, color: T.navy }}>{modal.mode === "add" ? "Add" : "Edit"} {modal.type === "users" ? "User" : modal.type === "plants" ? "Plant" : "Department"}</h2>
+          <button onClick={close} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 22, color: T.text2 }}>x</button>
+        </div>
+        {modal.type === "users" && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div style={{ gridColumn: "1/-1" }}><Lbl t="Full Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+          <div><Lbl t="Role" req /><select value={form.role || ""} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}><option value="">Select</option>{["MD", "Plant Head", "HOD", "Shift Engineer", "Supervisor", "Operator"].map(r => <option key={r}>{r}</option>)}</select></div>
+          <div><Lbl t="Plant" req /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value }))}><option value="">Select</option><option>All</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
+          <div><Lbl t="Department" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select</option>{depts.map(d => <option key={d.id}>{d.name}</option>)}</select></div>
+          <div><Lbl t="Superior (Reports To)" /><select value={form.superior || ""} onChange={e => setForm(f => ({ ...f, superior: e.target.value }))}><option value="">None (Top level)</option>{users.filter(u => u.id !== form.id).map(u => <option key={u.id} value={u.name}>{u.name} ({u.role})</option>)}</select></div>
+          <div style={{ gridColumn: "1/-1" }}><Lbl t="Phone Number" /><input value={form.phone || ""} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+91-98000-00000" /></div>
+          <div style={{ gridColumn: "1/-1" }}><Lbl t="Email Address" /><input type="email" value={form.email || ""} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@company.com" /></div>
+          <div style={{ gridColumn: "1/-1", display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={saveUser}>Save</button></div>
+        </div>}
+        {modal.type === "plants" && <div style={{ display: "grid", gap: 12 }}>
+          <div><Lbl t="Plant Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+          <div><Lbl t="Location" /><input value={form.location || ""} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} /></div>
+          <div><Lbl t="Plant Head" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const p = { ...form, id: form.id || "P" + String(plants.length + 1) }; if (modal.mode === "edit") setPlants(pp => pp.map(x => x.id === p.id ? p : x)); else setPlants(pp => [...pp, p]); close(); }}>Save</button></div>
+        </div>}
+        {modal.type === "depts" && <div style={{ display: "grid", gap: 12 }}>
+          <div><Lbl t="Dept Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+          <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 10 }}>
+            <div><Lbl t="Icon" /><input value={form.icon || ""} onChange={e => setForm(f => ({ ...f, icon: e.target.value }))} /></div>
+            <div><Lbl t="HOD" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
+          </div>
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const d = { ...form, id: form.id || "D" + String(depts.length + 1), icon: form.icon || "🔹" }; if (modal.mode === "edit") setDepts(pp => pp.map(x => x.id === d.id ? d : x)); else setDepts(pp => [...pp, d]); close(); }}>Save</button></div>
+        </div>}
+      </div></div>}
+    </div>
+  );
+}
+
+/* ===================== API BRIDGE ===================== */
+/* Minimal REST-like API bridge — exposes actions data via a global object
+   that external apps can read/write via postMessage or window.MCS_API.
+   Usage:
+     window.MCS_API.getActions()         → all current actions
+     window.MCS_API.getAction(id)        → specific action
+     window.MCS_API.updateAction(id, patch) → update an action
+     window.MCS_API.addAction(action)    → add a new action
+   
+   Via postMessage (iframe integration):
+     window.postMessage({type:"MCS_GET_ACTIONS"},"*")
+     → response: {type:"MCS_ACTIONS_RESULT",data:[...]}
+   
+   This satisfies requirement #6 — API/MCP integration option.
+*/
+function useAPIBridge(actions, setActions, projects) {
+  const actionsRef = useRef(actions);
+  useEffect(() => { actionsRef.current = actions; }, [actions]);
+
+  useEffect(() => {
+    // Expose global API
+    window.MCS_API = {
+      version: "1.0.0",
+      getActions: () => actionsRef.current,
+      getAction: (id) => actionsRef.current.find(a => a.id === id || a.sn === id),
+      updateAction: (id, patch) => setActions(p => p.map(a => a.id === id ? { ...a, ...patch } : a)),
+      addAction: (action) => setActions(p => [...p, { ...action, id: Date.now(), sn: nextSN(p), created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false }]),
+      getProjects: () => projects,
+    };
+    // postMessage bridge
+    const handler = (e) => {
+      if (!e.data || typeof e.data !== "object") return;
+      switch (e.data.type) {
+        case "MCS_GET_ACTIONS":
+          e.source?.postMessage({ type: "MCS_ACTIONS_RESULT", data: actionsRef.current, ok: true }, "*");
+          break;
+        case "MCS_GET_ACTION":
+          e.source?.postMessage({ type: "MCS_ACTION_RESULT", data: actionsRef.current.find(a => a.id === e.data.id), ok: true }, "*");
+          break;
+        case "MCS_UPDATE_ACTION":
+          setActions(p => p.map(a => a.id === e.data.id ? { ...a, ...e.data.patch } : a));
+          e.source?.postMessage({ type: "MCS_UPDATE_OK", id: e.data.id, ok: true }, "*");
+          break;
+        case "MCS_ADD_ACTION":
+          const newA = { ...e.data.action, id: Date.now(), sn: nextSN(actionsRef.current), created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false };
+          setActions(p => [...p, newA]);
+          e.source?.postMessage({ type: "MCS_ADD_OK", action: newA, ok: true }, "*");
+          break;
+        case "MCS_GET_PROJECTS":
+          e.source?.postMessage({ type: "MCS_PROJECTS_RESULT", data: projects, ok: true }, "*");
+          break;
+        default: break;
+      }
+    };
+    window.addEventListener("message", handler);
+    return () => { window.removeEventListener("message", handler); delete window.MCS_API; };
+  }, [setActions, projects]);
+}
+
+/* ===================== ERROR BOUNDARY ===================== */
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#F5F5FB", padding: 20, textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+          <h1 style={{ fontFamily: "'Sora',sans-serif", fontSize: 20, color: "#272262", marginBottom: 8 }}>Something went wrong</h1>
+          <p style={{ color: "#636E72", fontSize: 13, maxWidth: 400, marginBottom: 20, lineHeight: 1.5 }}>{this.state.error?.message || "An unexpected error occurred."}</p>
+          <button className="btn btn-navy" onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}>Reload Application</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+/* ===================== ROOT APP ===================== */
+export default function App() {
+  const [user, setUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem("mcs_session_user");
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) { return null; }
+  });
+  const [audit, setAudit] = useState([]);
+  const [page, setPage] = useState(() => {
+    const saved = localStorage.getItem("mcs_session_page");
+    return saved ? parseInt(saved, 10) || 0 : 0;
+  });
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
+
+  // ── Google Sheet live database ──
+  const {
+    dbReady, dbError, fetchData,
+    users, setUsers,
+    plants, setPlants,
+    depts, setDepts,
+    actions, setActions,
+    meetings, setMeetings,
+    projects, setProjects,
+    escMatrix, setEscMatrix,
+    permissions, setPermissions,
+    mtgPresets, setMtgPresets
+  } = useSheetDB({
+    defaultUsers: DEFAULT_USERS,
+    defaultPlants: DEFAULT_PLANTS,
+    defaultDepts: DEFAULT_DEPTS,
+    defaultActions: SEED_ACTIONS,
+    defaultMeetings: SEED_MEETINGS,
+    defaultProjects: SEED_PROJECTS,
+    defaultEscMatrix: DEFAULT_ESC_MATRIX,
+    defaultPermissions: DEFAULT_PERMISSIONS_SEED(),
+    defaultPresets: { attendeeMap: ATTENDEE_MAP, instructions: MTG_INSTRUCTIONS }
+  });
+  // Global active meeting — persists across page navigation
+  const [globalActiveMtg, setGlobalActiveMtg] = useState(null);
+  // Global meeting runtime state — persists when user navigates away from Work page
+  const [mtgRunning, setMtgRunning] = useState(false);
+  const [mtgElapsed, setMtgElapsed] = useState(0);
+  const [mtgTxLines, setMtgTxLines] = useState([]);
+  const [mtgFastActions, setMtgFastActions] = useState([]);
+  const [mtgInsights, setMtgInsights] = useState([]);
+  const mtgTxLineNo = useRef(0);
+  const mtgTimerRef = useRef(null);
+  const mtgTxRef = useRef(null);
+
+  // Persist session
+  useEffect(() => {
+    if (user) localStorage.setItem("mcs_session_user", JSON.stringify(user));
+    else localStorage.removeItem("mcs_session_user");
+  }, [user]);
+  useEffect(() => {
+    localStorage.setItem("mcs_session_page", page);
+  }, [page]);
+
+  // Global timer only — transcript now driven by real STT inside MeetingRoom
+  useEffect(() => {
+    if (mtgRunning && globalActiveMtg) {
+      mtgTimerRef.current = setInterval(() => setMtgElapsed(e => e + 1), 1000);
+    } else {
+      clearInterval(mtgTimerRef.current);
+    }
+    return () => clearInterval(mtgTimerRef.current);
+  }, [mtgRunning, globalActiveMtg]);
+
+  // Reset meeting state when meeting ends
+  const clearMeetingState = () => {
+    setGlobalActiveMtg(null); setMtgRunning(false); setMtgElapsed(0);
+    setMtgTxLines([]); setMtgFastActions([]); setMtgInsights([]); mtgTxLineNo.current = 0;
+  };
+
+  useAPIBridge(actions, setActions, projects);
+
+  useEffect(() => {
+    const t = setTimeout(() => runEscalation(actions, setAudit, escMatrix), 1500);
+    return () => clearTimeout(t);
+  }, [actions]);
+
+  const commitFinal = rows => {
+    setActions(p => {
+      const withSN = rows.map((r, i) => ({ ...r, sn: nextSN([...p, ...rows.slice(0, i)]), id: Date.now() + i, messages: r.messages || [], revisionHistory: r.revisionHistory || [], pendingConfirmation: false, allocatedBy: r.allocatedBy || user?.name || "" }));
+      return [...p, ...withSN];
+    });
+  };
+  const updateAction = (id, patch) => setActions(p => p.map(a => {
+    if (a.id !== id) return a;
+    if (patch.due && patch.due !== a.due) {
+      const rev = { date: todayStr(), from: a.due, to: patch.due, by: user?.name || "Unknown" };
+      return { ...a, ...patch, revisions: (a.revisions || 0) + 1, revisionHistory: [...(a.revisionHistory || []), rev] };
+    }
+    return { ...a, ...patch };
+  }));
+
+  const pendingForMe = actions.filter(a => {
+    if (!a.pendingConfirmation) return false;
+    const allocatorU = users.find(u => u.name === a.allocatedBy);
+    const allocSuperior = allocatorU?.superior ? users.find(u => u.name === allocatorU.superior) : null;
+    return user?.name === a.allocatedBy || user?.name === allocSuperior?.name || user?.role === "Admin";
+  }).length;
+
+  // Notification system
+  const { notifs, unread: unreadNotifs, markAllRead, markRead } = useNotifications(actions, audit, user);
+
+  // UI modals/panels
+  const [showSupport, setShowSupport] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [showAdminNotifs, setShowAdminNotifs] = useState(false);
+
+  // Loading screen while sheet initializes
+  if (!dbReady) return (
+    <ErrorBoundary>
+      <style>{CSS}</style>
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg,${T.navy} 0%,#3D378C 100%)`, gap: 16 }}>
+        <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 22, color: "#fff" }}>Management Control System</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, color: "rgba(255,255,255,.7)", fontSize: 13 }}>
+          <span style={{ width: 18, height: 18, border: "2px solid rgba(255,255,255,.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} />
+          {SHEET_ENABLED ? "Connecting to Google Sheet…" : "Loading…"}
+        </div>
+        {dbError && <div style={{ fontSize: 11, color: "#FEF3CD", marginTop: 4 }}>⚠ Sheet unavailable — using local data</div>}
+      </div>
+    </ErrorBoundary>
+  );
+
+  if (!user) return (<ErrorBoundary><style>{CSS}</style><LoginPage onLogin={acc => { setUser(acc); setPage(0); }} /></ErrorBoundary>);
+
+  return (
+    <ErrorBoundary>
+      <style>{CSS}</style>
+      <Shell page={page} setPage={setPage} user={user} onLogout={() => { setUser(null); setPage(0); clearMeetingState(); }} onQuickAdd={() => setShowQuickAdd(true)} pendingCount={pendingForMe} auditCount={audit.length} activeMtg={globalActiveMtg} onResumeActiveMtg={() => setPage(1)} mtgRunning={mtgRunning} mtgElapsed={mtgElapsed} notifications={notifs} unreadCount={unreadNotifs} onMarkAllRead={markAllRead} users={users} actions={actions} onShowSupport={() => setShowSupport(true)} onShowProfile={() => setShowProfile(true)} onShowAdminNotifs={() => setShowAdminNotifs(true)}>
+        {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} plants={plants} depts={depts} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} />}
+        {page === 1 && <WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows => { commitFinal(rows); clearMeetingState(); }} actions={actions} setActions={setActions} user={user} onProjectUpdate={updated => setProjects(p => p.map(x => x.id === updated.id ? updated : x))} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} permissions={permissions} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); }} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState} />}
+        {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} />}
+        {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} />}
+        {page === 4 && <EscalationsPage actions={actions} audit={audit} user={user} setPage={setPage} users={users} plants={plants} setActions={setActions} />}
+        {page === 99 && user?.role === "Admin" && <MasterPage plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} permissions={permissions} setPermissions={setPermissions} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets} />}
+      </Shell>
+      {showSupport && <SupportModal user={user} onClose={() => setShowSupport(false)} />}
+      {showProfile && <UserProfilePanel user={user} users={users} actions={actions} onClose={() => setShowProfile(false)} />}
+      {showAdminNotifs && user?.role === "Admin" && <AdminNotifManager users={users} onClose={() => setShowAdminNotifs(false)} />}
+      {showQuickAdd && (
+        <AddActionPanel
+          users={users} plants={plants} depts={depts}
+          defaultPlant={user?.plant === "All" ? "" : user?.plant}
+          defaultSrc="Quick Add"
+          projects={projects}
+          currentUser={user}
+          onSave={a => {
+            const newAction = { ...a, id: Date.now(), sn: nextSN(actions), dateOfAction: todayStr(), revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null, status: "IN PROCESS", messages: [], pendingConfirmation: false, allocatedBy: user?.name || "" };
+            setActions(p => [...p, newAction]);
+            setShowQuickAdd(false);
+          }}
+          onClose={() => setShowQuickAdd(false)}
+        />
+      )}
+    </ErrorBoundary>
+  );
+}
