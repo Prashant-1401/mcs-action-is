@@ -177,6 +177,11 @@ async def health():
         "smtp_configured": bool(SMTP_USER and SMTP_PASS),
     }
 
+@app.get("/api/ping")
+async def ping():
+    """Lightweight wakeup endpoint — called by frontend on meeting start to warm up the Render instance."""
+    return {"ok": True, "gemini_ready": bool(gemini_client)}
+
 @app.post("/api/email/escalate")
 async def email_escalate(req: EmailEscalateReq):
     subject = f"Escalation Alert Level {req.level} — {req.target}"
