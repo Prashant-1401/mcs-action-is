@@ -955,11 +955,17 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   const subs = user ? getSubordinates(user.name, users) : [];
   const subNames = subs.map(u => u.name);
   const myDept = user?.dept || "";
-  const scopedActions = actions.filter(a =>
-    a.responsible === user?.name ||
-    subNames.includes(a.responsible) ||
-    (myDept && (users.find(u => u.name === a.responsible)?.dept === myDept))
-  );
+  // Normalize name comparisons — Sheet data may have trailing spaces/casing differences
+  const userName = (user?.name || "").trim().toLowerCase();
+  const subNamesLower = subNames.map(n => n.trim().toLowerCase());
+  const scopedActions = actions.filter(a => {
+    const resp = (a.responsible || "").trim().toLowerCase();
+    return (
+      (userName && resp === userName) ||
+      subNamesLower.includes(resp) ||
+      (myDept && (users.find(u => (u.name || "").trim().toLowerCase() === resp)?.dept === myDept))
+    );
+  });
 
   const total = scopedActions.length;
   const comp = scopedActions.filter(a => a.status === "COMPLETED").length;
@@ -969,7 +975,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   const crit = scopedActions.filter(a => a.priority === "CRITICAL" && a.status !== "COMPLETED" && a.status !== "DROPPED").length;
 
   // Fix 2 & 4: My open actions as Responsible — clickable, opens side panel
-  const myOwn = actions.filter(a => a.responsible === user?.name && a.status !== "COMPLETED" && a.status !== "DROPPED")
+  const myOwn = actions.filter(a => (a.responsible || "").trim().toLowerCase() === userName && userName && a.status !== "COMPLETED" && a.status !== "DROPPED")
     .sort((a, b) => {
       if (!a.due && !b.due) return 0;
       if (!a.due) return 1;
@@ -1999,7 +2005,8 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   // Separate fail counters so translate failures don't block Gemini insights
   const translateFailRef = useRef(0);
   const analyzeFailRef = useRef(0);
-  const API_FAIL_LIMIT = 3;
+  // Increased from 3 to 5 — Render cold-start can eat 2-3 timeouts before warming up
+  const API_FAIL_LIMIT = 5;
   const apiFailCountRef = analyzeFailRef; // alias kept for any other usages
 
   const txRef = useRef(null);
@@ -2008,7 +2015,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   const paraBufferRef = useRef(""); // accumulates words between silences
   // 2-minute batch analysis refs
   const batchTimerRef = useRef(null);
-  const lastAnalyzedIdxRef = useRef(0); // tracks which txLines were already analyzed
+  const lastAnalyzedCharCountRef = useRef(0); // tracks total chars of txLines already analyzed
   const [batchCountdown, setBatchCountdown] = useState(120); // seconds until next analysis
   const batchCountdownRef = useRef(null);
   const instructions = mtgPresets?.instructions?.[mtg.type] || ["Follow meeting agenda", "Capture all action points", "Assign clear owners and due dates", "Confirm previous actions before closing"];
@@ -2198,9 +2205,24 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
       clearInterval(batchCountdownRef.current);
       return;
     }
-    // Reset countdown
+    // ── Reset all failure counters on every meeting start ──────────────────
+    // Critical: analyzeFailRef persists for the lifetime of MeetingRoom.
+    // If the backend failed 3× during a previous pause (e.g. Render cold-start),
+    // insights would be permanently blocked without this reset.
+    analyzeFailRef.current = 0;
+    translateFailRef.current = 0;
+    setApiLimitPopup(null); // clear any lingering "limit reached" popup
+
+    // ── Wake the Render backend before the first 2-min interval fires ──────
+    // Render free tier sleeps after inactivity. A fire-and-forget ping here
+    // gives it ~30s to warm up before the first real analyze call.
+    if (API_BASE_URL) {
+      fetch(`${API_BASE_URL}/api/ping`, { method: "GET" }).catch(() => {});
+    }
+
+    // Reset countdown and analyzed char count
     setBatchCountdown(120);
-    lastAnalyzedIdxRef.current = 0;
+    lastAnalyzedCharCountRef.current = 0;
 
     // Countdown every second
     batchCountdownRef.current = setInterval(() => {
@@ -2213,14 +2235,12 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
     // Main 2-minute analysis interval
     batchTimerRef.current = setInterval(() => {
       const lines = txLinesRef.current || [];
-      const startIdx = lastAnalyzedIdxRef.current;
-      const newLines = lines.slice(startIdx).filter(l => l.trim());
-      if (newLines.length > 0) {
-        const batchText = newLines.join(" ").trim();
-        if (batchText.length >= 20) {
-          analyzeParagraph(batchText);
-        }
-        lastAnalyzedIdxRef.current = lines.length;
+      const fullText = lines.filter(l => l.trim()).join(" ").trim();
+      const alreadyAnalyzed = lastAnalyzedCharCountRef.current;
+      const newText = fullText.slice(alreadyAnalyzed).trim();
+      if (newText.length >= 20) {
+        analyzeParagraph(newText);
+        lastAnalyzedCharCountRef.current = fullText.length;
       }
       setBatchCountdown(120); // reset countdown
     }, 120000); // 2 minutes
@@ -2234,14 +2254,12 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   // When meeting stops, do one final analysis of remaining unanalyzed transcript
   useEffect(() => {
     if (!running && txLines.length > 0) {
-      const startIdx = lastAnalyzedIdxRef.current;
-      const newLines = txLines.slice(startIdx).filter(l => l.trim());
-      if (newLines.length > 0) {
-        const batchText = newLines.join(" ").trim();
-        if (batchText.length >= 20) {
-          analyzeParagraph(batchText);
-          lastAnalyzedIdxRef.current = txLines.length;
-        }
+      const fullText = txLines.filter(l => l.trim()).join(" ").trim();
+      const alreadyAnalyzed = lastAnalyzedCharCountRef.current;
+      const newText = fullText.slice(alreadyAnalyzed).trim();
+      if (newText.length >= 20) {
+        analyzeParagraph(newText);
+        lastAnalyzedCharCountRef.current = fullText.length;
       }
     }
   }, [running]);// eslint-disable-line
@@ -2258,15 +2276,13 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   const triggerManualAnalysis = () => {
     if (analyzingPara) return;
     const lines = txLinesRef.current || [];
-    const startIdx = lastAnalyzedIdxRef.current;
-    const newLines = lines.slice(startIdx).filter(l => l.trim());
-    if (newLines.length > 0) {
-      const batchText = newLines.join(" ").trim();
-      if (batchText.length >= 20) {
-        analyzeParagraph(batchText);
-        lastAnalyzedIdxRef.current = lines.length;
-        setBatchCountdown(120);
-      }
+    const fullText = lines.filter(l => l.trim()).join(" ").trim();
+    const alreadyAnalyzed = lastAnalyzedCharCountRef.current;
+    const newText = fullText.slice(alreadyAnalyzed).trim();
+    if (newText.length >= 20) {
+      analyzeParagraph(newText);
+      lastAnalyzedCharCountRef.current = fullText.length;
+      setBatchCountdown(120);
     }
   };
 
@@ -2651,7 +2667,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <button className="btn btn-navy btn-sm"
                 onClick={triggerManualAnalysis}
-                disabled={analyzingPara || !running || (txLines.slice(lastAnalyzedIdxRef.current).filter(l => l.trim()).join("").length < 20)}
+                disabled={analyzingPara || !running || (txLines.filter(l => l.trim()).join(" ").trim().slice(lastAnalyzedCharCountRef.current).trim().length < 20)}
                 style={{ padding: "2px 8px", fontSize: 10, height: 22 }}>
                 {analyzingPara ? <Spin /> : "🧠 Get Insights"}
               </button>

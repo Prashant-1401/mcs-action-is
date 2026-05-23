@@ -35,8 +35,8 @@ if not GEMINI_API_KEY:
 from google import genai as google_genai
 gemini_client = google_genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-# Best model to use — flash-lite is fast and cheap for real-time use
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash-lite")
+# Best model to use — 2.5-flash has active quota and strong performance
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 def gemini_generate(prompt: str) -> str:
     """Call Gemini with the new SDK. Falls back to Ollama if unavailable."""
@@ -53,13 +53,22 @@ def gemini_generate(prompt: str) -> str:
         # Try fallback model before giving up
         try:
             response = gemini_client.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-2.0-flash",
                 contents=prompt
             )
             return response.text
         except Exception as e2:
             print(f"Gemini fallback also failed: {e2}")
-            return call_ollama_fallback(prompt)
+            # Last resort: try flash-lite before handing off to Ollama
+            try:
+                response = gemini_client.models.generate_content(
+                    model="gemini-2.0-flash-lite",
+                    contents=prompt
+                )
+                return response.text
+            except Exception as e3:
+                print(f"Gemini flash-lite also failed: {e3}")
+                return call_ollama_fallback(prompt)
 
 # ── Ollama local fallback ──────────────────────────────────────────────────
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3")

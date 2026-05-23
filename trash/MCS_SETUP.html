@@ -1,0 +1,1324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MCS Actions — Setup Guide</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Sora:wght@700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --navy: #272262;
+    --navy-d: #1a1653;
+    --amber: #E69903;
+    --amber-l: #FEF3CD;
+    --green: #1E8449;
+    --red: #C0392B;
+    --bg: #F4F4FB;
+    --card: #ffffff;
+    --border: #E2E2F0;
+    --text: #1A1532;
+    --text2: #636E72;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+    --display: 'Sora', sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  /* ── sidebar nav ── */
+  .layout { display: flex; min-height: 100vh; }
+
+  .sidebar {
+    width: 260px;
+    flex-shrink: 0;
+    background: var(--navy);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 28px 0 40px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sidebar-brand {
+    padding: 0 22px 24px;
+    border-bottom: 1px solid rgba(255,255,255,.1);
+    margin-bottom: 16px;
+  }
+  .sidebar-brand .tag {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: rgba(255,255,255,.45);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .sidebar-brand h2 {
+    font-family: var(--display);
+    font-size: 16px;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: .5px;
+  }
+  .sidebar-brand .subtitle {
+    font-size: 11px;
+    color: rgba(255,255,255,.5);
+    margin-top: 3px;
+  }
+
+  .nav-section {
+    padding: 8px 22px 4px;
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: rgba(255,255,255,.35);
+    text-transform: uppercase;
+    margin-top: 12px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 22px;
+    cursor: pointer;
+    transition: all .15s;
+    text-decoration: none;
+    color: rgba(255,255,255,.65);
+    font-size: 13px;
+    font-weight: 400;
+    border-left: 3px solid transparent;
+  }
+  .nav-item:hover { background: rgba(255,255,255,.06); color: #fff; }
+  .nav-item.active { background: rgba(255,255,255,.1); color: #fff; border-left-color: var(--amber); font-weight: 600; }
+  .nav-item .step-num {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: rgba(255,255,255,.12);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 10px; font-weight: 700;
+    flex-shrink: 0;
+    color: rgba(255,255,255,.7);
+  }
+
+  /* ── main content ── */
+  .main {
+    flex: 1;
+    padding: 0;
+    max-width: 860px;
+  }
+
+  /* ── hero ── */
+  .hero {
+    background: linear-gradient(135deg, var(--navy) 0%, #3D378C 100%);
+    padding: 52px 52px 44px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: "";
+    position: absolute;
+    right: -60px; top: -60px;
+    width: 360px; height: 360px;
+    border-radius: 50%;
+    background: rgba(255,255,255,.04);
+  }
+  .hero::after {
+    content: "";
+    position: absolute;
+    right: 80px; bottom: -100px;
+    width: 200px; height: 200px;
+    border-radius: 50%;
+    background: rgba(230,153,3,.08);
+  }
+  .hero-eyebrow {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: var(--amber);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .hero h1 {
+    font-family: var(--display);
+    font-size: 32px;
+    font-weight: 800;
+    color: #fff;
+    line-height: 1.2;
+    margin-bottom: 14px;
+  }
+  .hero p {
+    font-size: 14px;
+    color: rgba(255,255,255,.7);
+    max-width: 520px;
+    line-height: 1.65;
+    margin-bottom: 28px;
+  }
+  .hero-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .hero-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,.1);
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 20px;
+    padding: 5px 12px;
+    font-size: 11px;
+    color: rgba(255,255,255,.8);
+    font-weight: 500;
+  }
+
+  /* ── content sections ── */
+  .section {
+    padding: 44px 52px;
+    border-bottom: 1px solid var(--border);
+    scroll-margin-top: 24px;
+  }
+  .section:last-child { border-bottom: none; }
+
+  .section-eyebrow {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 2.5px;
+    color: var(--navy);
+    text-transform: uppercase;
+    opacity: .55;
+    margin-bottom: 6px;
+  }
+  .section h2 {
+    font-family: var(--display);
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--navy);
+    margin-bottom: 6px;
+  }
+  .section-sub {
+    font-size: 13px;
+    color: var(--text2);
+    margin-bottom: 24px;
+    line-height: 1.6;
+  }
+
+  h3 {
+    font-family: var(--display);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--navy);
+    margin: 24px 0 10px;
+  }
+
+  p { margin-bottom: 12px; }
+  p:last-child { margin-bottom: 0; }
+
+  /* ── cards ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  }
+  .card-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+  .card.accent-amber { border-left: 4px solid var(--amber); background: #FFFDF4; }
+  .card.accent-red   { border-left: 4px solid var(--red);   background: #FDF9F9; }
+  .card.accent-green { border-left: 4px solid var(--green); background: #F4FDF7; }
+  .card.accent-navy  { border-left: 4px solid var(--navy);  background: #F7F7FD; }
+  .card-title {
+    font-weight: 700; font-size: 13px; color: var(--text);
+    margin-bottom: 6px; display: flex; align-items: center; gap: 8px;
+  }
+  .card-body { font-size: 13px; color: var(--text2); line-height: 1.6; }
+
+  /* ── code blocks ── */
+  .code-block {
+    background: #1A1532;
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 14px 0;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    box-shadow: 0 4px 20px rgba(0,0,0,.12);
+  }
+  .code-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px;
+    background: rgba(255,255,255,.04);
+    border-bottom: 1px solid rgba(255,255,255,.08);
+  }
+  .code-lang {
+    font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+    text-transform: uppercase; color: var(--amber);
+  }
+  .code-copy {
+    font-size: 10px; color: rgba(255,255,255,.4);
+    cursor: pointer; background: none; border: none;
+    font-family: var(--mono); padding: 2px 6px;
+    border-radius: 4px; transition: all .15s;
+  }
+  .code-copy:hover { background: rgba(255,255,255,.08); color: #fff; }
+  .code-body {
+    padding: 16px 18px;
+    color: #C9D1D9;
+    line-height: 1.7;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .cm { color: #8B949E; } /* comment */
+  .ck { color: #FF7B72; } /* keyword */
+  .cs { color: #A5D6FF; } /* string */
+  .cv { color: #79C0FF; } /* var name */
+  .cn { color: #FFA657; } /* number/const */
+
+  /* ── inline code ── */
+  code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: rgba(39,34,98,.08);
+    color: var(--navy);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(39,34,98,.12);
+  }
+
+  /* ── step indicator ── */
+  .steps { display: flex; flex-direction: column; gap: 0; }
+  .step {
+    display: flex; gap: 18px; padding-bottom: 28px;
+    position: relative;
+  }
+  .step:not(:last-child)::before {
+    content: "";
+    position: absolute;
+    left: 17px; top: 38px; bottom: 0;
+    width: 2px;
+    background: var(--border);
+  }
+  .step-icon {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: var(--navy);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 13px; font-weight: 700;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+    box-shadow: 0 0 0 4px var(--bg);
+  }
+  .step-content { flex: 1; padding-top: 6px; }
+  .step-title { font-weight: 700; font-size: 14px; color: var(--text); margin-bottom: 6px; }
+  .step-desc { font-size: 13px; color: var(--text2); line-height: 1.6; }
+
+  /* ── table ── */
+  .tbl { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+  .tbl th {
+    background: var(--navy); color: #fff;
+    padding: 10px 14px; text-align: left;
+    font-size: 11px; font-weight: 700; letter-spacing: .5px;
+    font-family: var(--mono);
+  }
+  .tbl th:first-child { border-radius: 8px 0 0 0; }
+  .tbl th:last-child  { border-radius: 0 8px 0 0; }
+  .tbl td {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .tbl tr:last-child td { border-bottom: none; }
+  .tbl tr:nth-child(even) td { background: #FAFAFE; }
+  .tbl-wrap { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin: 16px 0; }
+
+  /* ── badges ── */
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 12px;
+    font-size: 10px; font-weight: 700;
+    font-family: var(--mono); letter-spacing: .3px;
+  }
+  .badge-req  { background: #FADBD8; color: #922B21; }
+  .badge-opt  { background: #D5F5E3; color: #1E6B3C; }
+  .badge-env  { background: #EAE7F8; color: #4A3F8C; }
+  .badge-sec  { background: #FFF3CD; color: #856404; }
+
+  /* ── warning / info boxes ── */
+  .alert {
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin: 16px 0;
+    font-size: 13px;
+    display: flex;
+    gap: 12px;
+    line-height: 1.6;
+  }
+  .alert-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+  .alert-warn { background: var(--amber-l); border-left: 4px solid var(--amber); }
+  .alert-danger { background: #FADBD8; border-left: 4px solid var(--red); }
+  .alert-info  { background: #EAF4FF; border-left: 4px solid #2980B9; }
+  .alert-ok    { background: #D5F5E3; border-left: 4px solid var(--green); }
+
+  /* ── architecture diagram ── */
+  .arch {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr auto 1fr;
+    align-items: center;
+    gap: 0;
+    margin: 20px 0;
+    padding: 24px;
+    background: #F7F7FD;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+  }
+  .arch-box {
+    background: #fff;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,.05);
+  }
+  .arch-box .icon { font-size: 22px; margin-bottom: 6px; }
+  .arch-box .name { font-weight: 700; font-size: 12px; color: var(--navy); }
+  .arch-box .detail { font-size: 10px; color: var(--text2); margin-top: 3px; font-family: var(--mono); }
+  .arch-arrow { text-align: center; padding: 0 8px; color: var(--text2); font-size: 18px; }
+
+  /* ── schema grid ── */
+  .schema-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0; }
+  .schema-card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .schema-card .tab-name {
+    font-family: var(--mono); font-size: 11px; font-weight: 700;
+    color: var(--navy); margin-bottom: 8px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .schema-card .tab-name .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--navy);
+  }
+  .schema-card .cols { display: flex; flex-wrap: wrap; gap: 4px; }
+  .col-pill {
+    font-family: var(--mono); font-size: 10px;
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text2); padding: 2px 7px; border-radius: 6px;
+  }
+  .col-pill.key { background: #EAE7F8; border-color: #C5C0E8; color: var(--navy); font-weight: 700; }
+  .col-pill.json { background: #FFF3CD; border-color: #F0DC8C; color: #7A5F00; }
+
+  /* ── checklist ── */
+  .checklist { list-style: none; margin: 12px 0; }
+  .checklist li {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 7px 0; border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .checklist li:last-child { border-bottom: none; }
+  .checklist li::before {
+    content: "☐";
+    font-size: 16px; color: var(--text2); flex-shrink: 0; margin-top: -1px;
+  }
+
+  /* ── env var table ── */
+  .env-row { display: grid; grid-template-columns: 220px 1fr; gap: 0; border-bottom: 1px solid var(--border); }
+  .env-row:last-child { border-bottom: none; }
+  .env-key {
+    padding: 12px 14px;
+    background: #F7F7FD;
+    font-family: var(--mono); font-size: 11.5px;
+    color: var(--navy); font-weight: 700;
+    border-right: 1px solid var(--border);
+    word-break: break-all;
+    display: flex; align-items: flex-start; gap: 8px; flex-direction: column;
+  }
+  .env-val {
+    padding: 12px 14px;
+    font-size: 13px; color: var(--text2); line-height: 1.55;
+  }
+
+  /* ── roles table ── */
+  .role-matrix { font-size: 12px; }
+  .role-matrix td, .role-matrix th { padding: 9px 12px; }
+  .chk { color: var(--green); font-size: 15px; }
+  .cross { color: var(--red); font-size: 15px; }
+
+  /* responsive */
+  @media (max-width: 768px) {
+    .sidebar { display: none; }
+    .hero { padding: 32px 24px; }
+    .section { padding: 32px 24px; }
+    .card-row, .schema-grid { grid-template-columns: 1fr; }
+    .arch { grid-template-columns: 1fr; }
+    .arch-arrow { transform: rotate(90deg); }
+    .env-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+<!-- ═══════════════════════════════════════════ SIDEBAR -->
+<nav class="sidebar">
+  <div class="sidebar-brand">
+    <div class="tag">MCS Actions</div>
+    <h2>Setup Guide</h2>
+    <div class="subtitle">Adroit & Signet Industries</div>
+  </div>
+
+  <div class="nav-section">Overview</div>
+  <a href="#overview" class="nav-item active">
+    <span class="step-num">●</span> Architecture
+  </a>
+  <a href="#prereqs" class="nav-item">
+    <span class="step-num">●</span> Prerequisites
+  </a>
+
+  <div class="nav-section">Backend</div>
+  <a href="#sheet" class="nav-item">
+    <span class="step-num">1</span> Google Sheet
+  </a>
+  <a href="#gas" class="nav-item">
+    <span class="step-num">2</span> Apps Script (GAS)
+  </a>
+  <a href="#fastapi" class="nav-item">
+    <span class="step-num">3</span> FastAPI Backend
+  </a>
+
+  <div class="nav-section">Frontend</div>
+  <a href="#env" class="nav-item">
+    <span class="step-num">4</span> Environment Variables
+  </a>
+  <a href="#frontend" class="nav-item">
+    <span class="step-num">5</span> React App (Vite)
+  </a>
+
+  <div class="nav-section">Deploy</div>
+  <a href="#render" class="nav-item">
+    <span class="step-num">6</span> Render (Backend)
+  </a>
+  <a href="#vercel" class="nav-item">
+    <span class="step-num">7</span> Vercel (Frontend)
+  </a>
+
+  <div class="nav-section">Reference</div>
+  <a href="#schema" class="nav-item">
+    <span class="step-num">●</span> Sheet Schema
+  </a>
+  <a href="#roles" class="nav-item">
+    <span class="step-num">●</span> Roles & Permissions
+  </a>
+  <a href="#checklist" class="nav-item">
+    <span class="step-num">●</span> Final Checklist
+  </a>
+</nav>
+
+<!-- ═══════════════════════════════════════════ MAIN -->
+<main class="main">
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-eyebrow">Deployment & Configuration Guide</div>
+  <h1>MCS Actions<br>Setup Manual</h1>
+  <p>Complete step-by-step guide to deploy the Management Control System for Adroit & Signet Industries — from Google Sheet configuration through full-stack production deployment.</p>
+  <div class="hero-chips">
+    <span class="hero-chip">⚛ React + Vite</span>
+    <span class="hero-chip">🐍 FastAPI + Gemini AI</span>
+    <span class="hero-chip">📊 Google Sheets DB</span>
+    <span class="hero-chip">🚀 Vercel + Render</span>
+    <span class="hero-chip">📜 Apps Script API</span>
+  </div>
+</div>
+
+<!-- ═══ ARCHITECTURE ═══ -->
+<section class="section" id="overview">
+  <div class="section-eyebrow">System Overview</div>
+  <h2>Architecture</h2>
+  <p class="section-sub">MCS Actions is a three-tier system. Google Sheets is the database, a GAS Web App is the write API, and FastAPI provides Gemini AI features. The React SPA reads data via CSV gviz URLs and writes via the GAS endpoint.</p>
+
+  <div class="arch">
+    <div class="arch-box">
+      <div class="icon">⚛</div>
+      <div class="name">React SPA</div>
+      <div class="detail">Vercel CDN</div>
+    </div>
+    <div class="arch-arrow">⟷</div>
+    <div class="arch-box">
+      <div class="icon">📜</div>
+      <div class="name">GAS Web App</div>
+      <div class="detail">Google Apps Script</div>
+    </div>
+    <div class="arch-arrow">⟷</div>
+    <div class="arch-box">
+      <div class="icon">📊</div>
+      <div class="name">Google Sheet</div>
+      <div class="detail">Live Database</div>
+    </div>
+  </div>
+
+  <div class="arch" style="margin-top: 12px; grid-template-columns: 1fr auto 1fr;">
+    <div class="arch-box">
+      <div class="icon">⚛</div>
+      <div class="name">React SPA</div>
+      <div class="detail">Vercel CDN</div>
+    </div>
+    <div class="arch-arrow">⟷</div>
+    <div class="arch-box">
+      <div class="icon">🐍</div>
+      <div class="name">FastAPI</div>
+      <div class="detail">Render · mcs-action.onrender.com</div>
+    </div>
+  </div>
+
+  <div class="card accent-navy" style="margin-top: 20px;">
+    <div class="card-title">📖 Data Flow</div>
+    <div class="card-body">
+      <b>Reads:</b> React fetches CSV via <code>docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=TabName</code> — no auth required, sheet must be publicly shared.<br><br>
+      <b>Writes:</b> React POSTs JSON to the GAS Web App (<code>VITE_SHEET_SCRIPT_URL</code>). GAS validates and calls <code>SpreadsheetApp.openById(SHEET_ID)</code>.<br><br>
+      <b>AI Features:</b> Meeting transcription, action extraction, and translation are handled by the FastAPI backend at <code>VITE_API_BASE_URL</code> using <code>gemini-flash-lite-latest</code>.
+    </div>
+  </div>
+</section>
+
+<!-- ═══ PREREQUISITES ═══ -->
+<section class="section" id="prereqs">
+  <div class="section-eyebrow">Before You Start</div>
+  <h2>Prerequisites</h2>
+  <p class="section-sub">Accounts and tools needed before beginning setup.</p>
+
+  <div class="card-row">
+    <div class="card">
+      <div class="card-title">🔑 Accounts Required</div>
+      <div class="card-body">
+        • Google account (for Sheets + Apps Script)<br>
+        • Vercel account (free tier sufficient)<br>
+        • Render account (free tier sufficient)<br>
+        • Google AI Studio account (for Gemini API key)
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">🛠 Tools Required</div>
+      <div class="card-body">
+        • Node.js 18+ with npm<br>
+        • Python 3.10+ with pip<br>
+        • Git<br>
+        • A Gmail account with SMTP app password (for email escalation)
+      </div>
+    </div>
+  </div>
+
+  <div class="card accent-amber">
+    <div class="card-title">⚠ Gmail SMTP App Password</div>
+    <div class="card-body">
+      Google blocked direct password login for SMTP. You need an <b>App Password</b>:<br>
+      Google Account → Security → 2-Step Verification (enable it) → App Passwords → Create one for "Mail". Use this 16-char password as <code>SMTP_PASS</code>. Your normal Gmail password will not work.
+    </div>
+  </div>
+</section>
+
+<!-- ═══ STEP 1 — GOOGLE SHEET ═══ -->
+<section class="section" id="sheet">
+  <div class="section-eyebrow">Step 1</div>
+  <h2>Google Sheet Configuration</h2>
+  <p class="section-sub">The sheet is the live database. All tabs must exist with exact column headers before the app runs.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-icon">1</div>
+      <div class="step-content">
+        <div class="step-title">Create a new Google Sheet</div>
+        <div class="step-desc">Go to <a href="https://sheets.google.com" target="_blank">sheets.google.com</a> → New. Name it <b>"MCS Action Log"</b>. Copy the Sheet ID from the URL: <code>docs.google.com/spreadsheets/d/<b>THIS_PART</b>/edit</code></div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-icon">2</div>
+      <div class="step-content">
+        <div class="step-title">Share the sheet publicly (for CSV reads)</div>
+        <div class="step-desc">File → Share → Share with others → Change to <b>"Anyone with the link"</b> → Viewer. This allows the React app to read data via the gviz CSV URL without authentication.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-icon">3</div>
+      <div class="step-content">
+        <div class="step-title">Run setupMissingTabs() from Apps Script</div>
+        <div class="step-desc">After deploying the GAS code (Step 2), run the <code>setupMissingTabs()</code> function once from the editor. This creates all required tabs with correct headers and seeds the Reasons tab.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-icon">4</div>
+      <div class="step-content">
+        <div class="step-title">Populate Users tab with credentials</div>
+        <div class="step-desc">The app authenticates exclusively from the Users sheet. Each user row must have <code>username</code> and <code>password</code> columns. There are no hardcoded fallback credentials — if the sheet is unreachable, login is blocked.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-warn">
+    <div class="alert-icon">⚠</div>
+    <div>Passwords in the Users tab are stored in plain text. This is acceptable for an internal tool but avoid reusing real passwords. A future upgrade should hash passwords with SHA-256 (see <code>Gas_Script_v2.js</code> for the implementation).</div>
+  </div>
+
+  <h3>Required Tabs (created by setupMissingTabs)</h3>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>Tab Name</th><th>Purpose</th><th>Key Column</th></tr></thead>
+      <tbody>
+        <tr><td><code>Users</code></td><td>Login credentials + user profile (name, role, plant, dept, superior, initials, color, phone, email, username, password)</td><td><code>id</code></td></tr>
+        <tr><td><code>Actions</code></td><td>All action log entries — the primary data store</td><td><code>id</code></td></tr>
+        <tr><td><code>Plants</code></td><td>Plant/facility list (name, location, head)</td><td><code>id</code></td></tr>
+        <tr><td><code>Departments</code></td><td>Department list (name, icon, head)</td><td><code>id</code></td></tr>
+        <tr><td><code>Meetings</code></td><td>Meeting schedule definitions</td><td><code>id</code></td></tr>
+        <tr><td><code>Projects</code></td><td>Strategic projects / charters</td><td><code>id</code></td></tr>
+        <tr><td><code>EscalationMatrix</code></td><td>Overdue escalation tiers and thresholds</td><td><code>id</code></td></tr>
+        <tr><td><code>Permissions</code></td><td>Per-user feature permissions (keyed by user id)</td><td><code>id</code></td></tr>
+        <tr><td><code>MeetingPresets</code></td><td>Attendee lists and agenda instructions per meeting type</td><td><code>type</code></td></tr>
+        <tr><td><code>Reasons</code></td><td>Autocomplete list for "Reason of Action" (seeded with 15 entries)</td><td><code>id</code></td></tr>
+        <tr><td><code>Audit</code></td><td>Escalation audit log (written by the escalation engine)</td><td><code>id</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══ STEP 2 — GAS ═══ -->
+<section class="section" id="gas">
+  <div class="section-eyebrow">Step 2</div>
+  <h2>Apps Script Web App (GAS)</h2>
+  <p class="section-sub">The GAS script is the write API for the sheet. It handles insert, update, delete, upsert, and replace_all operations on any registered tab.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-icon">1</div>
+      <div class="step-content">
+        <div class="step-title">Open the Apps Script editor</div>
+        <div class="step-desc">From the Google Sheet → Extensions → Apps Script. Paste the full contents of <code>Code.gs</code> (the GAS script file from your repository).</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-icon">2</div>
+      <div class="step-content">
+        <div class="step-title">Verify SHEET_ID is correct</div>
+        <div class="step-desc">At the top of the script, confirm:<br>
+        <div class="code-block"><div class="code-header"><span class="code-lang">GAS</span></div><div class="code-body"><span class="ck">const</span> <span class="cv">SHEET_ID</span> = <span class="cs">"your-sheet-id-here"</span>;</div></div>
+        Replace with your actual Sheet ID from Step 1.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-icon">3</div>
+      <div class="step-content">
+        <div class="step-title">Run setupMissingTabs() once</div>
+        <div class="step-desc">In the editor, select <code>setupMissingTabs</code> from the function dropdown → Run. This creates all missing tabs and adds <code>reasonOfAction</code> and <code>machineName</code> columns to the Actions tab. Check the Execution Log for confirmation messages.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-icon">4</div>
+      <div class="step-content">
+        <div class="step-title">Deploy as Web App</div>
+        <div class="step-desc">Deploy → New Deployment → Type: <b>Web App</b> → Execute as: <b>Me</b> → Who has access: <b>Anyone</b> → Deploy. Copy the web app URL — this becomes <code>VITE_SHEET_SCRIPT_URL</code>.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-icon">5</div>
+      <div class="step-content">
+        <div class="step-title">Test the deployment</div>
+        <div class="step-desc">Open the web app URL in a browser. You should see JSON:<br>
+        <div class="code-block"><div class="code-header"><span class="code-lang">JSON</span></div><div class="code-body">{ <span class="cs">"ok"</span>: false, <span class="cs">"error"</span>: <span class="cs">"Unknown tab: undefined"</span> }</div></div>
+        This error is expected and confirms the script is running. A 200 response with this error body means the GAS deploy is working.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-info">
+    <div class="alert-icon">ℹ</div>
+    <div><b>Re-deployment note:</b> Every time you edit the GAS script, you must create a <b>New Deployment</b> (not redeploy an existing one) to get a new URL. Update <code>VITE_SHEET_SCRIPT_URL</code> in Vercel whenever this URL changes. The old URL continues working for 6 months.</div>
+  </div>
+
+  <h3>Supported Actions (POST body)</h3>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>Action</th><th>Required Fields</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>insert</code></td><td><code>tab</code>, <code>row</code></td><td>Append a new row to the tab</td></tr>
+        <tr><td><code>update</code></td><td><code>tab</code>, <code>id</code>, <code>patch</code></td><td>Update specific fields of a row by key</td></tr>
+        <tr><td><code>delete</code></td><td><code>tab</code>, <code>id</code></td><td>Delete a row by key value</td></tr>
+        <tr><td><code>upsert</code></td><td><code>tab</code>, <code>row</code></td><td>Insert if not found, update if found</td></tr>
+        <tr><td><code>replace_all</code></td><td><code>tab</code>, <code>rows</code></td><td>Rewrite entire tab (skips if rows is empty — safety guard)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══ STEP 3 — FASTAPI ═══ -->
+<section class="section" id="fastapi">
+  <div class="section-eyebrow">Step 3</div>
+  <h2>FastAPI Backend</h2>
+  <p class="section-sub">The Python backend provides Gemini AI features: meeting transcript analysis, real-time paragraph insights, Hindi translation, and email escalation. It runs at <code>mcs-action.onrender.com</code>.</p>
+
+  <h3>Local Development</h3>
+  <div class="code-block">
+    <div class="code-header"><span class="code-lang">bash</span><button class="code-copy" onclick="navigator.clipboard.writeText(this.closest('.code-block').querySelector('.code-body').innerText)">copy</button></div>
+    <div class="code-body"><span class="cm"># Clone and enter the repo</span>
+cd mcs-action/backend
+
+<span class="cm"># Install dependencies</span>
+pip install fastapi uvicorn google-generativeai python-dotenv requests
+
+<span class="cm"># Create .env file (see Step 4 for values)</span>
+cp .env.example .env
+
+<span class="cm"># Run locally</span>
+uvicorn main:app --reload --port 8000</div>
+  </div>
+
+  <h3>API Endpoints</h3>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>GET</code></td><td><code>/api/health</code></td><td>Health check — returns Gemini config status</td></tr>
+        <tr><td><code>POST</code></td><td><code>/api/meetings/extract-insights</code></td><td>Full transcript → structured action log (JSON)</td></tr>
+        <tr><td><code>POST</code></td><td><code>/api/meetings/analyze-paragraph</code></td><td>Single paragraph → actions, decisions, risks, key points (real-time)</td></tr>
+        <tr><td><code>POST</code></td><td><code>/api/translate</code></td><td>Hindi / Hinglish → English translation</td></tr>
+        <tr><td><code>POST</code></td><td><code>/api/email/escalate</code></td><td>Send escalation email for overdue actions</td></tr>
+        <tr><td><code>POST</code></td><td><code>/api/email/share-insights</code></td><td>Email meeting insights to recipients</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="alert alert-info">
+    <div class="alert-icon">ℹ</div>
+    <div><b>Ollama fallback:</b> If Gemini API fails (quota exceeded, network error), the backend automatically falls back to a local Ollama instance at <code>localhost:11434</code> with model <code>llama3</code>. Set <code>OLLAMA_MODEL</code> env var to change the model. On Render this fallback will not work — Gemini is the only option in production.</div>
+  </div>
+
+  <h3>Gemini Model Used</h3>
+  <div class="card">
+    <div class="card-title">🤖 gemini-flash-lite-latest</div>
+    <div class="card-body">All three AI features (transcript extraction, paragraph analysis, translation) use <code>gemini-flash-lite-latest</code>. This is the fastest and cheapest Gemini model, appropriate for the real-time meeting analysis use case. Free tier supports 15 RPM and 1M tokens/day as of mid-2025.</div>
+  </div>
+</section>
+
+<!-- ═══ STEP 4 — ENV VARS ═══ -->
+<section class="section" id="env">
+  <div class="section-eyebrow">Step 4</div>
+  <h2>Environment Variables</h2>
+  <p class="section-sub">Two sets of env vars: Vite frontend vars (prefixed <code>VITE_</code>) and FastAPI backend vars. Never commit either <code>.env</code> file to Git.</p>
+
+  <h3>Frontend — <code>.env</code> (Vite / React)</h3>
+  <div class="card" style="padding: 0; overflow: hidden;">
+    <div class="env-row">
+      <div class="env-key"><code>VITE_SHEET_SCRIPT_URL</code> <span class="badge badge-req">required</span></div>
+      <div class="env-val">The deployed GAS Web App URL from Step 2, Step 4. Format: <code>https://script.google.com/macros/s/ABC.../exec</code></div>
+    </div>
+    <div class="env-row">
+      <div class="env-key"><code>VITE_SHEET_ID</code> <span class="badge badge-req">required</span></div>
+      <div class="env-val">Your Google Sheet ID. Found in the sheet URL: <code>spreadsheets/d/<b>THIS_PART</b>/edit</code></div>
+    </div>
+    <div class="env-row">
+      <div class="env-key"><code>VITE_API_BASE_URL</code> <span class="badge badge-req">required</span></div>
+      <div class="env-val">FastAPI backend URL. In production: <code>https://mcs-action.onrender.com</code>. Locally: <code>http://localhost:8000</code></div>
+    </div>
+  </div>
+
+  <div class="code-block" style="margin-top: 16px;">
+    <div class="code-header"><span class="code-lang">.env (frontend)</span></div>
+    <div class="code-body"><span class="ck">VITE_SHEET_SCRIPT_URL</span>=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec
+<span class="ck">VITE_SHEET_ID</span>=1OR4J17WrhQg9rqFV3uIhLCDG9UDCoQ5lc9-8ZXoNSOo
+<span class="ck">VITE_API_BASE_URL</span>=https://mcs-action.onrender.com</div>
+  </div>
+
+  <h3>Backend — <code>.env</code> (FastAPI / Python)</h3>
+  <div class="card" style="padding: 0; overflow: hidden;">
+    <div class="env-row">
+      <div class="env-key"><code>GEMINI_API_KEY</code> <span class="badge badge-req">required</span></div>
+      <div class="env-val">Get from <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com/app/apikey</a>. Free tier works for development.</div>
+    </div>
+    <div class="env-row">
+      <div class="env-key"><code>SMTP_SERVER</code> <span class="badge badge-opt">optional</span></div>
+      <div class="env-val">SMTP host for email escalation. Default: <code>smtp.gmail.com</code></div>
+    </div>
+    <div class="env-row">
+      <div class="env-key"><code>SMTP_PORT</code> <span class="badge badge-opt">optional</span></div>
+      <div class="env-val">SMTP port. Default: <code>587</code> (TLS/STARTTLS)</div>
+    </div>
+    <div class="env-row">
+      <div class="env-key"><code>SMTP_USER</code> <span class="badge badge-opt">optional</span></div>
+      <div class="env-val">Gmail address used to send escalation emails. If blank, email is printed to console (demo mode).</div>
+    </div>
+    <div class="env-row">
+      <div class="env-key"><code>SMTP_PASS</code> <span class="badge badge-opt">optional</span></div>
+      <div class="env-val">Gmail App Password (16 chars, no spaces). <b>Not</b> your regular Gmail password. See Prerequisites.</div>
+    </div>
+    <div class="env-row">
+      <div class="env-key"><code>ADMIN_EMAIL</code> <span class="badge badge-opt">optional</span></div>
+      <div class="env-val">Target email for Level 3+ escalation alerts. Default: <code>admin@adroit.in</code></div>
+    </div>
+    <div class="env-row">
+      <div class="env-key"><code>OLLAMA_MODEL</code> <span class="badge badge-opt">optional</span></div>
+      <div class="env-val">Local Ollama model used if Gemini fails. Default: <code>llama3</code>. Only relevant for local dev.</div>
+    </div>
+  </div>
+
+  <div class="code-block" style="margin-top: 16px;">
+    <div class="code-header"><span class="code-lang">.env (backend)</span></div>
+    <div class="code-body"><span class="ck">GEMINI_API_KEY</span>=AIza...
+<span class="ck">SMTP_SERVER</span>=smtp.gmail.com
+<span class="ck">SMTP_PORT</span>=587
+<span class="ck">SMTP_USER</span>=yourname@gmail.com
+<span class="ck">SMTP_PASS</span>=abcd efgh ijkl mnop
+<span class="ck">ADMIN_EMAIL</span>=admin@adroit.in</div>
+  </div>
+</section>
+
+<!-- ═══ STEP 5 — FRONTEND ═══ -->
+<section class="section" id="frontend">
+  <div class="section-eyebrow">Step 5</div>
+  <h2>React App (Vite)</h2>
+  <p class="section-sub">The frontend is a single-file React SPA (<code>App.jsx</code>) built with Vite. It uses no component library — all UI is hand-coded with inline styles.</p>
+
+  <h3>Project Structure</h3>
+  <div class="code-block">
+    <div class="code-header"><span class="code-lang">tree</span></div>
+    <div class="code-body">mcs-app/
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx        <span class="cm"># entire React application (4500+ lines)</span>
+│   │   ├── main.jsx       <span class="cm"># React root mount</span>
+│   │   └── index.css      <span class="cm"># minimal reset (most CSS is in App.jsx)</span>
+│   ├── .env               <span class="cm"># frontend env vars (never commit)</span>
+│   ├── .env.example       <span class="cm"># template</span>
+│   ├── index.html
+│   ├── vite.config.js
+│   └── package.json
+└── backend/
+    ├── main.py            <span class="cm"># FastAPI app</span>
+    ├── .env               <span class="cm"># backend env vars (never commit)</span>
+    └── requirements.txt</div>
+  </div>
+
+  <h3>Local Development</h3>
+  <div class="code-block">
+    <div class="code-header"><span class="code-lang">bash</span><button class="code-copy" onclick="navigator.clipboard.writeText(this.closest('.code-block').querySelector('.code-body').innerText)">copy</button></div>
+    <div class="code-body">cd frontend
+npm install
+cp .env.example .env   <span class="cm"># fill in your values</span>
+npm run dev            <span class="cm"># starts at http://localhost:5173</span></div>
+  </div>
+
+  <h3>Key Runtime Behaviour</h3>
+  <div class="card-row">
+    <div class="card accent-navy">
+      <div class="card-title">🔐 Login</div>
+      <div class="card-body">Auth reads the <code>Users</code> sheet tab via CSV URL. Matches <code>username</code> and <code>password</code> columns. No hardcoded fallback — sheet must be reachable.</div>
+    </div>
+    <div class="card accent-navy">
+      <div class="card-title">📊 Data Load</div>
+      <div class="card-body">On mount, <code>useSheetDB</code> fetches all 9 tabs in parallel. A 1-second delay after load prevents sync effects from overwriting the sheet with empty default arrays.</div>
+    </div>
+    <div class="card accent-navy">
+      <div class="card-title">✍ Writes</div>
+      <div class="card-body">State changes sync to the sheet via <code>replace_all</code> POST to the GAS endpoint. Empty payloads are silently skipped by the GAS safety guard.</div>
+    </div>
+    <div class="card accent-navy">
+      <div class="card-title">🤖 AI</div>
+      <div class="card-body">Meeting Room calls <code>VITE_API_BASE_URL/api/meetings/analyze-paragraph</code> in real-time and <code>/extract-insights</code> on session end. Translation uses <code>/api/translate</code>.</div>
+    </div>
+  </div>
+
+  <h3>Pages (Navigation)</h3>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>Page Index</th><th>Name</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>0</code></td><td>Home</td><td>Dashboard overview, quick KPIs, meeting launcher</td></tr>
+        <tr><td><code>1</code></td><td>Work</td><td>Meeting room, projects, staging area — core operational page</td></tr>
+        <tr><td><code>2</code></td><td>Actions</td><td>Full action log — table, board, kanban, and timeline views</td></tr>
+        <tr><td><code>3</code></td><td>Dashboard</td><td>Analytics, plant comparison, escalation overview</td></tr>
+        <tr><td><code>4</code></td><td>Escalations</td><td>Overdue action list, escalation audit trail</td></tr>
+        <tr><td><code>99</code></td><td>Master Setup</td><td>Admin only — users, plants, depts, org chart, permissions, escalation matrix, meeting presets</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══ STEP 6 — RENDER ═══ -->
+<section class="section" id="render">
+  <div class="section-eyebrow">Step 6</div>
+  <h2>Render Deployment (Backend)</h2>
+  <p class="section-sub">The FastAPI backend is hosted on Render as a Web Service at <code>mcs-action.onrender.com</code>.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-icon">1</div>
+      <div class="step-content">
+        <div class="step-title">Connect GitHub repo to Render</div>
+        <div class="step-desc">render.com → New → Web Service → Connect <code>Prashant-1401/mcs-action</code> repo. Select the branch (<code>main</code>).</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-icon">2</div>
+      <div class="step-content">
+        <div class="step-title">Configure build and start commands</div>
+        <div class="step-desc">
+          <div class="code-block"><div class="code-header"><span class="code-lang">render settings</span></div><div class="code-body">Root Directory: backend
+Build Command:  pip install -r requirements.txt
+Start Command:  uvicorn main:app --host 0.0.0.0 --port $PORT</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-icon">3</div>
+      <div class="step-content">
+        <div class="step-title">Add environment variables in Render dashboard</div>
+        <div class="step-desc">Dashboard → Environment → Add the 5 required env vars: <code>GEMINI_API_KEY</code>, <code>SMTP_SERVER</code>, <code>SMTP_USER</code>, <code>SMTP_PORT</code>, <code>SMTP_PASS</code>. Render encrypts these at rest.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-icon">4</div>
+      <div class="step-content">
+        <div class="step-title">Verify deployment</div>
+        <div class="step-desc">Visit <code>https://mcs-action.onrender.com/api/health</code>. Expected response:<br>
+        <div class="code-block"><div class="code-header"><span class="code-lang">JSON</span></div><div class="code-body">{ <span class="cs">"status"</span>: <span class="cs">"ok"</span>, <span class="cs">"gemini_configured"</span>: <span class="ck">true</span> }</div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-warn">
+    <div class="alert-icon">⚠</div>
+    <div><b>Free tier cold starts:</b> Render free tier spins down after 15 minutes of inactivity. The first request after idle takes 30–60 seconds. This causes a visible delay when opening the Meeting Room for the first time. Consider a Render Starter plan ($7/mo) or a UptimeRobot ping cron to keep it warm.</div>
+  </div>
+</section>
+
+<!-- ═══ STEP 7 — VERCEL ═══ -->
+<section class="section" id="vercel">
+  <div class="section-eyebrow">Step 7</div>
+  <h2>Vercel Deployment (Frontend)</h2>
+  <p class="section-sub">The React SPA is deployed to Vercel and served from the CDN. Zero config required beyond env vars.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-icon">1</div>
+      <div class="step-content">
+        <div class="step-title">Import the GitHub repository</div>
+        <div class="step-desc">vercel.com → New Project → Import <code>Prashant-1401/mcs-action</code> → Set <b>Root Directory</b> to <code>frontend</code> (or wherever your <code>package.json</code> is).</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-icon">2</div>
+      <div class="step-content">
+        <div class="step-title">Add environment variables</div>
+        <div class="step-desc">Settings → Environment Variables → Add the 3 frontend vars: <code>VITE_SHEET_SCRIPT_URL</code>, <code>VITE_SHEET_ID</code>, <code>VITE_API_BASE_URL</code>. These get baked into the Vite build at deploy time.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-icon">3</div>
+      <div class="step-content">
+        <div class="step-title">Deploy</div>
+        <div class="step-desc">Vercel auto-detects Vite. Build command is <code>npm run build</code>, output is <code>dist/</code>. First deploy takes ~90 seconds. Every push to <code>main</code> triggers a redeploy automatically.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-icon">4</div>
+      <div class="step-content">
+        <div class="step-title">Update VITE_API_BASE_URL if Render URL changes</div>
+        <div class="step-desc">If you rename or recreate the Render service, update <code>VITE_API_BASE_URL</code> in Vercel env settings and redeploy. The value is baked into the JS bundle — a running deployment will not pick up env changes without a redeploy.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-ok">
+    <div class="alert-icon">✅</div>
+    <div>Vercel automatically provides HTTPS, CDN distribution, and preview deployments for pull requests. No additional config needed for these.</div>
+  </div>
+</section>
+
+<!-- ═══ SHEET SCHEMA ═══ -->
+<section class="section" id="schema">
+  <div class="section-eyebrow">Reference</div>
+  <h2>Google Sheet Schema</h2>
+  <p class="section-sub">Exact column headers required in each tab. The GAS script and React app depend on these names being precise.</p>
+
+  <div class="schema-grid">
+    <div class="schema-card">
+      <div class="tab-name"><span class="dot"></span> Users</div>
+      <div class="cols">
+        <span class="col-pill key">id</span>
+        <span class="col-pill">name</span>
+        <span class="col-pill">email</span>
+        <span class="col-pill">phone</span>
+        <span class="col-pill">role</span>
+        <span class="col-pill">plant</span>
+        <span class="col-pill">dept</span>
+        <span class="col-pill">superior</span>
+        <span class="col-pill">initials</span>
+        <span class="col-pill">color</span>
+        <span class="col-pill">username</span>
+        <span class="col-pill">password</span>
+      </div>
+    </div>
+    <div class="schema-card">
+      <div class="tab-name"><span class="dot"></span> Actions</div>
+      <div class="cols">
+        <span class="col-pill key">id</span>
+        <span class="col-pill">sn</span>
+        <span class="col-pill">src</span>
+        <span class="col-pill">section</span>
+        <span class="col-pill">plant</span>
+        <span class="col-pill">dateOfAction</span>
+        <span class="col-pill">text</span>
+        <span class="col-pill">responsible</span>
+        <span class="col-pill">allocatedBy</span>
+        <span class="col-pill">due</span>
+        <span class="col-pill">status</span>
+        <span class="col-pill">remarks</span>
+        <span class="col-pill">priority</span>
+        <span class="col-pill">revisions</span>
+        <span class="col-pill json">revisionHistory</span>
+        <span class="col-pill">created</span>
+        <span class="col-pill">closedOn</span>
+        <span class="col-pill">project</span>
+        <span class="col-pill json">messages</span>
+        <span class="col-pill">pendingConfirmation</span>
+        <span class="col-pill">reasonOfAction</span>
+        <span class="col-pill">machineName</span>
+      </div>
+    </div>
+    <div class="schema-card">
+      <div class="tab-name"><span class="dot"></span> Plants</div>
+      <div class="cols">
+        <span class="col-pill key">id</span>
+        <span class="col-pill">name</span>
+        <span class="col-pill">location</span>
+        <span class="col-pill">head</span>
+      </div>
+    </div>
+    <div class="schema-card">
+      <div class="tab-name"><span class="dot"></span> Departments</div>
+      <div class="cols">
+        <span class="col-pill key">id</span>
+        <span class="col-pill">name</span>
+        <span class="col-pill">icon</span>
+        <span class="col-pill">head</span>
+      </div>
+    </div>
+    <div class="schema-card">
+      <div class="tab-name"><span class="dot"></span> Meetings</div>
+      <div class="cols">
+        <span class="col-pill key">id</span>
+        <span class="col-pill">type</span>
+        <span class="col-pill">plant</span>
+        <span class="col-pill">time</span>
+        <span class="col-pill">dur</span>
+        <span class="col-pill">facilitator</span>
+        <span class="col-pill">recurring</span>
+        <span class="col-pill">project</span>
+        <span class="col-pill json">completedSessions</span>
+      </div>
+    </div>
+    <div class="schema-card">
+      <div class="tab-name"><span class="dot"></span> Projects</div>
+      <div class="cols">
+        <span class="col-pill key">id</span>
+        <span class="col-pill">name</span>
+        <span class="col-pill">plant</span>
+        <span class="col-pill">owner</span>
+        <span class="col-pill">start</span>
+        <span class="col-pill">end</span>
+        <span class="col-pill">status</span>
+        <span class="col-pill">priority</span>
+        <span class="col-pill">objective</span>
+        <span class="col-pill">scope</span>
+        <span class="col-pill">budget</span>
+        <span class="col-pill">sponsor</span>
+        <span class="col-pill json">team</span>
+        <span class="col-pill json">milestones</span>
+        <span class="col-pill">risks</span>
+      </div>
+    </div>
+    <div class="schema-card">
+      <div class="tab-name"><span class="dot"></span> EscalationMatrix</div>
+      <div class="cols">
+        <span class="col-pill key">id</span>
+        <span class="col-pill">daysOverdue</span>
+        <span class="col-pill">level</span>
+        <span class="col-pill">target</span>
+        <span class="col-pill">action</span>
+      </div>
+    </div>
+    <div class="schema-card">
+      <div class="tab-name"><span class="dot"></span> Permissions</div>
+      <div class="cols">
+        <span class="col-pill key">id</span>
+        <span class="col-pill">canAddAction</span>
+        <span class="col-pill">canEditAction</span>
+        <span class="col-pill">canDeleteAction</span>
+        <span class="col-pill">canCreateMeeting</span>
+        <span class="col-pill">canCreateProject</span>
+        <span class="col-pill">canViewDashboard</span>
+        <span class="col-pill">canManageUsers</span>
+        <span class="col-pill">canExport</span>
+      </div>
+    </div>
+    <div class="schema-card">
+      <div class="tab-name"><span class="dot"></span> MeetingPresets</div>
+      <div class="cols">
+        <span class="col-pill key">type</span>
+        <span class="col-pill json">attendees</span>
+        <span class="col-pill json">instructions</span>
+      </div>
+    </div>
+    <div class="schema-card">
+      <div class="tab-name"><span class="dot"></span> Reasons</div>
+      <div class="cols">
+        <span class="col-pill key">id</span>
+        <span class="col-pill">reason</span>
+        <span class="col-pill">category</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card accent-amber" style="margin-top: 8px;">
+    <div class="card-title">📋 JSON columns</div>
+    <div class="card-body"><span class="col-pill json" style="margin-right: 4px;">yellow</span> columns store JSON arrays serialised as strings. The GAS script handles <code>JSON.stringify</code> on write and <code>JSON.parse</code> on read automatically for columns declared in <code>TABS[tabName].jsonFields</code>. The React CSV parser auto-parses cells that start with <code>[</code> or <code>{</code>.</div>
+  </div>
+</section>
+
+<!-- ═══ ROLES ═══ -->
+<section class="section" id="roles">
+  <div class="section-eyebrow">Reference</div>
+  <h2>Roles & Permissions</h2>
+  <p class="section-sub">The <code>role</code> field on the user object controls page access and actions. Permissions can be fine-tuned per user via the <b>Master Setup → Permissions</b> tab.</p>
+
+  <div class="tbl-wrap">
+    <table class="tbl role-matrix">
+      <thead><tr><th>Feature</th><th>Admin</th><th>Plant Head / MD</th><th>HOD</th><th>Supervisor</th><th>Operator / Guest</th></tr></thead>
+      <tbody>
+        <tr><td>View Dashboard</td><td class="chk">✓</td><td class="chk">✓</td><td class="chk">✓</td><td class="chk">✓</td><td class="chk">✓</td></tr>
+        <tr><td>Add Action</td><td class="chk">✓</td><td class="chk">✓</td><td class="chk">✓</td><td class="chk">✓</td><td class="cross">✗</td></tr>
+        <tr><td>Edit Any Action</td><td class="chk">✓</td><td class="chk">✓</td><td>Own dept</td><td>Own actions</td><td class="cross">✗</td></tr>
+        <tr><td>Confirm Completion</td><td class="chk">✓</td><td class="chk">✓</td><td>Own dept</td><td>Own actions</td><td class="cross">✗</td></tr>
+        <tr><td>Create Meeting</td><td class="chk">✓</td><td class="chk">✓</td><td class="cross">✗</td><td class="cross">✗</td><td class="cross">✗</td></tr>
+        <tr><td>Run Meeting Room</td><td class="chk">✓</td><td class="chk">✓</td><td class="chk">✓</td><td class="cross">✗</td><td class="cross">✗</td></tr>
+        <tr><td>Create Project</td><td class="chk">✓</td><td class="chk">✓</td><td class="cross">✗</td><td class="cross">✗</td><td class="cross">✗</td></tr>
+        <tr><td>View Escalations</td><td class="chk">✓</td><td class="chk">✓</td><td class="chk">✓</td><td class="cross">✗</td><td class="cross">✗</td></tr>
+        <tr><td>Master Setup (page 99)</td><td class="chk">✓</td><td class="cross">✗</td><td class="cross">✗</td><td class="cross">✗</td><td class="cross">✗</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>User Object Fields (Users tab)</h3>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>Field</th><th>Example</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td><code>id</code></td><td>U01</td><td>Unique user ID. Prefix <code>U</code> + 2-digit number.</td></tr>
+        <tr><td><code>role</code></td><td>Hod, Plant Head, MD, Supervisor, Operator, Admin, Guest</td><td>Controls access. Case-insensitive comparison not applied — match exactly.</td></tr>
+        <tr><td><code>plant</code></td><td>Adroit1, Signet, All</td><td>Use <code>All</code> for MD/Admin. Must match plant name exactly.</td></tr>
+        <tr><td><code>superior</code></td><td>Manish Manjhi</td><td>Name of reporting manager. Used for escalation chain. Leave blank for top-level users.</td></tr>
+        <tr><td><code>initials</code></td><td>MM</td><td>2-char avatar initials. Auto-generated in Master Setup if missing.</td></tr>
+        <tr><td><code>color</code></td><td>#272262</td><td>Hex color for avatar background. Auto-assigned in Master Setup if missing.</td></tr>
+        <tr><td><code>username</code></td><td>manish</td><td>Login username (case-insensitive).</td></tr>
+        <tr><td><code>password</code></td><td>1975</td><td>Plain-text login password. Set a strong, unique value per user.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══ CHECKLIST ═══ -->
+<section class="section" id="checklist">
+  <div class="section-eyebrow">Final Checklist</div>
+  <h2>Deployment Checklist</h2>
+  <p class="section-sub">Run through this before going live.</p>
+
+  <div class="card">
+    <div class="card-title">📊 Google Sheet</div>
+    <ul class="checklist">
+      <li>Sheet ID copied from URL</li>
+      <li>Sheet shared publicly (Anyone with link — Viewer)</li>
+      <li>Apps Script code deployed as Web App (Execute as: Me, Access: Anyone)</li>
+      <li><code>setupMissingTabs()</code> run — all 11 tabs exist with headers</li>
+      <li>Users tab populated with at least one Admin user (username + password)</li>
+      <li>Plants tab populated with plant names matching app usage</li>
+      <li>Departments tab populated</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">🐍 FastAPI Backend (Render)</div>
+    <ul class="checklist">
+      <li><code>GEMINI_API_KEY</code> set in Render environment</li>
+      <li><code>SMTP_USER</code> and <code>SMTP_PASS</code> set (or left blank for demo mode)</li>
+      <li><code>GET /api/health</code> returns <code>{"status":"ok","gemini_configured":true}</code></li>
+      <li>CORS is set to <code>allow_origins=["*"]</code> — confirm this is acceptable for your security requirements</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">⚛ React Frontend (Vercel)</div>
+    <ul class="checklist">
+      <li><code>VITE_SHEET_SCRIPT_URL</code> set and not the placeholder value</li>
+      <li><code>VITE_SHEET_ID</code> matches the actual Sheet ID</li>
+      <li><code>VITE_API_BASE_URL</code> points to the live Render URL</li>
+      <li>Login page shows "Connected" status (green dot) — not "Offline"</li>
+      <li>Admin user can log in and reach Master Setup (page 99)</li>
+      <li>Actions page loads real data from sheet (not empty)</li>
+      <li>Meeting Room can connect to AI backend (test with a short paragraph)</li>
+    </ul>
+  </div>
+
+  <div class="alert alert-danger">
+    <div class="alert-icon">🔒</div>
+    <div><b>Security reminders before production use:</b> (1) Remove or disable the <code>guest</code> account. (2) Change all default passwords. (3) Consider restricting the GAS Web App to specific users once your user base is stable (access: "Only myself" + allowlist). (4) The FastAPI CORS is currently set to <code>allow_origins=["*"]</code> — restrict this to your Vercel domain in production.</div>
+  </div>
+
+  <h3>Troubleshooting Quick Reference</h3>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>Symptom</th><th>Likely Cause</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr><td>Login page shows "Offline"</td><td>Sheet not publicly shared or wrong SHEET_ID</td><td>Check sharing settings + VITE_SHEET_ID</td></tr>
+        <tr><td>Login works but pages blank</td><td>Old code without the fetchDoneRef fix still deployed</td><td>Redeploy latest App.jsx from this session</td></tr>
+        <tr><td>GAS write returns 403</td><td>Deployment set to "Only myself" or expired</td><td>Redeploy GAS with Access: Anyone</td></tr>
+        <tr><td>AI features return 500</td><td>GEMINI_API_KEY missing or quota exceeded</td><td>Check Render env vars; check AI Studio quota</td></tr>
+        <tr><td>Emails not sending</td><td>SMTP_PASS is regular password, not App Password</td><td>Generate Gmail App Password; see Prerequisites</td></tr>
+        <tr><td>Data overwrites to empty on reload</td><td>fetchDoneRef fix not applied</td><td>Ensure App.jsx has fetchDoneRef 1000ms delay guard</td></tr>
+        <tr><td>Sheet reads stale data</td><td>CSV URL caching by Google</td><td>Normal — cache invalidates in ~30s. For real-time, add <code>&v={Date.now()}</code> to CSV URL</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script>
+  // Highlight active nav item on scroll
+  const sections = document.querySelectorAll('.section');
+  const navItems = document.querySelectorAll('.nav-item');
+
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const id = entry.target.id;
+        navItems.forEach(n => {
+          n.classList.toggle('active', n.getAttribute('href') === '#' + id);
+        });
+      }
+    });
+  }, { threshold: 0.3 });
+
+  sections.forEach(s => obs.observe(s));
+</script>
+
+</body>
+</html>
