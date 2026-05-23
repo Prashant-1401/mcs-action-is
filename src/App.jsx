@@ -2088,6 +2088,12 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
       });
       const parsed = await res.json();
       analyzeFailRef.current = 0; // reset on success
+
+      // Show error toast if backend signals a problem (e.g. Gemini returned garbage)
+      if (parsed.error) {
+        console.warn("AI insight warning:", parsed.error);
+      }
+
       const insight = {
         id: Date.now(),
         para: para.trim(),

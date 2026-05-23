@@ -35,8 +35,8 @@ if not GEMINI_API_KEY:
 from google import genai as google_genai
 gemini_client = google_genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-# Best model to use — 2.5-flash has active quota and strong performance
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+# gemini-2.0-flash: best balance of reliability, JSON instruction-following, and free-tier quota
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 
 def gemini_generate(prompt: str) -> str:
     """Call Gemini with the new SDK. Falls back to Ollama if unavailable."""
@@ -173,11 +173,11 @@ class InsightsShareReq(BaseModel):
     recipients: List[str]
 
 # ── Routes ─────────────────────────────────────────────────────────────────
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {"message": "MCS Backend API is running", "docs": "/docs", "health": "/api/health"}
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 async def health():
     return {
         "status": "ok",
@@ -247,12 +247,15 @@ TRANSCRIPT:
 """
     text = gemini_generate(prompt)
     if not text:
-        return {"error": "Service unavailable", "actions": []}
+        return {"error": "AI analysis unavailable. Please try again.", "topics": [], "actions": []}
     try:
-        return json.loads(clean_json_response(text))
+        result = json.loads(clean_json_response(text))
+        result.setdefault("topics", [])
+        result.setdefault("actions", [])
+        return result
     except Exception as e:
         print(f"Parse failed: {e}\nRaw: {text[:300]}")
-        return {"error": "Format error", "actions": []}
+        return {"error": f"AI returned unreadable response: {text[:80]}", "topics": [], "actions": []}
 
 @app.post("/api/meetings/analyze-paragraph")
 async def analyze_paragraph(req: ParagraphAnalysisReq):
@@ -280,12 +283,18 @@ Paragraph: "{req.paragraph}"
 """
     text = gemini_generate(prompt)
     if not text:
-        return {"actions": [], "decisions": [], "risks": [], "keyPoints": []}
+        return {"actions": [], "decisions": [], "risks": [], "keyPoints": [], "error": "AI analysis unavailable. Please try again."}
     try:
-        return json.loads(clean_json_response(text))
+        result = json.loads(clean_json_response(text))
+        # Ensure all required keys exist even if Gemini omits them
+        result.setdefault("actions", [])
+        result.setdefault("decisions", [])
+        result.setdefault("risks", [])
+        result.setdefault("keyPoints", [])
+        return result
     except Exception as e:
         print(f"Paragraph parse failed: {e}\nRaw: {text[:300]}")
-        return {"actions": [], "decisions": [], "risks": [], "keyPoints": []}
+        return {"actions": [], "decisions": [], "risks": [], "keyPoints": [], "error": f"AI returned unreadable response: {text[:80]}"}
 
 @app.post("/api/translate")
 async def translate_text(req: TranslateReq):
