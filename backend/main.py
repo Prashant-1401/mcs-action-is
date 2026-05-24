@@ -1,5 +1,5 @@
 """
-main.py — MCS Backend API  v2
+main.py — MCS Backend API  v2 (Integrated with wacrm WhatsApp Gateway)
 Uses google-genai SDK v2+ (replaces deprecated google-generativeai).
 Run: uvicorn main:app --reload --port 8000
 """
@@ -19,9 +19,10 @@ load_dotenv(os.path.join(os.getcwd(), ".env"))
 # ── FastAPI app ────────────────────────────────────────────────────────────
 app = FastAPI(title="MCS Backend API")
 
+# Updated in production to explicitly accept your wacrm and frontend domains
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -50,7 +51,6 @@ def gemini_generate(prompt: str) -> str:
         return response.text
     except Exception as e:
         print(f"Gemini failed ({GEMINI_MODEL}): {e}")
-        # Try fallback model before giving up
         try:
             response = gemini_client.models.generate_content(
                 model="gemini-2.0-flash",
@@ -59,7 +59,6 @@ def gemini_generate(prompt: str) -> str:
             return response.text
         except Exception as e2:
             print(f"Gemini fallback also failed: {e2}")
-            # Last resort: try flash-lite before handing off to Ollama
             try:
                 response = gemini_client.models.generate_content(
                     model="gemini-2.0-flash-lite",
@@ -97,7 +96,6 @@ TEAM_EMAIL  = os.environ.get("TEAM_EMAIL", "team@adroit.in")
 
 def send_email(to_emails: List[str], subject: str, html_content: str):
     if not SMTP_USER or not SMTP_PASS:
-        # Demo mode — print to console
         print(f"\n--- DEMO EMAIL ---\nTO: {to_emails}\nSUBJECT: {subject}\n{html_content}\n---")
         return True
     try:
@@ -116,9 +114,35 @@ def send_email(to_emails: List[str], subject: str, html_content: str):
         print(f"Email send failed: {e}")
         return False
 
+# ── wacrm WhatsApp Gateway Integration Helper ──────────────────────────────
+# URL configuration pointing to your newly created custom automation endpoint
+WACRM_ALERT_URL = os.environ.get("WACRM_ALERT_URL", "http://localhost:3000/api/automation/send-alert")
+
+def send_whatsapp_alert(phone: str, message: str) -> bool:
+    """Helper to dispatch text alerts directly to your wacrm automation endpoint."""
+    if not phone:
+        print("Skipping WhatsApp alert: Target phone number is missing.")
+        return False
+    try:
+        payload = {
+            "phone": phone,
+            "message": message
+        }
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(WACRM_ALERT_URL, json=payload, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            print(f"WhatsApp alert successfully dispatched via wacrm gateway to: {phone}")
+            return True
+        else:
+            print(f"wacrm gateway rejected request ({response.status_code}): {response.text}")
+            return False
+    except Exception as e:
+        print(f"Failed to communicate with wacrm WhatsApp gateway: {e}")
+        return False
+
 # ── JSON cleaning helper ───────────────────────────────────────────────────
 def clean_json_response(text: str) -> str:
-    """Extract JSON from an LLM response that may have markdown fences."""
     text = text.strip()
     if "```json" in text:
         try:
@@ -165,12 +189,14 @@ class EmailEscalateReq(BaseModel):
     actions: List[Dict[str, Any]]
     level: int
     target: str
+    phone: str = "" # Added phone property to extract task owner numbers dynamically
 
 class InsightsShareReq(BaseModel):
     insights: List[Dict[str, Any]]
     meeting_type: str
     plant: str
     recipients: List[str]
+    phones: List[str] = [] # Added phone list support for direct text distributions
 
 # ── Routes ─────────────────────────────────────────────────────────────────
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -184,25 +210,38 @@ async def health():
         "gemini_configured": bool(GEMINI_API_KEY),
         "gemini_model": GEMINI_MODEL,
         "smtp_configured": bool(SMTP_USER and SMTP_PASS),
+        "wacrm_gateway_configured": bool(WACRM_ALERT_URL)
     }
 
 @app.get("/api/ping")
 async def ping():
-    """Lightweight wakeup endpoint — called by frontend on meeting start to warm up the Render instance."""
     return {"ok": True, "gemini_ready": bool(gemini_client)}
 
 @app.post("/api/email/escalate")
 async def email_escalate(req: EmailEscalateReq):
+    # 1. Dispatch the legacy Email Alert Chain
     subject = f"Escalation Alert Level {req.level} — {req.target}"
     body = f"<h2>Escalated Actions — Level {req.level}</h2><ul>"
+    
+    whatsapp_body = f"⚠️ *MCS Escalation Alert Level {req.level}*\nTarget: {req.target}\n\n*Items Pending Allocation:*\n"
+    
     for a in req.actions:
         body += f"<li><b>{a.get('sn')}</b>: {a.get('text')} (Priority: {a.get('priority')})</li>"
+        whatsapp_body += f"• *[{a.get('sn')}]* {a.get('text')} (Priority: {a.get('priority')})\n"
+        
     body += "</ul>"
     send_email([ADMIN_EMAIL], subject, body)
+    
+    # 2. Concurrently push a WhatsApp copy if a phone string is available
+    if req.phone:
+        whatsapp_body += "\nPlease access your dashboard console to manage updates immediately."
+        send_whatsapp_alert(req.phone, whatsapp_body)
+        
     return {"status": "ok"}
 
 @app.post("/api/email/share-insights")
 async def email_share_insights(req: InsightsShareReq):
+    # 1. Execute standard Email Insights Delivery
     subject = f"Real-time Insights — {req.meeting_type} @ {req.plant}"
     body = "<h2>Meeting Insights</h2>"
     for ins in req.insights:
@@ -215,6 +254,22 @@ async def email_share_insights(req: InsightsShareReq):
             body += f"<li><b>Risk:</b> {rsk}</li>"
         body += "</ul>"
     send_email(req.recipients or [TEAM_EMAIL], subject, body)
+    
+    # 2. Iterate and broadcast clear summaries to phone list
+    if req.phones:
+        for p in req.phones:
+            wa_insights = f"📋 *Real-time Insights Summaries*\n{req.meeting_type} @ {req.plant}\n"
+            for ins in req.insights:
+                if ins.get('actions'):
+                    wa_insights += "\n*Allocated Actions:*\n"
+                    for act in ins.get('actions', []):
+                        wa_insights += f"• {act.get('text')} (Resp: {act.get('responsible')})\n"
+                if ins.get('decisions'):
+                    wa_insights += "\n*Key Decisions:*\n"
+                    for dec in ins.get('decisions', []):
+                        wa_insights += f"• {dec}\n"
+            send_whatsapp_alert(p, wa_insights)
+
     return {"status": "ok"}
 
 @app.post("/api/meetings/extract-insights")
@@ -286,7 +341,6 @@ Paragraph: "{req.paragraph}"
         return {"actions": [], "decisions": [], "risks": [], "keyPoints": [], "error": "AI analysis unavailable. Please try again."}
     try:
         result = json.loads(clean_json_response(text))
-        # Ensure all required keys exist even if Gemini omits them
         result.setdefault("actions", [])
         result.setdefault("decisions", [])
         result.setdefault("risks", [])

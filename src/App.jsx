@@ -87,11 +87,13 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   const [permissions, setPermsRaw] = useState(defaultPermissions);
   const [mtgPresets, setPresetsRaw] = useState(defaultPresets);
   const [machines, setMachinesRaw] = useState(defaultMachines || []);
+  const [reasons, setReasonsRaw] = useState([]);
+  const [persistedAudit, setPersistedAuditRaw] = useState([]);
 
   const fetchData = useCallback(async () => {
     if (!SHEET_ENABLED) { setDbReady(true); return; }
     try {
-      const [u, p, d, a, m, pr, em, pm, ps, mc] = await Promise.all([
+      const [u, p, d, a, m, pr, em, pm, ps, mc, rs, au] = await Promise.all([
         sheetGet("Users"),
         sheetGet("Plants"),
         sheetGet("Departments"),
@@ -102,6 +104,8 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
         sheetGet("Permissions"),
         sheetGet("MeetingPresets"),
         sheetGet("Machines"),
+        sheetGet("Reasons").catch(() => []),
+        sheetGet("Audit").catch(() => []),
       ]);
       const sanitize = (arr, prefix) => (Array.isArray(arr) ? arr : [])
         .filter(x => x && Object.values(x).some(v => v !== "" && v !== null && v !== undefined))
@@ -115,9 +119,13 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
       if (em.length) setEscRaw(sanitize(em, "e"));
       if (pm.length) {
         const pObj = {};
-        pm.forEach(row => { if (row.id) pObj[row.id] = row; });
+        // Script stores Permissions with key=id; keep the row under that id key
+        // and ensure name is preserved for lookup fallback
+        pm.forEach(row => { if (row.id !== undefined && row.id !== null && String(row.id).trim()) pObj[String(row.id)] = row; });
         setPermsRaw(pObj);
       }
+      if (rs.length) setReasonsRaw(rs);
+      if (au.length) setPersistedAuditRaw(sanitize(au, "au"));
       if (ps.length) {
         const pMap = { attendeeMap: {}, instructions: {} };
         ps.forEach(row => {
@@ -153,6 +161,8 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   const setPermissions = useCallback((fnOrVal) => { setPermsRaw(fnOrVal); }, []);
   const setMtgPresets = useCallback((fnOrVal) => { setPresetsRaw(fnOrVal); }, []);
   const setMachines = useCallback((fnOrVal) => { setMachinesRaw(fnOrVal); }, []);
+  const setReasons = useCallback((fnOrVal) => { setReasonsRaw(fnOrVal); }, []);
+  const setPersistedAudit = useCallback((fnOrVal) => { setPersistedAuditRaw(fnOrVal); }, []);
 
   // ── Sync state changes to sheet via effects (only after initial load) ──
   // fetchDoneRef is set true only after a delay post-load, preventing the
@@ -177,9 +187,20 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   useEffect(() => { syncToSheet("Projects", projects); }, [projects, syncToSheet]);
   useEffect(() => { syncToSheet("EscalationMatrix", escMatrix); }, [escMatrix, syncToSheet]);
   useEffect(() => {
-    const rows = Object.values(permissions);
+    // Ensure every row has id and name fields so the script's key lookup works
+    const rows = Object.values(permissions).map(row => ({
+      id: row.id ?? "",
+      name: row.name ?? "",
+      canEditMeetings: row.canEditMeetings ?? false,
+      canCreateProjects: row.canCreateProjects ?? false,
+      canEditActions: row.canEditActions ?? false,
+      canViewDashboard: row.canViewDashboard ?? true,
+      canManageEscalations: row.canManageEscalations ?? false,
+    }));
     syncToSheet("Permissions", rows);
   }, [permissions, syncToSheet]);
+  useEffect(() => { syncToSheet("Reasons", reasons); }, [reasons, syncToSheet]);
+  useEffect(() => { syncToSheet("Audit", persistedAudit); }, [persistedAudit, syncToSheet]);
   useEffect(() => {
     const allTypes = Array.from(new Set([...Object.keys(mtgPresets.attendeeMap), ...Object.keys(mtgPresets.instructions)]));
     const rows = allTypes.map(t => ({ type: t, attendees: mtgPresets.attendeeMap[t] || [], instructions: mtgPresets.instructions[t] || [] }));
@@ -198,7 +219,9 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
     escMatrix, setEscMatrix,
     permissions, setPermissions,
     mtgPresets, setMtgPresets,
-    machines, setMachines
+    machines, setMachines,
+    reasons, setReasons,
+    persistedAudit, setPersistedAudit,
   };
 }
 
@@ -232,6 +255,26 @@ const SEED_ACTIONS = [];
 // Permissions are managed entirely from the Google Sheet (Permissions tab).
 // This returns an empty object so the sheet is always the source of truth.
 const DEFAULT_PERMISSIONS_SEED = () => ({});
+
+// Resolve permissions for a user — looks up by id (string-coerced) or name fallback.
+// If no explicit row exists, ALL perms default to true (open access).
+// Only explicitly stored false values lock a permission.
+const getPerms = (user, permissions) => {
+  if (!user || !permissions) return { canEditMeetings: true, canCreateProjects: true, canEditActions: true, canViewDashboard: true, canManageEscalations: true };
+  // Try by id (coerce both sides to string to avoid number/string mismatch)
+  const byId = permissions[String(user.id)] || permissions[user.id];
+  // Try by name as fallback
+  const byName = !byId ? Object.values(permissions).find(p => p.name === user.name || p.id === user.name) : null;
+  const row = byId || byName;
+  if (!row) return { canEditMeetings: true, canCreateProjects: true, canEditActions: true, canViewDashboard: true, canManageEscalations: true };
+  return {
+    canEditMeetings:     row.canEditMeetings     !== false && row.canEditMeetings     !== "false",
+    canCreateProjects:   row.canCreateProjects   !== false && row.canCreateProjects   !== "false",
+    canEditActions:      row.canEditActions      !== false && row.canEditActions      !== "false",
+    canViewDashboard:    row.canViewDashboard    !== false && row.canViewDashboard    !== "false",
+    canManageEscalations:row.canManageEscalations!== false && row.canManageEscalations!== "false",
+  };
+};
 
 const SAMPLE_TRANSCRIPT_LINES = [
   "Good morning everyone. Let's start with yesterday's production numbers.",
@@ -747,10 +790,19 @@ function AdminNotifManager({ users, onClose }) {
     </div>
   );
 }
-function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCount, auditCount, activeMtg, onResumeActiveMtg, mtgRunning, mtgElapsed, notifications, onMarkAllRead, unreadCount, users, actions, onShowSupport, onShowProfile, onShowAdminNotifs }) {
+function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCount, auditCount, activeMtg, onResumeActiveMtg, mtgRunning, mtgElapsed, notifications, onMarkAllRead, unreadCount, users, actions, onShowSupport, onShowProfile, onShowAdminNotifs, permissions }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const isAdmin = user?.role === "Admin";
+  const userPerms = getPerms(user, permissions);
+  const canAccessPage = (id) => {
+    if (isAdmin) return true;
+    if (id === 0 || id === 1) return true;
+    if (id === 2) return userPerms.canEditActions;
+    if (id === 3) return userPerms.canViewDashboard;
+    if (id === 4) return userPerms.canManageEscalations;
+    return false;
+  };
   const hms = s => `${String(Math.floor(s / 3600)).padStart(2, "0")}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
   return (
@@ -767,13 +819,15 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
         </div>
         <nav style={{ padding: "14px 10px", flex: 1 }}>
           {NAV.map(n => {
-            const active = page === n.id; return (
-              <button key={n.id} onClick={() => setPage(n.id)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px", borderRadius: 10, border: "none", cursor: "pointer", marginBottom: 3, textAlign: "left", fontFamily: "'Inter',sans-serif", fontSize: 13, fontWeight: active ? 600 : 400, background: active ? "rgba(255,255,255,.15)" : "transparent", color: active ? "#fff" : "rgba(255,255,255,.65)", transition: "all .2s", position: "relative" }}>
-                <span style={{ fontSize: 16, width: 22, textAlign: "center", flexShrink: 0 }}>{n.icon}</span>
+            const active = page === n.id;
+            const allowed = canAccessPage(n.id);
+            return (
+              <button key={n.id} onClick={() => { if (allowed) setPage(n.id); }} title={!allowed ? "Access not granted" : ""} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px", borderRadius: 10, border: "none", cursor: allowed ? "pointer" : "not-allowed", marginBottom: 3, textAlign: "left", fontFamily: "'Inter',sans-serif", fontSize: 13, fontWeight: active ? 600 : 400, background: active ? "rgba(255,255,255,.15)" : "transparent", color: active ? "#fff" : allowed ? "rgba(255,255,255,.65)" : "rgba(255,255,255,.3)", transition: "all .2s", position: "relative" }}>
+                <span style={{ fontSize: 16, width: 22, textAlign: "center", flexShrink: 0, opacity: allowed ? 1 : 0.4 }}>{n.icon}</span>
                 <span style={{ flex: 1 }}>{n.label}</span>
-                {n.id
-                  === 2 && pendingCount > 0 && <span style={{ background: T.red, color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{pendingCount}</span>}
-                {n.id === 4 && auditCount > 0 && <span style={{ background: T.amber, color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{auditCount}</span>}
+                {!allowed && <span style={{ fontSize: 10, opacity: 0.5 }}>🔒</span>}
+                {allowed && n.id === 2 && pendingCount > 0 && <span style={{ background: T.red, color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{pendingCount}</span>}
+                {allowed && n.id === 4 && auditCount > 0 && <span style={{ background: T.amber, color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{auditCount}</span>}
                 {active && <span style={{ width: 3, height: 20, borderRadius: 2, background: T.amber, position: "absolute", right: 8 }} />}
               </button>
             );
@@ -1276,7 +1330,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
       </div>
 
       {/* Unified action detail panel — same as Actions page */}
-      {actionPanel && <ActionDetailPanel action={actionPanel} onClose={() => setActionPanel(null)} onUpdate={(id, patch) => { upAction(id, patch); setActionPanel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} />}
+      {actionPanel && <ActionDetailPanel action={actionPanel} onClose={() => setActionPanel(null)} onUpdate={(id, patch) => { upAction(id, patch); setActionPanel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} permissions={permissions} />}
 
       {/* Fix 6: Team sub modal */}
       {subModal && (
@@ -1531,7 +1585,7 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
 }
 
 /* ===================== WORK PAGE ===================== */
-function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, user, onProjectUpdate, allProjects, setProjects: setProjectsUp, allMeetings, setMeetings: setMeetingsUp, permissions, setPage, globalActiveMtg, setGlobalActiveMtg, mtgRunning, setMtgRunning, mtgElapsed, mtgTxLines, setMtgTxLines, mtgFastActions, setMtgFastActions, mtgInsights, setMtgInsights, clearMeetingState, mtgPresets }) {
+function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, user, onProjectUpdate, allProjects, setProjects: setProjectsUp, allMeetings, setMeetings: setMeetingsUp, permissions, setPage, globalActiveMtg, setGlobalActiveMtg, mtgRunning, setMtgRunning, mtgElapsed, mtgTxLines, setMtgTxLines, mtgFastActions, setMtgFastActions, mtgInsights, setMtgInsights, clearMeetingState, mtgPresets, reasons }) {
   // activeMtg is now global — WorkPage just reads/writes it
   const activeMtg = globalActiveMtg;
   const setActiveMtg = (m) => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); };
@@ -1550,9 +1604,9 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
   const [mtgPlan, setMtgPlan] = useState(null);  // Feature 4: meeting plan view
 
   const isAdmin = user?.role === "Admin";
-  const userPerms = permissions?.[user?.id] || {};
+  const userPerms = getPerms(user, permissions);
   // Feature 3: can create projects if admin or has permission
-  const canCreateProject = isAdmin || userPerms.canCreateProjects || user?.role !== "Guest";
+  const canCreateProject = isAdmin || userPerms.canCreateProjects;
   // Feature 4: can edit meetings if admin or has permission
   const canEditMeetings = isAdmin || userPerms.canEditMeetings;
 
@@ -1589,7 +1643,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
             : a.src === activeMtg.type;
           const matchesProject = activeMtg.project && a.project === activeMtg.project;
           return matchesMeeting || matchesProject;
-        })} running={mtgRunning} setRunning={setMtgRunning} elapsed={mtgElapsed} txLines={mtgTxLines} setTxLines={setMtgTxLines} fastActions={mtgFastActions} setFastActions={setMtgFastActions} insights={mtgInsights} setInsights={setMtgInsights} currentUser={user} mtgPresets={mtgPresets} setActions={setActions} />;
+        })} running={mtgRunning} setRunning={setMtgRunning} elapsed={mtgElapsed} txLines={mtgTxLines} setTxLines={setMtgTxLines} fastActions={mtgFastActions} setFastActions={setMtgFastActions} insights={mtgInsights} setInsights={setMtgInsights} currentUser={user} mtgPresets={mtgPresets} setActions={setActions} reasons={reasons} />;
 
   return (
     <div className="fade-in">
@@ -1744,7 +1798,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
         </div>
       </div>
       {charter && <ProjectCharterModal pr={charter} onClose={() => { setCharter(null); setCharterActionSel(null); }} actions={actions} meetings={meetings} user={user} users={users} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); onProjectUpdate(updated); }} onActionSelect={a => setCharterActionSel(a)} />}
-      {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={() => { }} user={user} users={users} allUsers={users} plants={plants} />}
+      {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={() => { }} user={user} users={users} allUsers={users} plants={plants} permissions={permissions} />}
       {showAddMtg && <AddMeetingModal plants={plants} users={users} projects={projects} onSave={m => { setMeetings(p => [...p, { ...m, id: "M" + Date.now(), completedSessions: [] }]); setShowAddMtg(false); }} onClose={() => setShowAddMtg(false)} />}
       {/* Feature 3: Add Project Modal */}
       {showAddProject && <AddProjectModal plants={plants} users={users} onSave={p => { setProjects(prev => [...prev, { ...p, id: "PR" + Date.now(), milestones: [], risks: "", team: [] }]); showAddProject && setShowAddProject(false); }} onClose={() => setShowAddProject(false)} />}
@@ -1987,7 +2041,7 @@ function AddMeetingModal({ plants, users, projects, onSave, onClose }) {
 }
 
 /* ===================== MEETING ROOM ===================== */
-function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBack, prevActions, relatedActions, running, setRunning, elapsed, txLines, setTxLines, fastActions, setFastActions, insights, setInsights, currentUser, mtgPresets, setActions }) {
+function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBack, prevActions, relatedActions, running, setRunning, elapsed, txLines, setTxLines, fastActions, setFastActions, insights, setInsights, currentUser, mtgPresets, setActions, reasons }) {
   const [phase, setPhase] = useState("live");
   const [showSidePanel, setShowSidePanel] = useState(false);
   const [selAction, setSelAction] = useState(null);
@@ -2792,27 +2846,19 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
         </div>
       </div>
 
-      {showSidePanel && <AddActionPanel users={users} plants={plants} depts={depts} defaultPlant={mtg.plant} defaultSrc={mtg.type} onSave={a => { setFastActions(p => Array.isArray(p) ? [...p, { ...a, id: Date.now() }] : [{ ...a, id: Date.now() }]); setShowSidePanel(false); }} onClose={() => setShowSidePanel(false)} />}
+      {showSidePanel && <AddActionPanel users={users} plants={plants} depts={depts} defaultPlant={mtg.plant} defaultSrc={mtg.type} reasons={reasons} onSave={a => { setFastActions(p => Array.isArray(p) ? [...p, { ...a, id: Date.now() }] : [{ ...a, id: Date.now() }]); setShowSidePanel(false); }} onClose={() => setShowSidePanel(false)} />}
       {selAction && <ActionDetailPanel action={selAction} onClose={() => setSelAction(null)} onUpdate={() => { }} user={null} users={users} allUsers={users} />}
     </div>
   );
 }
 
 /* ADD ACTION SIDE PANEL */
-function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projects, onSave, onClose, currentUser, machines }) {
+function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projects, onSave, onClose, currentUser, machines, reasons: reasonsProp }) {
   useEscClose(onClose);
-  const [f, setF] = useState({ text: "", responsible: "", due: "", section: "General", plant: defaultPlant || "", src: defaultSrc || "", priority: "NORMAL", remarks: "", project: "", reasonOfAction: "", machineName: "" });
-  const [reasonSuggestions, setReasonSuggestions] = useState([]);
+  const [f, setF] = useState({ text: "", responsible: "", due: "", section: "General", plant: defaultPlant || "", src: defaultSrc || "", priority: "NORMAL", remarks: "", project: "", reasonOfAction: "", machineName: "", actionPointType: "" });
+  // Derive reason suggestions from the reasons state passed in (loaded at app boot)
+  const reasonSuggestions = (reasonsProp || []).map(r => r.reason || r.Reason || r.text || r.Text || Object.values(r)[0]).filter(Boolean);
   const up = (k, v) => setF(x => ({ ...x, [k]: v }));
-
-  // Pull reason suggestions from Google Sheet "Reasons" tab
-  useEffect(() => {
-    if (!SHEET_ENABLED) return;
-    sheetGet("Reasons").then(rows => {
-      const reasons = rows.map(r => r.reason || r.Reason || r.text || r.Text || Object.values(r)[0]).filter(Boolean);
-      if (reasons.length) setReasonSuggestions(reasons);
-    }).catch(() => {/* silently ignore */ });
-  }, []);
   const machineOpts = (machines || []).filter(m => !f.plant || !m.plant || m.plant === f.plant).map(m => m.name).filter(Boolean);
   return (
     <>
@@ -2823,7 +2869,7 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projec
           <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 22, color: T.text2 }}>x</button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div><Lbl t="Action Category" /><input value={f.reasonOfAction} onChange={e => up("reasonOfAction", e.target.value)} placeholder="Category or reason for this action…" list="reason-suggestions" />{reasonSuggestions.length > 0 && <datalist id="reason-suggestions">{reasonSuggestions.map((r, i) => <option key={i} value={r} />)}</datalist>}</div>
+          <div><Lbl t="Action Point Type" req /><select value={f.actionPointType} onChange={e => up("actionPointType", e.target.value)}><option value="">Select type…</option>{["Corrective Action","Preventive Action","Improvement","Safety","Maintenance","Quality","Compliance","Other"].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
           <div><Lbl t="Action Point" req /><textarea value={f.text} onChange={e => up("text", e.target.value)} style={{ height: 72, resize: "none" }} placeholder="Describe the action…" /></div>
           <div><Lbl t="Responsible Person" req /><select value={f.responsible} onChange={e => up("responsible", e.target.value)}><option value="">Select…</option>{users.map(u => <option key={u.id} value={u.name}>{u.name} ({u.role})</option>)}</select></div>
           <div><Lbl t="Due Date" req /><input type="date" value={f.due} onChange={e => up("due", e.target.value)} /></div>
@@ -3005,7 +3051,7 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
 
 /* ===================== ACTION DETAIL SIDE PANEL ===================== */
 /* Completion workflow: assignee marks done → goes to allocatedBy + their superior for confirmation */
-function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, plants: panelPlants, machines: panelMachines }) {
+function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, plants: panelPlants, machines: panelMachines, permissions }) {
   useEscClose(onClose);
   const [msgText, setMsgText] = useState("");
   const messagesEndRef = useRef(null);
@@ -3025,9 +3071,10 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
   const isAllocator = user?.name === allocator;
   const isAllocatorSuperior = user?.name === allocatorSuperior?.name;
   const isAdmin = user?.role === "Admin";
+  const _hasEditPerm = isAdmin || getPerms(user, permissions).canEditActions;
   const canConfirm = isAllocator || isAllocatorSuperior || isAdmin;
-  const canMsg = user?.role !== "Guest";  // anyone who can see the action can comment
-  const canEdit = user?.role !== "Guest" && !isPendingConfirm && action.status !== "COMPLETED" && action.status !== "DROPPED";
+  const canMsg = _hasEditPerm || isAssignee || isAllocator;
+  const canEdit = _hasEditPerm && !isPendingConfirm && action.status !== "COMPLETED" && action.status !== "DROPPED";
 
   useEffect(() => { if (messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
@@ -3131,7 +3178,10 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
           <div style={{ padding: "16px 24px", borderBottom: `1px solid ${T.border}` }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: T.navy, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>📋 Details {canEdit && <span style={{ fontSize: 10, color: T.text2, fontWeight: 400 }}>(click any field to edit)</span>}</div>
             <div style={{ marginBottom: 12 }}>
-              <InlineField label="Action Category" field="reasonOfAction" value={action.reasonOfAction} type="text" />
+              <InlineField label="Action Category" field="reasonOfAction" value={action.reasonOfAction} type="select" opts={["","Corrective Action","Preventive Action","Improvement","Safety","Maintenance","Quality","Compliance","Other"]} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <InlineField label="Action Point" field="text" value={action.text} type="textarea" />
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
               {/* Read-only fields */}
@@ -3243,7 +3293,7 @@ const userViewPref = {};
 const userSortPref = {};  // persist sort across page changes
 const userFilterPref = {}; // persist filters across page changes
 
-function ActionsPage({ actions, setActions, plants, depts, users, user, projects, machines }) {
+function ActionsPage({ actions, setActions, plants, depts, users, user, projects, machines, permissions }) {
   const userKey = user?.id || "guest";
   const [view, setView] = useState(userViewPref[userKey] || "table");
   // Multi-select filters: persistent across page changes
@@ -3257,7 +3307,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(null);
   const [openFilter, setOpenFilter] = useState(null);
-  const canEdit = user?.role !== "Guest";
+  const canEdit = user?.role === "Admin" || getPerms(user, permissions).canEditActions;
   const allProjects = [...new Set(actions.map(a => a.project).filter(Boolean))];
 
   const changeView = v => { setView(v); userViewPref[userKey] = v; };
@@ -3452,7 +3502,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
       {view === "board" && <BoardView fa={fa} setSel={setSel} users={users} />}
       {view === "kanban" && <KanbanView fa={fa} upStatus={upStatus} canEdit={canEdit} users={users} setSel={setSel} />}
       {view === "timeline" && <TimelineView fa={fa} />}
-      {sel && <ActionDetailPanel action={sel} onClose={() => setSel(null)} onUpdate={(id, patch) => { upAction(id, patch); setSel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} machines={machines} />}
+      {sel && <ActionDetailPanel action={sel} onClose={() => setSel(null)} onUpdate={(id, patch) => { upAction(id, patch); setSel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} machines={machines} permissions={permissions} />}
     </div>
   );
 }
@@ -3516,7 +3566,7 @@ function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortC
                 <td style={{ minWidth: 280, maxWidth: 360 }}>
                   <div style={{ fontWeight: 500, whiteSpace: "normal", wordBreak: "break-word", fontSize: 13, lineHeight: 1.4 }}>{a.text}</div>
                   {isOverdue(a) && <div style={{ fontSize: 10, color: T.red, fontWeight: 600 }}>⚠ {daysOver(a)}d overdue</div>}
-                  {a.pendingConfirmation && <div style={{ fontSize: 10, color: T.amber, fontWeight: 600 }}>⏳ Pending confirm</div>}
+                  {a.pendingConfirmation && <div style={{ fontSize: 10, color: T.amber, fontWeight: 600 }}>⏳ {a.status}</div>}
                 </td>
                 <td onClick={e => e.stopPropagation()}><div style={{ display: "flex", alignItems: "center", gap: 6 }}><Avatar name={a.responsible} size={24} users={users} /><span style={{ fontSize: 12 }}>{a.responsible}</span></div></td>
                 <td style={{ fontSize: 12, color: isOverdue(a) ? T.red : T.text, whiteSpace: "nowrap" }}>{fmt(a.due)}</td>
@@ -3701,7 +3751,7 @@ function KanbanView({ fa, upStatus, canEdit, users, setSel }) {
                       <Avatar name={a.responsible} size={20} users={users || []} />
                       <span style={{ fontSize: 10, color: isOverdue(a) ? T.red : T.text2 }}>{fmt(a.due)}</span>
                     </div>
-                    {a.pendingConfirmation && <div style={{ fontSize: 10, color: T.amber, marginTop: 5, fontWeight: 600 }}>⏳ Pending</div>}
+                    {a.pendingConfirmation && <div style={{ fontSize: 10, color: T.amber, marginTop: 5, fontWeight: 600 }}>⏳ {a.status}</div>}
                     {(a.messages || []).length > 0 && <div style={{ fontSize: 10, color: T.text2, marginTop: 4 }}>💬 {a.messages.length}</div>}
                   </div>
                 );
@@ -3755,7 +3805,7 @@ function TimelineView({ fa }) {
 }
 
 /* ===================== DASHBOARD ===================== */
-function DashboardPage({ actions, plants, depts, users, audit, user, meetings, onViewEscalations, refreshData, setActions: setActionsUp }) {
+function DashboardPage({ actions, plants, depts, users, audit, user, meetings, onViewEscalations, refreshData, setActions: setActionsUp, permissions }) {
   const [drill, setDrill] = useState(null);
   const [deptDrill, setDeptDrill] = useState(null);
   const [mtgDrill, setMtgDrill] = useState(false);
@@ -4110,13 +4160,13 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
           </div>
         );
       })()}
-      {actionDetail && <ActionDetailPanel action={actionDetail} onClose={() => setActionDetail(null)} onUpdate={(id, patch) => { if (setActionsUp) setActionsUp(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); setActionDetail(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} />}
+      {actionDetail && <ActionDetailPanel action={actionDetail} onClose={() => setActionDetail(null)} onUpdate={(id, patch) => { if (setActionsUp) setActionsUp(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); setActionDetail(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} permissions={permissions} />}
     </div>
   );
 }
 
 /* ===================== ESCALATIONS PAGE — Feature 9 ===================== */
-function EscalationsPage({ actions, audit, user, setPage, users, plants, setActions: setActionsUp }) {
+function EscalationsPage({ actions, audit, user, setPage, users, plants, setActions: setActionsUp, permissions }) {
   const [sel, setSel] = useState(null);
   const [filterMode, setFilterMode] = useState("mine"); // "mine" | "all"
   const [actionDetail, setActionDetail] = useState(null);
@@ -4250,7 +4300,7 @@ function EscalationsPage({ actions, audit, user, setPage, users, plants, setActi
           </tbody>
         </table>
       </div>
-      {actionDetail && <ActionDetailPanel action={actionDetail} onClose={() => setActionDetail(null)} onUpdate={(id, patch) => { if (setActionsUp) setActionsUp(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); setActionDetail(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} />}
+      {actionDetail && <ActionDetailPanel action={actionDetail} onClose={() => setActionDetail(null)} onUpdate={(id, patch) => { if (setActionsUp) setActionsUp(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); setActionDetail(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} permissions={permissions} />}
     </div>
   );
 }
@@ -4404,6 +4454,28 @@ function EscMatrixTab({ escMatrix, setEscMatrix }) {
   );
 }
 
+function PermSaveButton({ permissions }) {
+  const [status, setStatus] = React.useState("idle");
+  const save = async () => {
+    if (!SHEET_ENABLED) { setStatus("error"); setTimeout(() => setStatus("idle"), 2500); return; }
+    setStatus("saving");
+    try {
+      const rows = Object.values(permissions);
+      await sheetPost("replace_all", "Permissions", { rows });
+      setStatus("saved");
+    } catch (e) { setStatus("error"); }
+    setTimeout(() => setStatus("idle"), 2500);
+  };
+  const label = status === "saving" ? "Saving…" : status === "saved" ? "✓ Saved!" : status === "error" ? "⚠ Failed" : "💾 Save to Sheet";
+  const col = status === "saved" ? "#1E8449" : status === "error" ? "#C0392B" : "#272262";
+  return (
+    <button onClick={save} disabled={status === "saving"} title={SHEET_ENABLED ? "Push current permissions to Google Sheet" : "Sheet not connected"} style={{ padding: "8px 18px", borderRadius: 8, border: "none", cursor: status === "saving" ? "not-allowed" : "pointer", background: col, color: "#fff", fontWeight: 700, fontSize: 13, opacity: status === "saving" ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}>
+      {status === "saving" && <span style={{ width: 13, height: 13, border: "2px solid rgba(255,255,255,.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} />}
+      {label}
+    </button>
+  );
+}
+
 function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permissions, setPermissions, escMatrix, setEscMatrix, mtgPresets, setMtgPresets, machines, setMachines }) {
   const [tab, setTab] = useState("users");
   const [modal, setModal] = useState(null);
@@ -4415,7 +4487,9 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
   useEscClose(close);
   const saveUser = () => {
     if (!form.name || !form.role || !form.plant) return;
-    const u = { ...form, id: form.id || "U" + String(users.length + 1).padStart(2, "0"), initials: form.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(), color: form.color || COLORS[users.length % 6] };
+    // Strip UI-only temp fields before saving to state/sheet
+    const { _showPw, ...cleanForm } = form;
+    const u = { ...cleanForm, id: cleanForm.id || "U" + String(users.length + 1).padStart(2, "0"), initials: cleanForm.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(), color: cleanForm.color || COLORS[users.length % 6] };
     if (modal.mode === "edit") setUsers(p => p.map(x => x.id === u.id ? u : x)); else setUsers(p => [...p, u]); close();
   };
   const TABS = [["users", "👥 Users"], ["plants", "🏭 Plants"], ["depts", "🗂 Departments"], ["machines", "⚙ Machines"], ["org", "🌳 Org Chart"], ["perms", "🔐 Permissions"], ["escmatrix", "🚨 Escalation Matrix"], ["presets", "🎙 Meeting Presets"]];
@@ -4461,7 +4535,7 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
         {tab !== "org" && <button className="btn btn-amber btn-sm" style={{ marginLeft: "auto", alignSelf: "center" }} onClick={() => openAdd(tab)}>+ Add</button>}
       </div>
       {tab === "users" && <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <table><thead><tr><th>User</th><th>Role</th><th>Plant</th><th>Department</th><th>Superior</th><th>Phone</th><th>Email</th><th></th></tr></thead>
+        <table><thead><tr><th>User</th><th>Role</th><th>Plant</th><th>Department</th><th>Superior</th><th>Phone</th><th>Email</th><th>Password</th><th></th></tr></thead>
           <tbody>{users.map(u => <tr key={u.id}>
             <td><div style={{ display: "flex", alignItems: "center", gap: 10 }}><Avatar name={u.name} size={34} users={users} /><div><div style={{ fontWeight: 600 }}>{u.name}</div></div></div></td>
             <td><span style={{ padding: "3px 9px", borderRadius: 20, background: T.navy + "15", color: T.navy, fontSize: 11, fontWeight: 600 }}>{u.role}</span></td>
@@ -4469,7 +4543,11 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
             <td style={{ fontSize: 12, color: T.text2 }}>{u.superior || "—"}</td>
             <td style={{ fontSize: 12, color: T.text2 }}>{u.phone || "—"}</td>
             <td style={{ fontSize: 12, color: T.text2 }}>{u.email || "—"}</td>
-            <td><button className="btn btn-ghost btn-sm" onClick={() => openEdit("users", u)}>Edit</button></td>
+            <td style={{ fontSize: 12, color: T.text2 }}>{u.password ? "••••••••" : <span style={{ color: T.amber, fontWeight: 600 }}>Not set</span>}</td>
+            <td style={{ whiteSpace: "nowrap" }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => openEdit("users", u)}>Edit</button>
+              <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove "${u.name}" from the system?`)) setUsers(p => p.filter(x => x.id !== u.id)); }}>✕ Remove</button>
+            </td>
           </tr>)}</tbody></table>
       </div>}
       {tab === "plants" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 14 }}>
@@ -4516,6 +4594,7 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
             <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 15, color: T.navy }}>Permission Center</div>
             <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>Configure access rights for each user. Admin users always have full access.</div>
           </div>
+          <PermSaveButton permissions={permissions} users={users} />
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -4535,18 +4614,11 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
                 const perms = permissions?.[u.id] || { canEditMeetings: false, canCreateProjects: false, canEditActions: false, canViewDashboard: true, canManageEscalations: false };
                 const toggle = (key) => {
                   if (isAdmin) return;
-                  setPermissions && setPermissions(p => ({ ...p, [u.id]: { ...perms, [key]: !perms[key] } }));
+                  setPermissions && setPermissions(prev => ({
+                    ...prev,
+                    [u.id]: { id: u.id, name: u.name, ...perms, [key]: !perms[key] }
+                  }));
                 };
-                const PermToggle = ({ pkey }) => (
-                  <td style={{ padding: "10px 12px", textAlign: "center", borderBottom: `1px solid ${T.border}` }}>
-                    {isAdmin
-                      ? <span style={{ fontSize: 16 }} title="Admin: always granted">✅</span>
-                      : <button onClick={() => toggle(pkey)} style={{ background: perms[pkey] ? T.green : "#e2e8f0", border: "none", borderRadius: 12, width: 42, height: 22, cursor: "pointer", transition: "all .2s", position: "relative" }} title={perms[pkey] ? "Enabled — click to disable" : "Disabled — click to enable"}>
-                        <span style={{ position: "absolute", top: 2, left: perms[pkey] ? 22 : 2, width: 18, height: 18, borderRadius: "50%", background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,.3)", transition: "all .2s", display: "block" }} />
-                      </button>
-                    }
-                  </td>
-                );
                 return (
                   <tr key={u.id} style={{ background: i % 2 === 0 ? "transparent" : T.bg }}>
                     <td style={{ padding: "10px 16px", borderBottom: `1px solid ${T.border}` }}>
@@ -4559,11 +4631,20 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
                         {isAdmin && <span style={{ fontSize: 10, background: T.amber, color: "#fff", borderRadius: 4, padding: "2px 6px", fontWeight: 700, marginLeft: 4 }}>ADMIN</span>}
                       </div>
                     </td>
-                    <PermToggle pkey="canEditMeetings" />
-                    <PermToggle pkey="canCreateProjects" />
-                    <PermToggle pkey="canEditActions" />
-                    <PermToggle pkey="canViewDashboard" />
-                    <PermToggle pkey="canManageEscalations" />
+                    {["canEditMeetings","canCreateProjects","canEditActions","canViewDashboard","canManageEscalations"].map(pkey => (
+                      <td key={pkey} style={{ padding: "10px 12px", textAlign: "center", borderBottom: `1px solid ${T.border}` }}>
+                        {isAdmin
+                          ? <span style={{ fontSize: 16 }} title="Admin: always granted">✅</span>
+                          : <button
+                              onClick={() => toggle(pkey)}
+                              style={{ background: perms[pkey] ? T.green : "#e2e8f0", border: "none", borderRadius: 12, width: 42, height: 22, cursor: "pointer", position: "relative", flexShrink: 0 }}
+                              title={perms[pkey] ? "Enabled — click to disable" : "Disabled — click to enable"}
+                            >
+                              <span style={{ position: "absolute", top: 2, left: perms[pkey] ? 22 : 2, width: 18, height: 18, borderRadius: "50%", background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,.3)", transition: "left .2s", display: "block" }} />
+                            </button>
+                        }
+                      </td>
+                    ))}
                   </tr>
                 );
               })}
@@ -4641,6 +4722,23 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
           <div><Lbl t="Superior (Reports To)" /><select value={form.superior || ""} onChange={e => setForm(f => ({ ...f, superior: e.target.value }))}><option value="">None (Top level)</option>{users.filter(u => u.id !== form.id).map(u => <option key={u.id} value={u.name}>{u.name} ({u.role})</option>)}</select></div>
           <div style={{ gridColumn: "1/-1" }}><Lbl t="Phone Number" /><input value={form.phone || ""} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+91-98000-00000" /></div>
           <div style={{ gridColumn: "1/-1" }}><Lbl t="Email Address" /><input type="email" value={form.email || ""} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@company.com" /></div>
+          <div style={{ gridColumn: "1/-1" }}>
+            <Lbl t="Password" req />
+            <div style={{ position: "relative" }}>
+              <input
+                type={form._showPw ? "text" : "password"}
+                value={form.password || ""}
+                onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                placeholder="Set login password"
+                style={{ paddingRight: 44 }}
+              />
+              <button
+                type="button"
+                onClick={() => setForm(f => ({ ...f, _showPw: !f._showPw }))}
+                style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", cursor: "pointer", fontSize: 16, color: T.text2, lineHeight: 1, padding: 0, display: "flex", alignItems: "center" }}
+              >{form._showPw ? "🙈" : "👁"}</button>
+            </div>
+          </div>
           <div style={{ gridColumn: "1/-1", display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={saveUser}>Save</button></div>
         </div>}
         {modal.type === "plants" && <div style={{ display: "grid", gap: 12 }}>
@@ -4779,7 +4877,9 @@ export default function App() {
     escMatrix, setEscMatrix,
     permissions, setPermissions,
     mtgPresets, setMtgPresets,
-    machines, setMachines
+    machines, setMachines,
+    reasons, setReasons,
+    persistedAudit, setPersistedAudit,
   } = useSheetDB({
     defaultUsers: DEFAULT_USERS,
     defaultPlants: DEFAULT_PLANTS,
@@ -4832,7 +4932,15 @@ export default function App() {
   useAPIBridge(actions, setActions, projects);
 
   useEffect(() => {
-    const t = setTimeout(() => runEscalation(actions, setAudit, escMatrix), 1500);
+    const t = setTimeout(() => runEscalation(actions, (updater) => {
+      setAudit(updater);
+      // Also persist audit entries to Google Sheet via persistedAudit state
+      setPersistedAudit(prev => {
+        const current = typeof prev === "function" ? prev([]) : prev;
+        const updated = typeof updater === "function" ? updater(current) : updater;
+        return updated;
+      });
+    }, escMatrix), 1500);
     return () => clearTimeout(t);
   }, [actions]);
 
@@ -4886,12 +4994,12 @@ export default function App() {
   return (
     <ErrorBoundary>
       <style>{CSS}</style>
-      <Shell page={page} setPage={setPage} user={user} onLogout={() => { setUser(null); setPage(0); clearMeetingState(); }} onQuickAdd={() => setShowQuickAdd(true)} pendingCount={pendingForMe} auditCount={audit.length} activeMtg={globalActiveMtg} onResumeActiveMtg={() => setPage(1)} mtgRunning={mtgRunning} mtgElapsed={mtgElapsed} notifications={notifs} unreadCount={unreadNotifs} onMarkAllRead={markAllRead} users={users} actions={actions} onShowSupport={() => setShowSupport(true)} onShowProfile={() => setShowProfile(true)} onShowAdminNotifs={() => setShowAdminNotifs(true)}>
+      <Shell page={page} setPage={setPage} user={user} onLogout={() => { setUser(null); setPage(0); clearMeetingState(); }} onQuickAdd={() => setShowQuickAdd(true)} pendingCount={pendingForMe} auditCount={audit.length} activeMtg={globalActiveMtg} onResumeActiveMtg={() => setPage(1)} mtgRunning={mtgRunning} mtgElapsed={mtgElapsed} notifications={notifs} unreadCount={unreadNotifs} onMarkAllRead={markAllRead} users={users} actions={actions} onShowSupport={() => setShowSupport(true)} onShowProfile={() => setShowProfile(true)} onShowAdminNotifs={() => setShowAdminNotifs(true)} permissions={permissions}>
         {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} plants={plants} depts={depts} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} />}
-        {page === 1 && <WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows => { commitFinal(rows); clearMeetingState(); }} actions={actions} setActions={setActions} user={user} onProjectUpdate={updated => setProjects(p => p.map(x => x.id === updated.id ? updated : x))} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} permissions={permissions} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); }} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState} />}
-        {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} machines={machines} />}
-        {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} />}
-        {page === 4 && <EscalationsPage actions={actions} audit={audit} user={user} setPage={setPage} users={users} plants={plants} setActions={setActions} />}
+        {page === 1 && <WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows => { commitFinal(rows); clearMeetingState(); }} actions={actions} setActions={setActions} user={user} onProjectUpdate={updated => setProjects(p => p.map(x => x.id === updated.id ? updated : x))} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} permissions={permissions} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); }} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState} reasons={reasons} />}
+        {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} machines={machines} permissions={permissions} />}
+        {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} permissions={permissions} />}
+        {page === 4 && <EscalationsPage actions={actions} audit={audit} user={user} setPage={setPage} users={users} plants={plants} setActions={setActions} permissions={permissions} />}
         {page === 99 && user?.role === "Admin" && <MasterPage plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} permissions={permissions} setPermissions={setPermissions} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets} machines={machines} setMachines={setMachines} />}
       </Shell>
       {showSupport && <SupportModal user={user} onClose={() => setShowSupport(false)} />}
@@ -4904,6 +5012,7 @@ export default function App() {
           defaultSrc="Quick Add"
           projects={projects}
           machines={machines}
+          reasons={reasons}
           currentUser={user}
           onSave={a => {
             const newAction = { ...a, id: Date.now(), sn: nextSN(actions), dateOfAction: todayStr(), revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null, status: "IN PROCESS", messages: [], pendingConfirmation: false, allocatedBy: user?.name || "" };
