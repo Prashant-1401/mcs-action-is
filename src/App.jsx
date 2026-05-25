@@ -384,6 +384,14 @@ tbody tr:hover td{background:#FAFAFE;}tbody tr:last-child td{border-bottom:none;
 .fab{position:fixed;bottom:28px;right:28px;width:52px;height:52px;border-radius:50%;background:#272262;color:#fff;border:none;font-size:26px;cursor:pointer;box-shadow:0 6px 24px rgba(39,34,98,.35);display:flex;align-items:center;justify-content:center;z-index:200;transition:all .2s;}
 .fab:hover{background:#1A1653;transform:scale(1.08);}
 .drag-over{background:#EAE7F8!important;border:2px dashed #272262!important;}
+@media(max-width:640px){
+  .master-mobile-cards{display:block!important;}
+  .master-desktop-table{display:none!important;}
+}
+@media(min-width:641px){
+  .master-mobile-cards{display:none!important;}
+  .master-desktop-table{display:block!important;}
+}
 .kanban-card{transition:transform .15s,box-shadow .15s,opacity .15s;}
 .kanban-card:active{cursor:grabbing!important;}
 .kanban-card.is-dragging{opacity:.45;transform:scale(.97);box-shadow:none!important;}
@@ -992,7 +1000,7 @@ function ActionSidePanel({ action, onClose, onUpdate, users, plants, depts, curr
   );
 }
 
-function HomePage({ actions, setActions, user, setPage, users, meetings, plants, depts, setGlobalActiveMtg }) {
+function HomePage({ actions, setActions, user, setPage, users, meetings, plants, depts, setGlobalActiveMtg, permissions }) {
   const now = new Date();
   // Scope: my plant OR all
   const myPlantActions = user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant);
@@ -2847,7 +2855,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
       </div>
 
       {showSidePanel && <AddActionPanel users={users} plants={plants} depts={depts} defaultPlant={mtg.plant} defaultSrc={mtg.type} reasons={reasons} onSave={a => { setFastActions(p => Array.isArray(p) ? [...p, { ...a, id: Date.now() }] : [{ ...a, id: Date.now() }]); setShowSidePanel(false); }} onClose={() => setShowSidePanel(false)} />}
-      {selAction && <ActionDetailPanel action={selAction} onClose={() => setSelAction(null)} onUpdate={() => { }} user={null} users={users} allUsers={users} />}
+      {selAction && <ActionDetailPanel action={selAction} onClose={() => setSelAction(null)} onUpdate={() => { }} user={user} users={users} allUsers={users} plants={plants} permissions={permissions} />}
     </div>
   );
 }
@@ -3570,7 +3578,7 @@ function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortC
                 </td>
                 <td onClick={e => e.stopPropagation()}><div style={{ display: "flex", alignItems: "center", gap: 6 }}><Avatar name={a.responsible} size={24} users={users} /><span style={{ fontSize: 12 }}>{a.responsible}</span></div></td>
                 <td style={{ fontSize: 12, color: isOverdue(a) ? T.red : T.text, whiteSpace: "nowrap" }}>{fmt(a.due)}</td>
-                <td onClick={e => e.stopPropagation()}><SBadge s={a.pendingConfirmation && a.status !== "COMPLETED" && a.status !== "DROPPED" ? "PENDING CONFIRM" : a.status} /></td>
+                <td onClick={e => e.stopPropagation()}><SBadge s={a.status} /></td>
                 <td style={{ textAlign: "center" }}>{(a.revisions || 0) > 0 ? <span style={{ fontWeight: 700, color: T.amber, fontSize: 12 }}>{a.revisions}</span> : <span style={{ color: T.text2, fontSize: 12 }}>—</span>}</td>
               </tr>
             ))}
@@ -3829,11 +3837,11 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
     if (!a.due || !a.closedOn) return sum + 0;
     return sum + (new Date(a.closedOn) <= new Date(a.due) ? 100 : 0);
   }, 0) / comp) : 0;
-  const visibleDepts = deptF !== "All" ? depts.filter(d => d.name.toLowerCase().trim() === deptF.toLowerCase().trim()) : (plantF !== "All" ? depts.filter(d => (users || []).some(u => u.plant === plantF && u.dept === d.name) || fa.some(a => (a.section || "").toLowerCase().trim() === d.name.toLowerCase().trim())) : depts);
+  const visibleDepts = deptF !== "All" ? depts.filter(d => (d.name || "").toLowerCase().trim() === deptF.toLowerCase().trim()) : (plantF !== "All" ? depts.filter(d => (users || []).some(u => u.plant === plantF && u.dept === d.name) || fa.some(a => (a.section || "").toLowerCase().trim() === (d.name || "").toLowerCase().trim())) : depts);
 
   // Build heat map rows: merge dept master + unique section values from actual actions
   // This ensures actions always appear even if section doesn't match any dept name
-  const deptNames = new Set(visibleDepts.map(d => d.name.toLowerCase().trim()));
+  const deptNames = new Set(visibleDepts.map(d => (d.name || "").toLowerCase().trim()));
   const extraSections = [...new Set(fa.map(a => (a.section || "").trim()).filter(s => s && s !== "" && !deptNames.has(s.toLowerCase())))];
   const heatmapRows = [
     ...visibleDepts.map(d => ({ id: d.id, name: d.name, head: d.head, icon: d.icon || "🏭", fromDept: true })),
@@ -4307,7 +4315,7 @@ function EscalationsPage({ actions, audit, user, setPage, users, plants, setActi
 
 /* ===================== MASTER SETUP ===================== */
 /* ===================== ESCALATION MATRIX TAB ===================== */
-function EscMatrixTab({ escMatrix, setEscMatrix }) {
+function EscMatrixTab({ escMatrix, setEscMatrix, onSave }) {
   const PRIORITIES = ["CRITICAL", "WARNING", "NORMAL"];
   const TARGETS = ["Supervisor", "HOD", "Plant Head", "MD", "All"];
   const METHODS = ["In-App", "In-App + Email", "Email Only", "SMS + Email"];
@@ -4342,7 +4350,10 @@ function EscMatrixTab({ escMatrix, setEscMatrix }) {
             <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 16, marginBottom: 4 }}>🚨 Escalation Matrix</div>
             <div style={{ fontSize: 12, opacity: .8 }}>Define when and to whom pending actions are escalated based on overdue duration and priority.</div>
           </div>
-          <button onClick={addTier} style={{ background: "rgba(255,255,255,.2)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ Add Level</button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {onSave && <SectionSaveButton onSave={onSave} />}
+            <button onClick={addTier} style={{ background: "rgba(255,255,255,.2)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ Add Level</button>
+          </div>
         </div>
       </div>
 
@@ -4454,24 +4465,23 @@ function EscMatrixTab({ escMatrix, setEscMatrix }) {
   );
 }
 
-function PermSaveButton({ permissions }) {
-  const [status, setStatus] = React.useState("idle");
-  const save = async () => {
-    if (!SHEET_ENABLED) { setStatus("error"); setTimeout(() => setStatus("idle"), 2500); return; }
+
+/* ── Reusable Save-to-Sheet button ─────────────────────────────────────── */
+function SectionSaveButton({ label = "💾 Save to Sheet", onSave }) {
+  const [status, setStatus] = useState("idle");
+  const handleSave = async () => {
     setStatus("saving");
-    try {
-      const rows = Object.values(permissions);
-      await sheetPost("replace_all", "Permissions", { rows });
-      setStatus("saved");
-    } catch (e) { setStatus("error"); }
+    try { await onSave(); setStatus("saved"); }
+    catch { setStatus("error"); }
     setTimeout(() => setStatus("idle"), 2500);
   };
-  const label = status === "saving" ? "Saving…" : status === "saved" ? "✓ Saved!" : status === "error" ? "⚠ Failed" : "💾 Save to Sheet";
-  const col = status === "saved" ? "#1E8449" : status === "error" ? "#C0392B" : "#272262";
+  const col = status === "saved" ? T.green : status === "error" ? T.red : T.navy;
+  const lbl = status === "saving" ? "Saving…" : status === "saved" ? "✓ Saved!" : status === "error" ? "⚠ Failed" : label;
   return (
-    <button onClick={save} disabled={status === "saving"} title={SHEET_ENABLED ? "Push current permissions to Google Sheet" : "Sheet not connected"} style={{ padding: "8px 18px", borderRadius: 8, border: "none", cursor: status === "saving" ? "not-allowed" : "pointer", background: col, color: "#fff", fontWeight: 700, fontSize: 13, opacity: status === "saving" ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}>
+    <button onClick={handleSave} disabled={status === "saving"}
+      style={{ padding: "8px 16px", borderRadius: 8, border: "none", cursor: status === "saving" ? "not-allowed" : "pointer", background: col, color: "#fff", fontWeight: 700, fontSize: 13, opacity: status === "saving" ? 0.7 : 1, display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", flexShrink: 0 }}>
       {status === "saving" && <span style={{ width: 13, height: 13, border: "2px solid rgba(255,255,255,.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} />}
-      {label}
+      {lbl}
     </button>
   );
 }
@@ -4487,12 +4497,17 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
   useEscClose(close);
   const saveUser = () => {
     if (!form.name || !form.role || !form.plant) return;
-    // Strip UI-only temp fields before saving to state/sheet
     const { _showPw, ...cleanForm } = form;
     const u = { ...cleanForm, id: cleanForm.id || "U" + String(users.length + 1).padStart(2, "0"), initials: cleanForm.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(), color: cleanForm.color || COLORS[users.length % 6] };
     if (modal.mode === "edit") setUsers(p => p.map(x => x.id === u.id ? u : x)); else setUsers(p => [...p, u]); close();
   };
-  const TABS = [["users", "👥 Users"], ["plants", "🏭 Plants"], ["depts", "🗂 Departments"], ["machines", "⚙ Machines"], ["org", "🌳 Org Chart"], ["perms", "🔐 Permissions"], ["escmatrix", "🚨 Escalation Matrix"], ["presets", "🎙 Meeting Presets"]];
+  const TABS = [["users", "👥 Users"], ["plants", "🏭 Plants"], ["depts", "🗂 Depts"], ["machines", "⚙ Machines"], ["org", "🌳 Org"], ["perms", "🔐 Perms"], ["escmatrix", "🚨 Escalation"], ["presets", "🎙 Presets"]];
+
+  // Save helpers
+  const saveToSheet = async (tab, rows) => {
+    if (!SHEET_ENABLED) throw new Error("Sheet not connected");
+    await sheetPost("replace_all", tab, { rows });
+  };
 
   function OrgNode({ name, allUsers, depth }) {
     const u = allUsers.find(x => x.name === name);
@@ -4501,8 +4516,8 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
     if (depth > 5) return null;
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-        <div style={{ background: "#fff", border: `2px solid ${color}`, borderRadius: 12, padding: "10px 14px", textAlign: "center", minWidth: 130, maxWidth: 150, boxShadow: "0 2px 8px rgba(0,0,0,.08)" }}>
-          <div style={{ width: 36, height: 36, borderRadius: "50%", background: color + "20", color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, margin: "0 auto 6px" }}>{u?.initials || name?.slice(0, 2).toUpperCase()}</div>
+        <div style={{ background: "#fff", border: `2px solid ${color}`, borderRadius: 12, padding: "10px 14px", textAlign: "center", minWidth: 120, maxWidth: 150, boxShadow: "0 2px 8px rgba(0,0,0,.08)" }}>
+          <div style={{ width: 36, height: 36, borderRadius: "50%", background: color + "20", color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, margin: "0 auto 6px" }}>{u?.initials || (name || "?").slice(0, 2).toUpperCase()}</div>
           <div style={{ fontWeight: 700, fontSize: 11, color: T.text, lineHeight: 1.3 }}>{name}</div>
           <div style={{ fontSize: 10, color: T.text2, marginTop: 2 }}>{u?.role}</div>
           {u?.dept && u.dept !== "Management" && <div style={{ fontSize: 9, color: T.text2 }}>{u.dept}</div>}
@@ -4527,122 +4542,243 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
 
   const roots = users.filter(u => !u.superior || !users.find(x => x.name === u.superior));
 
+  /* ── Section header with Save button ── */
+  const SectionHeader = ({ title, sub, onSave, addLabel, onAdd }) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+      <div>
+        <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 15, color: T.navy }}>{title}</div>
+        {sub && <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>{sub}</div>}
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {onAdd && <button className="btn btn-amber btn-sm" onClick={onAdd}>{addLabel || "+ Add"}</button>}
+        {onSave && <SectionSaveButton onSave={onSave} />}
+      </div>
+    </div>
+  );
+
   return (
     <div className="fade-in">
       <PageHeader title="Master Setup" sub="Admin only — manage organisation structure" />
-      <div style={{ borderBottom: `2px solid ${T.border}`, marginBottom: 24, display: "flex", gap: 4 }}>
-        {TABS.map(([id, l]) => <button key={id} onClick={() => setTab(id)} style={{ padding: "9px 20px", border: "none", cursor: "pointer", background: "transparent", fontSize: 13, fontWeight: tab === id ? 700 : 400, color: tab === id ? T.navy : T.text2, borderBottom: tab === id ? `3px solid ${T.navy}` : "3px solid transparent", marginBottom: -2, transition: "all .2s" }}>{l}</button>)}
-        {tab !== "org" && <button className="btn btn-amber btn-sm" style={{ marginLeft: "auto", alignSelf: "center" }} onClick={() => openAdd(tab)}>+ Add</button>}
+
+      {/* Scrollable tab bar */}
+      <div style={{ borderBottom: `2px solid ${T.border}`, marginBottom: 20, overflowX: "auto", display: "flex", gap: 0, WebkitOverflowScrolling: "touch" }}>
+        {TABS.map(([id, l]) => (
+          <button key={id} onClick={() => setTab(id)}
+            style={{ padding: "9px 14px", border: "none", cursor: "pointer", background: "transparent", fontSize: 12, fontWeight: tab === id ? 700 : 400, color: tab === id ? T.navy : T.text2, borderBottom: tab === id ? `3px solid ${T.navy}` : "3px solid transparent", marginBottom: -2, transition: "all .2s", whiteSpace: "nowrap", flexShrink: 0 }}>
+            {l}
+          </button>
+        ))}
       </div>
-      {tab === "users" && <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <table><thead><tr><th>User</th><th>Role</th><th>Plant</th><th>Department</th><th>Superior</th><th>Phone</th><th>Email</th><th>Password</th><th></th></tr></thead>
-          <tbody>{users.map(u => <tr key={u.id}>
-            <td><div style={{ display: "flex", alignItems: "center", gap: 10 }}><Avatar name={u.name} size={34} users={users} /><div><div style={{ fontWeight: 600 }}>{u.name}</div></div></div></td>
-            <td><span style={{ padding: "3px 9px", borderRadius: 20, background: T.navy + "15", color: T.navy, fontSize: 11, fontWeight: 600 }}>{u.role}</span></td>
-            <td style={{ fontSize: 12 }}>{u.plant}</td><td style={{ fontSize: 12 }}>{u.dept}</td>
-            <td style={{ fontSize: 12, color: T.text2 }}>{u.superior || "—"}</td>
-            <td style={{ fontSize: 12, color: T.text2 }}>{u.phone || "—"}</td>
-            <td style={{ fontSize: 12, color: T.text2 }}>{u.email || "—"}</td>
-            <td style={{ fontSize: 12, color: T.text2 }}>{u.password ? "••••••••" : <span style={{ color: T.amber, fontWeight: 600 }}>Not set</span>}</td>
-            <td style={{ whiteSpace: "nowrap" }}>
-              <button className="btn btn-ghost btn-sm" onClick={() => openEdit("users", u)}>Edit</button>
-              <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove "${u.name}" from the system?`)) setUsers(p => p.filter(x => x.id !== u.id)); }}>✕ Remove</button>
-            </td>
-          </tr>)}</tbody></table>
-      </div>}
-      {tab === "plants" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 14 }}>
-        {plants.map(p => <div key={p.id} className="card" style={{ padding: 18 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>🏭</span><button className="btn btn-ghost btn-sm" onClick={() => openEdit("plants", p)}>Edit</button></div>
-          <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 14, color: T.navy }}>{p.name}</div>
-          <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>{p.location}</div>
-          <HR /><div style={{ fontSize: 12 }}>Head: <b>{p.head}</b></div>
-        </div>)}
-      </div>}
-      {tab === "depts" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 14 }}>
-        {depts.map(d => <div key={d.id} className="card" style={{ padding: 18 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>{d.icon}</span><button className="btn btn-ghost btn-sm" onClick={() => openEdit("depts", d)}>Edit</button></div>
-          <div style={{ fontWeight: 700, fontSize: 14 }}>{d.name}</div>
-          <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>HOD: {d.head}</div>
-        </div>)}
-      </div>}
-      {tab === "machines" && <div>
-        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-          <table><thead><tr><th>Machine Name</th><th>Plant</th><th>Department</th><th>Type</th><th>Asset No.</th><th></th></tr></thead>
-            <tbody>{(machines || []).map(m => <tr key={m.id}>
-              <td style={{ fontWeight: 600 }}>{m.name}</td>
-              <td style={{ fontSize: 12 }}>{m.plant || "—"}</td>
-              <td style={{ fontSize: 12 }}>{m.dept || "—"}</td>
-              <td style={{ fontSize: 12, color: T.text2 }}>{m.type || "—"}</td>
-              <td style={{ fontSize: 12, color: T.text2 }}>{m.assetNo || "—"}</td>
-              <td><button className="btn btn-ghost btn-sm" onClick={() => openEdit("machines", m)}>Edit</button>
-                <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => setMachines(p => p.filter(x => x.id !== m.id))}>✕</button></td>
-            </tr>)}
-            {(!machines || machines.length === 0) && <tr><td colSpan={6} style={{ textAlign: "center", padding: 24, color: T.text2, fontSize: 12 }}>No machines added yet. Click + Add to register a machine.</td></tr>}
-            </tbody></table>
+
+      {/* ── USERS ── */}
+      {tab === "users" && <>
+        <SectionHeader
+          title="Users"
+          sub="All system users and their login credentials"
+          onAdd={() => openAdd("users")}
+          onSave={() => saveToSheet("Users", users)}
+        />
+        {/* Mobile card list */}
+        <div style={{ display: "none" }} className="master-mobile-cards">
+          {users.map(u => (
+            <div key={u.id} className="card" style={{ padding: 14, marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <Avatar name={u.name} size={38} users={users} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{u.name}</div>
+                  <div style={{ fontSize: 11, color: T.text2 }}>{u.role} · {u.plant}</div>
+                </div>
+                <button className="btn btn-ghost btn-sm" onClick={() => openEdit("users", u)}>Edit</button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, fontSize: 12 }}>
+                <div><span style={{ color: T.text2 }}>Dept: </span>{u.dept || "—"}</div>
+                <div><span style={{ color: T.text2 }}>Superior: </span>{u.superior || "Top"}</div>
+                <div><span style={{ color: T.text2 }}>Phone: </span>{u.phone || "—"}</div>
+                <div><span style={{ color: T.text2 }}>Password: </span>{u.password ? "••••••" : <span style={{ color: T.amber, fontWeight: 600 }}>Not set</span>}</div>
+              </div>
+              <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
+                <button className="btn btn-ghost btn-sm" style={{ color: T.red }} onClick={() => { if (window.confirm(`Remove "${u.name}"?`)) setUsers(p => p.filter(x => x.id !== u.id)); }}>✕ Remove</button>
+              </div>
+            </div>
+          ))}
+          {users.length === 0 && <Empty icon="👥" title="No users" sub="Click + Add to create the first user." />}
         </div>
-      </div>}
+        {/* Desktop table */}
+        <div className="card master-desktop-table" style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ minWidth: 700 }}><thead><tr><th>User</th><th>Role</th><th>Plant</th><th>Dept</th><th>Superior</th><th>Phone</th><th>Password</th><th></th></tr></thead>
+              <tbody>{users.map(u => <tr key={u.id}>
+                <td><div style={{ display: "flex", alignItems: "center", gap: 10 }}><Avatar name={u.name} size={32} users={users} /><div style={{ fontWeight: 600 }}>{u.name}</div></div></td>
+                <td><span style={{ padding: "3px 9px", borderRadius: 20, background: T.navy + "15", color: T.navy, fontSize: 11, fontWeight: 600 }}>{u.role}</span></td>
+                <td style={{ fontSize: 12 }}>{u.plant}</td>
+                <td style={{ fontSize: 12 }}>{u.dept || "—"}</td>
+                <td style={{ fontSize: 12, color: T.text2 }}>{u.superior || "—"}</td>
+                <td style={{ fontSize: 12, color: T.text2 }}>{u.phone || "—"}</td>
+                <td style={{ fontSize: 12, color: T.text2 }}>{u.password ? "••••••••" : <span style={{ color: T.amber, fontWeight: 600 }}>Not set</span>}</td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => openEdit("users", u)}>Edit</button>
+                  <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove "${u.name}" from the system?`)) setUsers(p => p.filter(x => x.id !== u.id)); }}>✕</button>
+                </td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        </div>
+      </>}
+
+      {/* ── PLANTS ── */}
+      {tab === "plants" && <>
+        <SectionHeader title="Plants" sub="Manufacturing plant locations" onAdd={() => openAdd("plants")} onSave={() => saveToSheet("Plants", plants)} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 14 }}>
+          {plants.map(p => <div key={p.id} className="card" style={{ padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>🏭</span><button className="btn btn-ghost btn-sm" onClick={() => openEdit("plants", p)}>Edit</button></div>
+            <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 14, color: T.navy }}>{p.name}</div>
+            <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>{p.location}</div>
+            <HR /><div style={{ fontSize: 12 }}>Head: <b>{p.head}</b></div>
+          </div>)}
+          {plants.length === 0 && <Empty icon="🏭" title="No plants" sub="Click + Add to register a plant." />}
+        </div>
+      </>}
+
+      {/* ── DEPARTMENTS ── */}
+      {tab === "depts" && <>
+        <SectionHeader title="Departments" sub="Sections within each plant" onAdd={() => openAdd("depts")} onSave={() => saveToSheet("Departments", depts)} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(190px,1fr))", gap: 14 }}>
+          {depts.map(d => <div key={d.id} className="card" style={{ padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>{d.icon || "🗂"}</span><button className="btn btn-ghost btn-sm" onClick={() => openEdit("depts", d)}>Edit</button></div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>{d.name}</div>
+            <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>HOD: {d.head || "—"}</div>
+          </div>)}
+          {depts.length === 0 && <Empty icon="🗂" title="No departments" sub="Click + Add to create a department." />}
+        </div>
+      </>}
+
+      {/* ── MACHINES ── */}
+      {tab === "machines" && <>
+        <SectionHeader title="Machines" sub="Registered equipment across all plants" onAdd={() => openAdd("machines")} onSave={() => saveToSheet("Machines", machines || [])} />
+        {/* Mobile cards */}
+        <div style={{ display: "none" }} className="master-mobile-cards">
+          {(machines || []).map(m => (
+            <div key={m.id} className="card" style={{ padding: 14, marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{m.name}</div>
+                  <div style={{ fontSize: 12, color: T.text2, marginTop: 3 }}>{m.type || "—"} · {m.plant || "—"}</div>
+                  <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>Dept: {m.dept || "—"} · Asset: {m.assetNo || "—"}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => openEdit("machines", m)}>Edit</button>
+                  <button className="btn btn-ghost btn-sm" style={{ color: T.red }} onClick={() => setMachines(p => p.filter(x => x.id !== m.id))}>✕</button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {(!machines || machines.length === 0) && <Empty icon="⚙" title="No machines" sub="Click + Add to register a machine." />}
+        </div>
+        {/* Desktop table */}
+        <div className="card master-desktop-table" style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ minWidth: 560 }}><thead><tr><th>Machine</th><th>Plant</th><th>Dept</th><th>Type</th><th>Asset No.</th><th></th></tr></thead>
+              <tbody>
+                {(machines || []).map(m => <tr key={m.id}>
+                  <td style={{ fontWeight: 600 }}>{m.name}</td>
+                  <td style={{ fontSize: 12 }}>{m.plant || "—"}</td>
+                  <td style={{ fontSize: 12 }}>{m.dept || "—"}</td>
+                  <td style={{ fontSize: 12, color: T.text2 }}>{m.type || "—"}</td>
+                  <td style={{ fontSize: 12, color: T.text2 }}>{m.assetNo || "—"}</td>
+                  <td>
+                    <button className="btn btn-ghost btn-sm" onClick={() => openEdit("machines", m)}>Edit</button>
+                    <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => setMachines(p => p.filter(x => x.id !== m.id))}>✕</button>
+                  </td>
+                </tr>)}
+                {(!machines || machines.length === 0) && <tr><td colSpan={6} style={{ textAlign: "center", padding: 24, color: T.text2, fontSize: 12 }}>No machines added yet.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </>}
+
+      {/* ── ORG CHART ── */}
       {tab === "org" && <div className="card" style={{ padding: 24, overflowX: "auto" }}>
-        <div style={{ minWidth: 900, display: "flex", flexDirection: "column", gap: 32, alignItems: "center" }}>
+        <div style={{ minWidth: 600, display: "flex", flexDirection: "column", gap: 32, alignItems: "center" }}>
           {roots.map(u => <div key={u.id} style={{ width: "100%", display: "flex", justifyContent: "center" }}><OrgNode name={u.name} allUsers={users} depth={0} /></div>)}
           {roots.length === 0 && <Empty icon="🌳" title="No org structure" sub="Add users with superior relationships to build the organogram." />}
         </div>
       </div>}
 
+      {/* ── PERMISSIONS ── */}
       {tab === "perms" && <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <div style={{ padding: "16px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ padding: "16px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
           <div>
             <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 15, color: T.navy }}>Permission Center</div>
             <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>Configure access rights for each user. Admin users always have full access.</div>
           </div>
-          <PermSaveButton permissions={permissions} users={users} />
+          <SectionSaveButton onSave={() => saveToSheet("Permissions", Object.values(permissions))} />
         </div>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        {/* Mobile perm cards */}
+        <div style={{ padding: 14, display: "none" }} className="master-mobile-cards">
+          {users.map(u => {
+            const isAdmin = u.role === "Admin" || u.role === "MD" || u.role === "Plant Head";
+            const perms = permissions?.[u.id] || { canEditMeetings: false, canCreateProjects: false, canEditActions: false, canViewDashboard: true, canManageEscalations: false };
+            const toggle = (key) => { if (isAdmin) return; setPermissions && setPermissions(prev => ({ ...prev, [u.id]: { id: u.id, name: u.name, ...perms, [key]: !perms[key] } })); };
+            const PERM_LABELS = [["canEditMeetings","Edit Meetings"],["canCreateProjects","Create Projects"],["canEditActions","Edit Actions"],["canViewDashboard","View Dashboard"],["canManageEscalations","Manage Escalations"]];
+            return (
+              <div key={u.id} className="card" style={{ padding: 14, marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: "50%", background: isAdmin ? T.amber : T.navy, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>{(u.name || "?").slice(0, 2).toUpperCase()}</div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>{u.name}</div>
+                    <div style={{ fontSize: 11, color: T.text2 }}>{u.role} · {u.dept || u.plant}</div>
+                  </div>
+                  {isAdmin && <span style={{ fontSize: 10, background: T.amber, color: "#fff", borderRadius: 4, padding: "2px 6px", fontWeight: 700 }}>ADMIN</span>}
+                </div>
+                {PERM_LABELS.map(([pkey, label]) => (
+                  <div key={pkey} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: `1px solid ${T.border}` }}>
+                    <span style={{ fontSize: 12, color: T.text }}>{label}</span>
+                    {isAdmin ? <span style={{ fontSize: 14 }}>✅</span> : (
+                      <button onClick={() => toggle(pkey)} style={{ background: perms[pkey] ? T.green : "#e2e8f0", border: "none", borderRadius: 12, width: 42, height: 22, cursor: "pointer", position: "relative", flexShrink: 0 }}>
+                        <span style={{ position: "absolute", top: 2, left: perms[pkey] ? 22 : 2, width: 18, height: 18, borderRadius: "50%", background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,.3)", transition: "left .2s", display: "block" }} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+        {/* Desktop table */}
+        <div className="master-desktop-table" style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 600 }}>
             <thead>
               <tr style={{ background: T.bg }}>
                 <th style={{ padding: "10px 16px", textAlign: "left", fontWeight: 700, color: T.text2, fontSize: 12, borderBottom: `1px solid ${T.border}` }}>User</th>
-                <th style={{ padding: "10px 12px", textAlign: "center", fontWeight: 700, color: T.text2, fontSize: 12, borderBottom: `1px solid ${T.border}` }}>Edit Meetings</th>
-                <th style={{ padding: "10px 12px", textAlign: "center", fontWeight: 700, color: T.text2, fontSize: 12, borderBottom: `1px solid ${T.border}` }}>Create Projects</th>
-                <th style={{ padding: "10px 12px", textAlign: "center", fontWeight: 700, color: T.text2, fontSize: 12, borderBottom: `1px solid ${T.border}` }}>Edit Actions</th>
-                <th style={{ padding: "10px 12px", textAlign: "center", fontWeight: 700, color: T.text2, fontSize: 12, borderBottom: `1px solid ${T.border}` }}>View Dashboard</th>
-                <th style={{ padding: "10px 12px", textAlign: "center", fontWeight: 700, color: T.text2, fontSize: 12, borderBottom: `1px solid ${T.border}` }}>Manage Escalations</th>
+                {[["Edit Mtgs"],["Projects"],["Actions"],["Dashboard"],["Escalations"]].map(([h]) => (
+                  <th key={h} style={{ padding: "10px 10px", textAlign: "center", fontWeight: 700, color: T.text2, fontSize: 12, borderBottom: `1px solid ${T.border}`, whiteSpace: "nowrap" }}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {users.map((u, i) => {
                 const isAdmin = u.role === "Admin" || u.role === "MD" || u.role === "Plant Head";
                 const perms = permissions?.[u.id] || { canEditMeetings: false, canCreateProjects: false, canEditActions: false, canViewDashboard: true, canManageEscalations: false };
-                const toggle = (key) => {
-                  if (isAdmin) return;
-                  setPermissions && setPermissions(prev => ({
-                    ...prev,
-                    [u.id]: { id: u.id, name: u.name, ...perms, [key]: !perms[key] }
-                  }));
-                };
+                const toggle = (key) => { if (isAdmin) return; setPermissions && setPermissions(prev => ({ ...prev, [u.id]: { id: u.id, name: u.name, ...perms, [key]: !perms[key] } })); };
                 return (
                   <tr key={u.id} style={{ background: i % 2 === 0 ? "transparent" : T.bg }}>
                     <td style={{ padding: "10px 16px", borderBottom: `1px solid ${T.border}` }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ width: 34, height: 34, borderRadius: "50%", background: isAdmin ? T.amber : T.navy, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>{u.name.slice(0, 2).toUpperCase()}</div>
+                        <div style={{ width: 32, height: 32, borderRadius: "50%", background: isAdmin ? T.amber : T.navy, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 12, flexShrink: 0 }}>{(u.name || "?").slice(0, 2).toUpperCase()}</div>
                         <div>
-                          <div style={{ fontWeight: 700, fontSize: 13 }}>{u.name}</div>
-                          <div style={{ fontSize: 11, color: T.text2 }}>{u.role} · {u.dept || u.plant}</div>
+                          <div style={{ fontWeight: 700, fontSize: 12 }}>{u.name}</div>
+                          <div style={{ fontSize: 11, color: T.text2 }}>{u.role}</div>
                         </div>
-                        {isAdmin && <span style={{ fontSize: 10, background: T.amber, color: "#fff", borderRadius: 4, padding: "2px 6px", fontWeight: 700, marginLeft: 4 }}>ADMIN</span>}
+                        {isAdmin && <span style={{ fontSize: 10, background: T.amber, color: "#fff", borderRadius: 4, padding: "2px 5px", fontWeight: 700 }}>ADMIN</span>}
                       </div>
                     </td>
                     {["canEditMeetings","canCreateProjects","canEditActions","canViewDashboard","canManageEscalations"].map(pkey => (
-                      <td key={pkey} style={{ padding: "10px 12px", textAlign: "center", borderBottom: `1px solid ${T.border}` }}>
-                        {isAdmin
-                          ? <span style={{ fontSize: 16 }} title="Admin: always granted">✅</span>
-                          : <button
-                              onClick={() => toggle(pkey)}
-                              style={{ background: perms[pkey] ? T.green : "#e2e8f0", border: "none", borderRadius: 12, width: 42, height: 22, cursor: "pointer", position: "relative", flexShrink: 0 }}
-                              title={perms[pkey] ? "Enabled — click to disable" : "Disabled — click to enable"}
-                            >
+                      <td key={pkey} style={{ padding: "10px 10px", textAlign: "center", borderBottom: `1px solid ${T.border}` }}>
+                        {isAdmin ? <span style={{ fontSize: 16 }} title="Admin: always granted">✅</span>
+                          : <button onClick={() => toggle(pkey)} style={{ background: perms[pkey] ? T.green : "#e2e8f0", border: "none", borderRadius: 12, width: 42, height: 22, cursor: "pointer", position: "relative", flexShrink: 0 }} title={perms[pkey] ? "Enabled" : "Disabled"}>
                               <span style={{ position: "absolute", top: 2, left: perms[pkey] ? 22 : 2, width: 18, height: 18, borderRadius: "50%", background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,.3)", transition: "left .2s", display: "block" }} />
-                            </button>
-                        }
+                            </button>}
                       </td>
                     ))}
                   </tr>
@@ -4653,14 +4789,24 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
         </div>
       </div>}
 
-      {tab === "escmatrix" && <EscMatrixTab escMatrix={escMatrix} setEscMatrix={setEscMatrix} />}
+      {/* ── ESCALATION MATRIX ── */}
+      {tab === "escmatrix" && <EscMatrixTab escMatrix={escMatrix} setEscMatrix={setEscMatrix} onSave={() => saveToSheet("EscalationMatrix", escMatrix || [])} />}
+
+      {/* ── MEETING PRESETS ── */}
       {tab === "presets" && <div className="card" style={{ padding: 20 }}>
-        <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 15, color: T.navy, marginBottom: 14 }}>Meeting Presets (Attendees &amp; Guidelines)</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+          <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 15, color: T.navy }}>Meeting Presets</div>
+          <SectionSaveButton onSave={() => {
+            const allTypes = Array.from(new Set([...Object.keys(mtgPresets.attendeeMap || {}), ...Object.keys(mtgPresets.instructions || {})]));
+            const rows = allTypes.map(t => ({ type: t, attendees: (mtgPresets.attendeeMap || {})[t] || [], instructions: (mtgPresets.instructions || {})[t] || [] }));
+            return saveToSheet("MeetingPresets", rows);
+          }} />
+        </div>
         <div style={{ display: "grid", gap: 16 }}>
           {MEETING_TYPES.map(type => (
             <div key={type} className="card" style={{ padding: 16, background: T.bg }}>
               <div style={{ fontWeight: 700, color: T.navy, marginBottom: 10, fontSize: 14 }}>{type}</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 16 }}>
                 <div>
                   <Lbl t="Default Attendees" />
                   <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 180, overflowY: "auto", padding: "8px 10px", background: "#fff", border: `1px solid ${T.border}`, borderRadius: 8 }}>
@@ -4678,7 +4824,7 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
                           }}
                           style={{ width: 15, height: 15, flexShrink: 0, cursor: "pointer", accentColor: T.navy }} />
                         <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                          <div style={{ width: 24, height: 24, borderRadius: "50%", background: u.color || T.navy, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, flexShrink: 0 }}>{u.initials || u.name?.slice(0, 2).toUpperCase()}</div>
+                          <div style={{ width: 24, height: 24, borderRadius: "50%", background: u.color || T.navy, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, flexShrink: 0 }}>{u.initials || (u.name || "?").slice(0, 2).toUpperCase()}</div>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ fontWeight: 600, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{u.name}</div>
                             <div style={{ fontSize: 10, color: T.text2 }}>{u.role}</div>
@@ -4687,21 +4833,14 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
                       </label>
                     ))}
                   </div>
-                  <div style={{ fontSize: 11, color: T.text2, marginTop: 5 }}>
-                    {(mtgPresets?.attendeeMap?.[type] || []).length} selected
-                  </div>
+                  <div style={{ fontSize: 11, color: T.text2, marginTop: 5 }}>{(mtgPresets?.attendeeMap?.[type] || []).length} selected</div>
                 </div>
                 <div>
-                  <Lbl t="Default Guidelines / Instructions (one per line)" />
+                  <Lbl t="Guidelines / Instructions (one per line)" />
                   <textarea value={(mtgPresets?.instructions?.[type] || []).join("\n")}
-                    onChange={e => {
-                      const next = e.target.value.split("\n").filter(l => l.trim() !== "");
-                      setMtgPresets(prev => ({ ...prev, instructions: { ...prev.instructions, [type]: next } }));
-                    }}
-                    style={{ fontSize: 12, height: 180, resize: "vertical" }} />
-                  <div style={{ fontSize: 11, color: T.text2, marginTop: 5 }}>
-                    {(mtgPresets?.instructions?.[type] || []).length} guideline{(mtgPresets?.instructions?.[type] || []).length !== 1 ? "s" : ""}
-                  </div>
+                    onChange={e => { const next = e.target.value.split("\n").filter(l => l.trim() !== ""); setMtgPresets(prev => ({ ...prev, instructions: { ...prev.instructions, [type]: next } })); }}
+                    style={{ fontSize: 12, height: 160, resize: "vertical" }} />
+                  <div style={{ fontSize: 11, color: T.text2, marginTop: 5 }}>{(mtgPresets?.instructions?.[type] || []).length} guideline{(mtgPresets?.instructions?.[type] || []).length !== 1 ? "s" : ""}</div>
                 </div>
               </div>
             </div>
@@ -4709,64 +4848,61 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
         </div>
       </div>}
 
-      {modal && <div className="overlay" onClick={close}><div className="modal" style={{ width: 520, padding: 28 }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-          <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 16, fontWeight: 800, color: T.navy }}>{modal.mode === "add" ? "Add" : "Edit"} {modal.type === "users" ? "User" : modal.type === "plants" ? "Plant" : modal.type === "machines" ? "Machine" : "Department"}</h2>
-          <button onClick={close} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 22, color: T.text2 }}>x</button>
-        </div>
-        {modal.type === "users" && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div style={{ gridColumn: "1/-1" }}><Lbl t="Full Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-          <div><Lbl t="Role" req /><select value={form.role || ""} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}><option value="">Select</option>{["MD", "Plant Head", "HOD", "Shift Engineer", "Supervisor", "Operator"].map(r => <option key={r}>{r}</option>)}</select></div>
-          <div><Lbl t="Plant" req /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value }))}><option value="">Select</option><option>All</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
-          <div><Lbl t="Department" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select</option>{depts.map(d => <option key={d.id}>{d.name}</option>)}</select></div>
-          <div><Lbl t="Superior (Reports To)" /><select value={form.superior || ""} onChange={e => setForm(f => ({ ...f, superior: e.target.value }))}><option value="">None (Top level)</option>{users.filter(u => u.id !== form.id).map(u => <option key={u.id} value={u.name}>{u.name} ({u.role})</option>)}</select></div>
-          <div style={{ gridColumn: "1/-1" }}><Lbl t="Phone Number" /><input value={form.phone || ""} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+91-98000-00000" /></div>
-          <div style={{ gridColumn: "1/-1" }}><Lbl t="Email Address" /><input type="email" value={form.email || ""} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@company.com" /></div>
-          <div style={{ gridColumn: "1/-1" }}>
-            <Lbl t="Password" req />
-            <div style={{ position: "relative" }}>
-              <input
-                type={form._showPw ? "text" : "password"}
-                value={form.password || ""}
-                onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                placeholder="Set login password"
-                style={{ paddingRight: 44 }}
-              />
-              <button
-                type="button"
-                onClick={() => setForm(f => ({ ...f, _showPw: !f._showPw }))}
-                style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", cursor: "pointer", fontSize: 16, color: T.text2, lineHeight: 1, padding: 0, display: "flex", alignItems: "center" }}
-              >{form._showPw ? "🙈" : "👁"}</button>
+      {/* ── MODALS (responsive width) ── */}
+      {modal && (
+        <div className="overlay" onClick={close}>
+          <div className="modal" style={{ width: "min(520px, calc(100vw - 32px))", padding: "24px 20px" }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+              <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 16, fontWeight: 800, color: T.navy }}>
+                {modal.mode === "add" ? "Add" : "Edit"} {modal.type === "users" ? "User" : modal.type === "plants" ? "Plant" : modal.type === "machines" ? "Machine" : "Department"}
+              </h2>
+              <button onClick={close} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 22, color: T.text2, lineHeight: 1, padding: 0 }}>×</button>
             </div>
+            {modal.type === "users" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
+              <div style={{ gridColumn: "1/-1" }}><Lbl t="Full Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+              <div><Lbl t="Role" req /><select value={form.role || ""} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}><option value="">Select</option>{["MD", "Plant Head", "HOD", "Shift Engineer", "Supervisor", "Operator"].map(r => <option key={r}>{r}</option>)}</select></div>
+              <div><Lbl t="Plant" req /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value }))}><option value="">Select</option><option>All</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
+              <div><Lbl t="Department" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select</option>{depts.map(d => <option key={d.id}>{d.name}</option>)}</select></div>
+              <div><Lbl t="Superior (Reports To)" /><select value={form.superior || ""} onChange={e => setForm(f => ({ ...f, superior: e.target.value }))}><option value="">None (Top level)</option>{users.filter(u => u.id !== form.id).map(u => <option key={u.id} value={u.name}>{u.name} ({u.role})</option>)}</select></div>
+              <div style={{ gridColumn: "1/-1" }}><Lbl t="Phone Number" /><input value={form.phone || ""} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+91-98000-00000" /></div>
+              <div style={{ gridColumn: "1/-1" }}><Lbl t="Email Address" /><input type="email" value={form.email || ""} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@company.com" /></div>
+              <div style={{ gridColumn: "1/-1" }}>
+                <Lbl t="Password" req />
+                <div style={{ position: "relative" }}>
+                  <input type={form._showPw ? "text" : "password"} value={form.password || ""} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Set login password" style={{ paddingRight: 44 }} />
+                  <button type="button" onClick={() => setForm(f => ({ ...f, _showPw: !f._showPw }))} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", cursor: "pointer", fontSize: 16, color: T.text2, lineHeight: 1, padding: 0, display: "flex", alignItems: "center" }}>{form._showPw ? "🙈" : "👁"}</button>
+                </div>
+              </div>
+              <div style={{ gridColumn: "1/-1", display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={saveUser}>Save</button></div>
+            </div>}
+            {modal.type === "plants" && <div style={{ display: "grid", gap: 12 }}>
+              <div><Lbl t="Plant Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+              <div><Lbl t="Location" /><input value={form.location || ""} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} /></div>
+              <div><Lbl t="Plant Head" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const p = { ...form, id: form.id || "P" + String(plants.length + 1) }; if (modal.mode === "edit") setPlants(pp => pp.map(x => x.id === p.id ? p : x)); else setPlants(pp => [...pp, p]); close(); }}>Save</button></div>
+            </div>}
+            {modal.type === "depts" && <div style={{ display: "grid", gap: 12 }}>
+              <div><Lbl t="Dept Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+              <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 10 }}>
+                <div><Lbl t="Icon" /><input value={form.icon || ""} onChange={e => setForm(f => ({ ...f, icon: e.target.value }))} /></div>
+                <div><Lbl t="HOD" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
+              </div>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const d = { ...form, id: form.id || "D" + String(depts.length + 1), icon: form.icon || "🔹" }; if (modal.mode === "edit") setDepts(pp => pp.map(x => x.id === d.id ? d : x)); else setDepts(pp => [...pp, d]); close(); }}>Save</button></div>
+            </div>}
+            {modal.type === "machines" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
+              <div style={{ gridColumn: "1/-1" }}><Lbl t="Machine Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Furnace Line 1" /></div>
+              <div><Lbl t="Plant" /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value }))}><option value="">Select plant…</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
+              <div><Lbl t="Department" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select dept…</option>{depts.map(d => <option key={d.id}>{d.name}</option>)}</select></div>
+              <div><Lbl t="Machine Type" /><input value={form.type || ""} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} placeholder="e.g. Furnace, Crane, Press" /></div>
+              <div><Lbl t="Asset No." /><input value={form.assetNo || ""} onChange={e => setForm(f => ({ ...f, assetNo: e.target.value }))} placeholder="e.g. AST-001" /></div>
+              <div style={{ gridColumn: "1/-1", display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button className="btn btn-ghost" onClick={close}>Cancel</button>
+                <button className="btn btn-navy" onClick={() => { if (!form.name) return; const mc = { ...form, id: form.id || "MC" + String((machines || []).length + 1).padStart(2, "0") }; if (modal.mode === "edit") setMachines(pp => pp.map(x => x.id === mc.id ? mc : x)); else setMachines(pp => [...(pp || []), mc]); close(); }}>Save</button>
+              </div>
+            </div>}
           </div>
-          <div style={{ gridColumn: "1/-1", display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={saveUser}>Save</button></div>
-        </div>}
-        {modal.type === "plants" && <div style={{ display: "grid", gap: 12 }}>
-          <div><Lbl t="Plant Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-          <div><Lbl t="Location" /><input value={form.location || ""} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} /></div>
-          <div><Lbl t="Plant Head" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
-          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const p = { ...form, id: form.id || "P" + String(plants.length + 1) }; if (modal.mode === "edit") setPlants(pp => pp.map(x => x.id === p.id ? p : x)); else setPlants(pp => [...pp, p]); close(); }}>Save</button></div>
-        </div>}
-        {modal.type === "depts" && <div style={{ display: "grid", gap: 12 }}>
-          <div><Lbl t="Dept Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-          <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 10 }}>
-            <div><Lbl t="Icon" /><input value={form.icon || ""} onChange={e => setForm(f => ({ ...f, icon: e.target.value }))} /></div>
-            <div><Lbl t="HOD" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
-          </div>
-          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const d = { ...form, id: form.id || "D" + String(depts.length + 1), icon: form.icon || "🔹" }; if (modal.mode === "edit") setDepts(pp => pp.map(x => x.id === d.id ? d : x)); else setDepts(pp => [...pp, d]); close(); }}>Save</button></div>
-        </div>}
-        {modal.type === "machines" && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div style={{ gridColumn: "1/-1" }}><Lbl t="Machine Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Furnace Line 1" /></div>
-          <div><Lbl t="Plant" /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value }))}><option value="">Select plant…</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
-          <div><Lbl t="Department" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select dept…</option>{depts.map(d => <option key={d.id}>{d.name}</option>)}</select></div>
-          <div><Lbl t="Machine Type" /><input value={form.type || ""} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} placeholder="e.g. Furnace, Crane, Press" /></div>
-          <div><Lbl t="Asset No." /><input value={form.assetNo || ""} onChange={e => setForm(f => ({ ...f, assetNo: e.target.value }))} placeholder="e.g. AST-001" /></div>
-          <div style={{ gridColumn: "1/-1", display: "flex", gap: 10, justifyContent: "flex-end" }}>
-            <button className="btn btn-ghost" onClick={close}>Cancel</button>
-            <button className="btn btn-navy" onClick={() => { if (!form.name) return; const mc = { ...form, id: form.id || "MC" + String((machines || []).length + 1).padStart(2, "0") }; if (modal.mode === "edit") setMachines(pp => pp.map(x => x.id === mc.id ? mc : x)); else setMachines(pp => [...(pp || []), mc]); close(); }}>Save</button>
-          </div>
-        </div>}
-      </div></div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -4995,7 +5131,7 @@ export default function App() {
     <ErrorBoundary>
       <style>{CSS}</style>
       <Shell page={page} setPage={setPage} user={user} onLogout={() => { setUser(null); setPage(0); clearMeetingState(); }} onQuickAdd={() => setShowQuickAdd(true)} pendingCount={pendingForMe} auditCount={audit.length} activeMtg={globalActiveMtg} onResumeActiveMtg={() => setPage(1)} mtgRunning={mtgRunning} mtgElapsed={mtgElapsed} notifications={notifs} unreadCount={unreadNotifs} onMarkAllRead={markAllRead} users={users} actions={actions} onShowSupport={() => setShowSupport(true)} onShowProfile={() => setShowProfile(true)} onShowAdminNotifs={() => setShowAdminNotifs(true)} permissions={permissions}>
-        {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} plants={plants} depts={depts} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} />}
+        {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} plants={plants} depts={depts} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} permissions={permissions} />}
         {page === 1 && <WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows => { commitFinal(rows); clearMeetingState(); }} actions={actions} setActions={setActions} user={user} onProjectUpdate={updated => setProjects(p => p.map(x => x.id === updated.id ? updated : x))} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} permissions={permissions} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); }} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState} reasons={reasons} />}
         {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} machines={machines} permissions={permissions} />}
         {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} permissions={permissions} />}
