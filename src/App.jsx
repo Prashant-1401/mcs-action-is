@@ -35,14 +35,16 @@ async function sheetPost(action, tab, payload) {
 function parseCsv(text) {
   const lines = text.trim().split("\n");
   if (lines.length < 2) return [];
-  const headers = parseCsvRow(lines[0]);
+  const allHeaders = parseCsvRow(lines[0]);
+  // Strip empty/blank header columns — these are ghost columns from Sheet formatting
+  const headers = allHeaders.map((h, i) => ({ h: h.trim(), i })).filter(x => x.h !== "");
   return lines.slice(1).map(line => {
     const vals = parseCsvRow(line);
     const obj = {};
-    headers.forEach((h, i) => {
+    headers.forEach(({ h, i }) => {
       let v = vals[i] ?? "";
       // Auto-parse JSON arrays/objects stored in cells
-      if (v.startsWith("[") || v.startsWith("{")) {
+      if (typeof v === "string" && (v.startsWith("[") || v.startsWith("{"))) {
         try { v = JSON.parse(v); } catch { /* keep as string */ }
       }
       // Booleans
@@ -55,6 +57,13 @@ function parseCsv(text) {
     });
     return obj;
   }).filter(r => Object.values(r).some(v => v !== "" && v !== null));
+}
+
+/** Strip blank keys from a row object before writing to Sheet */
+function cleanRow(row) {
+  const out = {};
+  Object.keys(row).forEach(k => { if (k && k.trim() !== "") out[k] = row[k]; });
+  return out;
 }
 
 function parseCsvRow(line) {
@@ -170,6 +179,8 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   // sync effects from firing during the same render cycle as fetchData().
   // This stops seed/default data from overwriting the sheet on mount.
   const fetchDoneRef = useRef(false);
+  // Track when each tab was last written — poll skips tabs written within 90s
+  const lastWriteRef = useRef({});
   useEffect(() => {
     if (dbReady) {
       const t = setTimeout(() => { fetchDoneRef.current = true; }, 1000);
@@ -178,7 +189,10 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   }, [dbReady]);
   const syncToSheet = useCallback((tab, data) => {
     if (!SHEET_ENABLED || !fetchDoneRef.current) return;
-    sheetPost("replace_all", tab, { rows: data });
+    if (!data || (Array.isArray(data) && data.length === 0)) return;
+    lastWriteRef.current[tab] = Date.now();
+    const cleaned = Array.isArray(data) ? data.map(cleanRow) : data;
+    sheetPost("replace_all", tab, { rows: cleaned });
   }, []);
   useEffect(() => { syncToSheet("Users", users); }, [users, syncToSheet]);
   useEffect(() => { syncToSheet("Plants", plants); }, [plants, syncToSheet]);
@@ -187,97 +201,77 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   useEffect(() => { syncToSheet("Meetings", meetings); }, [meetings, syncToSheet]);
   useEffect(() => { syncToSheet("Projects", projects); }, [projects, syncToSheet]);
   useEffect(() => { syncToSheet("EscalationMatrix", escMatrix); }, [escMatrix, syncToSheet]);
-  useEffect(() => {
-    // Ensure every row has id and name fields so the script's key lookup works
-    const rows = Object.values(permissions).map(row => ({
-      id: row.id ?? "",
-      name: row.name ?? "",
-      canEditMeetings: row.canEditMeetings ?? false,
-      canCreateProjects: row.canCreateProjects ?? false,
-      canEditActions: row.canEditActions ?? false,
-      canViewDashboard: row.canViewDashboard ?? true,
-      canManageEscalations: row.canManageEscalations ?? false,
-    }));
-    syncToSheet("Permissions", rows);
-  }, [permissions, syncToSheet]);
+  // NOTE: Permissions, Machines, MeetingPresets are master data — only synced via
+  // the explicit "Save to Sheet" button in MasterPage, not on every toggle.
+  // This prevents the toggle→re-fetch→revert race condition.
   useEffect(() => { syncToSheet("Reasons", reasons); }, [reasons, syncToSheet]);
   useEffect(() => { syncToSheet("Audit", persistedAudit); }, [persistedAudit, syncToSheet]);
-  useEffect(() => {
-    const allTypes = Array.from(new Set([...Object.keys(mtgPresets.attendeeMap), ...Object.keys(mtgPresets.instructions)]));
-    const rows = allTypes.map(t => ({ type: t, attendees: mtgPresets.attendeeMap[t] || [], instructions: mtgPresets.instructions[t] || [] }));
-    syncToSheet("MeetingPresets", rows);
-  }, [mtgPresets, syncToSheet]);
-  useEffect(() => { syncToSheet("Machines", machines); }, [machines, syncToSheet]);
 
-  // ── Master data polling — re-fetch org/config tabs every 30s ──
+  // ── Master data polling — re-fetch org/config tabs every 60s ──
   // This ensures every logged-in user picks up Admin changes without a full reload.
+  // Tabs written to within the last 90s are skipped to prevent the stale CSV
+  // cache from reverting a save that hasn't propagated yet.
+  const POLL_WRITE_LOCK_MS = 90000; // 90s — Google Sheets CSV cache TTL
   useEffect(() => {
     if (!SHEET_ENABLED) return;
-    // Wait until initial load is done
-    const startPoll = () => {
-      const interval = setInterval(async () => {
-        // Don't poll if the tab is hidden — saves quota and avoids stale writes
-        if (document.hidden) return;
+    const MASTER_TABS = [
+      { key: "Users",            tab: "Users",            set: setUsersRaw,   prefix: "u",  isObj: false },
+      { key: "Plants",           tab: "Plants",           set: setPlantsRaw,  prefix: "p",  isObj: false },
+      { key: "Departments",      tab: "Departments",      set: setDeptsRaw,   prefix: "d",  isObj: false },
+      { key: "EscalationMatrix", tab: "EscalationMatrix", set: setEscRaw,     prefix: "e",  isObj: false },
+      { key: "Machines",         tab: "Machines",         set: setMachinesRaw,prefix: "mc", isObj: false },
+      { key: "Permissions",      tab: "Permissions",      set: setPermsRaw,   prefix: null, isObj: true  },
+      { key: "MeetingPresets",   tab: "MeetingPresets",   set: setPresetsRaw, prefix: null, isObj: "presets" },
+    ];
+    const sanitize = (arr, prefix) => (Array.isArray(arr) ? arr : [])
+      .filter(x => x && Object.values(x).some(v => v !== "" && v !== null && v !== undefined))
+      .map((x, i) => ({ ...x, id: (x.id !== undefined && x.id !== null && String(x.id).trim()) ? x.id : `${prefix}-${i}` }));
+    const changed = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
+
+    const poll = async () => {
+      if (document.hidden) return;
+      const now = Date.now();
+      // Only fetch tabs that haven't been written to recently
+      const tabsToFetch = MASTER_TABS.filter(t => {
+        const lastWrite = lastWriteRef.current[t.tab] || 0;
+        return (now - lastWrite) > POLL_WRITE_LOCK_MS;
+      });
+      if (tabsToFetch.length === 0) return;
+
+      await Promise.all(tabsToFetch.map(async ({ tab, set, prefix, isObj }) => {
         try {
-          const [u, p, d, em, pm, ps, mc] = await Promise.all([
-            sheetGet("Users"),
-            sheetGet("Plants"),
-            sheetGet("Departments"),
-            sheetGet("EscalationMatrix"),
-            sheetGet("Permissions"),
-            sheetGet("MeetingPresets"),
-            sheetGet("Machines"),
-          ]);
-          const sanitize = (arr, prefix) => (Array.isArray(arr) ? arr : [])
-            .filter(x => x && Object.values(x).some(v => v !== "" && v !== null && v !== undefined))
-            .map((x, i) => ({ ...x, id: (x.id !== undefined && x.id !== null && String(x.id).trim()) ? x.id : `${prefix}-${i}` }));
-
-          // Only update state if data actually changed (avoids needless re-renders)
-          const changed = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
-
-          const newUsers = sanitize(u, "u");
-          const newPlants = sanitize(p, "p");
-          const newDepts = sanitize(d, "d");
-          const newEsc = sanitize(em, "e");
-          const newMachines = sanitize(mc, "mc");
-
-          setUsersRaw(prev => changed(prev, newUsers) && newUsers.length ? newUsers : prev);
-          setPlantsRaw(prev => changed(prev, newPlants) && newPlants.length ? newPlants : prev);
-          setDeptsRaw(prev => changed(prev, newDepts) && newDepts.length ? newDepts : prev);
-          setEscRaw(prev => changed(prev, newEsc) && newEsc.length ? newEsc : prev);
-          setMachinesRaw(prev => changed(prev, newMachines) ? newMachines : prev);
-
-          if (pm.length) {
-            const pObj = {};
-            pm.forEach(row => { if (row.id !== undefined && row.id !== null && String(row.id).trim()) pObj[String(row.id)] = row; });
-            setPermsRaw(prev => changed(prev, pObj) ? pObj : prev);
-          }
-          if (ps.length) {
+          const rows = await sheetGet(tab);
+          if (!rows.length) return;
+          if (isObj === "presets") {
             const pMap = { attendeeMap: {}, instructions: {} };
-            ps.forEach(row => { if (row.type) { pMap.attendeeMap[row.type] = row.attendees || []; pMap.instructions[row.type] = row.instructions || []; } });
-            setPresetsRaw(prev => changed(prev, pMap) ? pMap : prev);
+            rows.forEach(row => { if (row.type) { pMap.attendeeMap[row.type] = row.attendees || []; pMap.instructions[row.type] = row.instructions || []; } });
+            set(prev => changed(prev, pMap) ? pMap : prev);
+          } else if (isObj) {
+            const pObj = {};
+            rows.forEach(row => { if (row.id !== undefined && row.id !== null && String(row.id).trim()) pObj[String(row.id)] = row; });
+            set(prev => changed(prev, pObj) ? pObj : prev);
+          } else {
+            const newData = sanitize(rows, prefix);
+            set(prev => changed(prev, newData) && newData.length ? newData : prev);
           }
         } catch (e) {
-          // Silent fail — don't crash the app on a poll error
-          console.warn("Master poll failed:", e.message);
+          console.warn(`Master poll failed for ${tab}:`, e.message);
         }
-      }, 30000); // every 30 seconds
-      return interval;
+      }));
     };
 
-    // Start polling only after initial data is loaded
     let interval;
-    if (dbReady) {
-      interval = startPoll();
-    } else {
-      const check = setInterval(() => { if (dbReady) { clearInterval(check); interval = startPoll(); } }, 1000);
-      return () => { clearInterval(check); };
+    const start = () => { interval = setInterval(poll, 60000); }; // poll every 60s
+    if (dbReady) { start(); }
+    else {
+      const check = setInterval(() => { if (dbReady) { clearInterval(check); start(); } }, 1000);
+      return () => clearInterval(check);
     }
     return () => clearInterval(interval);
   }, [dbReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
-    dbReady, dbError, fetchData,
+    dbReady, dbError, fetchData, lastWriteRef,
     users, setUsers,
     plants, setPlants,
     depts, setDepts,
@@ -4549,7 +4543,7 @@ function SectionSaveButton({ label = "💾 Save to Sheet", onSave }) {
   );
 }
 
-function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permissions, setPermissions, escMatrix, setEscMatrix, mtgPresets, setMtgPresets, machines, setMachines, refreshMaster }) {
+function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permissions, setPermissions, escMatrix, setEscMatrix, mtgPresets, setMtgPresets, machines, setMachines, refreshMaster, lastWriteRef }) {
   const [tab, setTab] = useState("users");
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
@@ -4566,12 +4560,31 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
   };
   const TABS = [["users", "👥 Users"], ["plants", "🏭 Plants"], ["depts", "🗂 Depts"], ["machines", "⚙ Machines"], ["org", "🌳 Org"], ["perms", "🔐 Perms"], ["escmatrix", "🚨 Escalation"], ["presets", "🎙 Presets"]];
 
-  // Save helpers — write to Sheet then re-fetch to confirm
+  // Save helpers — write to Sheet; no re-fetch since CSV cache lags up to 90s
   const saveToSheet = async (tab, rows) => {
     if (!SHEET_ENABLED) throw new Error("Sheet not connected");
-    await sheetPost("replace_all", tab, { rows });
-    // Re-fetch so local state is confirmed from sheet (and other clients pick it up via poll)
-    if (refreshMaster) setTimeout(refreshMaster, 800);
+    // Always clean blank keys before sending
+    const cleaned = (Array.isArray(rows) ? rows : []).map(cleanRow).filter(r => Object.keys(r).length > 0);
+    if (cleaned.length === 0) throw new Error("Nothing to save");
+    await sheetPost("replace_all", tab, { rows: cleaned });
+    if (lastWriteRef?.current) lastWriteRef.current[tab] = Date.now();
+  };
+
+  // Permissions-specific save — normalises shape before sending
+  const savePermissions = async () => {
+    const rows = Object.values(permissions).map(row => cleanRow({
+      id: String(row.id ?? ""),
+      name: String(row.name ?? ""),
+      canEditMeetings: row.canEditMeetings ?? false,
+      canCreateProjects: row.canCreateProjects ?? false,
+      canEditActions: row.canEditActions ?? false,
+      canViewDashboard: row.canViewDashboard ?? true,
+      canManageEscalations: row.canManageEscalations ?? false,
+    })).filter(r => r.id !== "");
+    if (!SHEET_ENABLED) throw new Error("Sheet not connected");
+    if (rows.length === 0) throw new Error("No permissions to save");
+    await sheetPost("replace_all", "Permissions", { rows });
+    lastWriteRef?.current && (lastWriteRef.current["Permissions"] = Date.now());
   };
 
   function OrgNode({ name, allUsers, depth }) {
@@ -4777,7 +4790,7 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
             <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 15, color: T.navy }}>Permission Center</div>
             <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>Configure access rights for each user. Admin users always have full access.</div>
           </div>
-          <SectionSaveButton onSave={() => saveToSheet("Permissions", Object.values(permissions))} />
+          <SectionSaveButton onSave={savePermissions} />
         </div>
         {/* Mobile perm cards */}
         <div style={{ padding: 14, display: "none" }} className="master-mobile-cards">
@@ -5068,7 +5081,7 @@ export default function App() {
 
   // ── Google Sheet live database ──
   const {
-    dbReady, dbError, fetchData,
+    dbReady, dbError, fetchData, lastWriteRef,
     users, setUsers,
     plants, setPlants,
     depts, setDepts,
@@ -5201,7 +5214,7 @@ export default function App() {
         {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} machines={machines} permissions={permissions} />}
         {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} permissions={permissions} />}
         {page === 4 && <EscalationsPage actions={actions} audit={audit} user={user} setPage={setPage} users={users} plants={plants} setActions={setActions} permissions={permissions} />}
-        {page === 99 && user?.role === "Admin" && <MasterPage plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} permissions={permissions} setPermissions={setPermissions} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets} machines={machines} setMachines={setMachines} refreshMaster={fetchData} />}
+        {page === 99 && user?.role === "Admin" && <MasterPage plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} permissions={permissions} setPermissions={setPermissions} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets} machines={machines} setMachines={setMachines} refreshMaster={fetchData} lastWriteRef={lastWriteRef} />}
       </Shell>
       {showSupport && <SupportModal user={user} onClose={() => setShowSupport(false)} />}
       {showProfile && <UserProfilePanel user={user} users={users} actions={actions} onClose={() => setShowProfile(false)} />}
