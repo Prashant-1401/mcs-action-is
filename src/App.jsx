@@ -48,8 +48,9 @@ function parseCsv(text) {
       // Booleans
       if (v === "true") v = true;
       if (v === "false") v = false;
-      // Numerics (only pure numbers, avoid corrupting IDs like "U01" or "007")
-      if (v !== "" && /^-?\d+(\.\d+)?$/.test(v) && typeof v === "string") v = Number(v);
+      // Numerics — only coerce known numeric fields; never coerce name/id/dept/plant/role/text fields
+      const NUMERIC_FIELDS = ["level", "daysOverdue", "overdueDays", "delay", "count", "index", "order", "seq"];
+      if (v !== "" && /^-?\d+(\.\d+)?$/.test(v) && typeof v === "string" && NUMERIC_FIELDS.includes(h)) v = Number(v);
       obj[h] = v;
     });
     return obj;
@@ -207,6 +208,73 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
     syncToSheet("MeetingPresets", rows);
   }, [mtgPresets, syncToSheet]);
   useEffect(() => { syncToSheet("Machines", machines); }, [machines, syncToSheet]);
+
+  // ── Master data polling — re-fetch org/config tabs every 30s ──
+  // This ensures every logged-in user picks up Admin changes without a full reload.
+  useEffect(() => {
+    if (!SHEET_ENABLED) return;
+    // Wait until initial load is done
+    const startPoll = () => {
+      const interval = setInterval(async () => {
+        // Don't poll if the tab is hidden — saves quota and avoids stale writes
+        if (document.hidden) return;
+        try {
+          const [u, p, d, em, pm, ps, mc] = await Promise.all([
+            sheetGet("Users"),
+            sheetGet("Plants"),
+            sheetGet("Departments"),
+            sheetGet("EscalationMatrix"),
+            sheetGet("Permissions"),
+            sheetGet("MeetingPresets"),
+            sheetGet("Machines"),
+          ]);
+          const sanitize = (arr, prefix) => (Array.isArray(arr) ? arr : [])
+            .filter(x => x && Object.values(x).some(v => v !== "" && v !== null && v !== undefined))
+            .map((x, i) => ({ ...x, id: (x.id !== undefined && x.id !== null && String(x.id).trim()) ? x.id : `${prefix}-${i}` }));
+
+          // Only update state if data actually changed (avoids needless re-renders)
+          const changed = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
+
+          const newUsers = sanitize(u, "u");
+          const newPlants = sanitize(p, "p");
+          const newDepts = sanitize(d, "d");
+          const newEsc = sanitize(em, "e");
+          const newMachines = sanitize(mc, "mc");
+
+          setUsersRaw(prev => changed(prev, newUsers) && newUsers.length ? newUsers : prev);
+          setPlantsRaw(prev => changed(prev, newPlants) && newPlants.length ? newPlants : prev);
+          setDeptsRaw(prev => changed(prev, newDepts) && newDepts.length ? newDepts : prev);
+          setEscRaw(prev => changed(prev, newEsc) && newEsc.length ? newEsc : prev);
+          setMachinesRaw(prev => changed(prev, newMachines) ? newMachines : prev);
+
+          if (pm.length) {
+            const pObj = {};
+            pm.forEach(row => { if (row.id !== undefined && row.id !== null && String(row.id).trim()) pObj[String(row.id)] = row; });
+            setPermsRaw(prev => changed(prev, pObj) ? pObj : prev);
+          }
+          if (ps.length) {
+            const pMap = { attendeeMap: {}, instructions: {} };
+            ps.forEach(row => { if (row.type) { pMap.attendeeMap[row.type] = row.attendees || []; pMap.instructions[row.type] = row.instructions || []; } });
+            setPresetsRaw(prev => changed(prev, pMap) ? pMap : prev);
+          }
+        } catch (e) {
+          // Silent fail — don't crash the app on a poll error
+          console.warn("Master poll failed:", e.message);
+        }
+      }, 30000); // every 30 seconds
+      return interval;
+    };
+
+    // Start polling only after initial data is loaded
+    let interval;
+    if (dbReady) {
+      interval = startPoll();
+    } else {
+      const check = setInterval(() => { if (dbReady) { clearInterval(check); interval = startPoll(); } }, 1000);
+      return () => { clearInterval(check); };
+    }
+    return () => clearInterval(interval);
+  }, [dbReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     dbReady, dbError, fetchData,
@@ -3437,12 +3505,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
           <button className="btn btn-ghost btn-sm" onClick={printPage} title="Print">🖨 Print</button>
         </div>
       </PageHeader>
-      {pendingConf.length > 0 && (
-        <div className="confirm-banner" style={{ marginBottom: 16 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, color: "#7A5A00" }}>⏳ {pendingConf.length} action{pendingConf.length !== 1 ? "s" : ""} awaiting your completion confirmation</div>
-          <div style={{ fontSize: 12, color: "#7A5A00", marginTop: 2 }}>Click an action to review and confirm or reopen it.</div>
-        </div>
-      )}
+
       <div className="card" style={{ padding: "14px 16px", marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 10 }}>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 Search actions…" style={{ width: 200 }} />
@@ -3825,7 +3888,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
   const allPlants = plants ? plants.map(p => p.name) : [...new Set(actions.map(a => a.plant))];
   let fa = actions;
   if (plantF !== "All") fa = fa.filter(a => a.plant === plantF);
-  if (deptF !== "All") fa = fa.filter(a => (a.section || "").toLowerCase().trim() === deptF.toLowerCase().trim() || (a.dept || "").toLowerCase().trim() === deptF.toLowerCase().trim());
+  if (deptF !== "All") fa = fa.filter(a => String(a.section ?? "").toLowerCase().trim() === String(deptF ?? "").toLowerCase().trim() || String(a.dept ?? "").toLowerCase().trim() === String(deptF ?? "").toLowerCase().trim());
 
   const total = fa.length, comp = fa.filter(a => a.status === "COMPLETED").length, ip = fa.filter(a => a.status === "IN PROCESS").length;
   const ns = fa.filter(a => a.status === "NOT STARTED").length, drop = fa.filter(a => a.status === "DROPPED").length;
@@ -3837,11 +3900,11 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
     if (!a.due || !a.closedOn) return sum + 0;
     return sum + (new Date(a.closedOn) <= new Date(a.due) ? 100 : 0);
   }, 0) / comp) : 0;
-  const visibleDepts = deptF !== "All" ? depts.filter(d => (d.name || "").toLowerCase().trim() === deptF.toLowerCase().trim()) : (plantF !== "All" ? depts.filter(d => (users || []).some(u => u.plant === plantF && u.dept === d.name) || fa.some(a => (a.section || "").toLowerCase().trim() === (d.name || "").toLowerCase().trim())) : depts);
+  const visibleDepts = deptF !== "All" ? depts.filter(d => String(d.name ?? "").toLowerCase().trim() === String(deptF ?? "").toLowerCase().trim()) : (plantF !== "All" ? depts.filter(d => (users || []).some(u => u.plant === plantF && u.dept === d.name) || fa.some(a => String(a.section ?? "").toLowerCase().trim() === String(d.name ?? "").toLowerCase().trim())) : depts);
 
   // Build heat map rows: merge dept master + unique section values from actual actions
   // This ensures actions always appear even if section doesn't match any dept name
-  const deptNames = new Set(visibleDepts.map(d => (d.name || "").toLowerCase().trim()));
+  const deptNames = new Set(visibleDepts.map(d => String(d.name ?? "").toLowerCase().trim()));
   const extraSections = [...new Set(fa.map(a => (a.section || "").trim()).filter(s => s && s !== "" && !deptNames.has(s.toLowerCase())))];
   const heatmapRows = [
     ...visibleDepts.map(d => ({ id: d.id, name: d.name, head: d.head, icon: d.icon || "🏭", fromDept: true })),
@@ -3929,10 +3992,10 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
         <table>
           <thead><tr><th>Department</th><th style={{ textAlign: "center" }}>Total</th><th style={{ textAlign: "center" }}>Open</th><th style={{ textAlign: "center" }}>Critical</th><th style={{ textAlign: "center" }}>Overdue</th><th>Completion</th><th style={{ textAlign: "center" }}>Health</th></tr></thead>
           <tbody>{heatmapRows.map(d => {
-            const dname = (d.name || "").toLowerCase().trim();
+            const dname = String(d.name ?? "").toLowerCase().trim();
             const da = fa.filter(a => {
-              const sec = (a.section || "").toLowerCase().trim();
-              const dept = (a.dept || "").toLowerCase().trim();
+              const sec = String(a.section ?? "").toLowerCase().trim();
+              const dept = String(a.dept ?? "").toLowerCase().trim();
               return sec === dname || dept === dname;
             });
             const open = da.filter(a => a.status !== "COMPLETED" && a.status !== "DROPPED").length;
@@ -4141,7 +4204,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
       )}
 
       {deptDrill && (() => {
-        const da = fa.filter(a => (a.section || "").toLowerCase().trim() === (deptDrill.name || "").toLowerCase().trim() || (a.dept || "").toLowerCase().trim() === (deptDrill.name || "").toLowerCase().trim());
+        const da = fa.filter(a => String(a.section ?? "").toLowerCase().trim() === String(deptDrill.name ?? "").toLowerCase().trim() || String(a.dept ?? "").toLowerCase().trim() === String(deptDrill.name ?? "").toLowerCase().trim());
         const dopen = da.filter(a => a.status !== "COMPLETED" && a.status !== "DROPPED").length;
         const dover = da.filter(isOverdue).length, ddone = da.filter(a => a.status === "COMPLETED").length;
         return (
@@ -4486,7 +4549,7 @@ function SectionSaveButton({ label = "💾 Save to Sheet", onSave }) {
   );
 }
 
-function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permissions, setPermissions, escMatrix, setEscMatrix, mtgPresets, setMtgPresets, machines, setMachines }) {
+function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permissions, setPermissions, escMatrix, setEscMatrix, mtgPresets, setMtgPresets, machines, setMachines, refreshMaster }) {
   const [tab, setTab] = useState("users");
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
@@ -4503,10 +4566,12 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
   };
   const TABS = [["users", "👥 Users"], ["plants", "🏭 Plants"], ["depts", "🗂 Depts"], ["machines", "⚙ Machines"], ["org", "🌳 Org"], ["perms", "🔐 Perms"], ["escmatrix", "🚨 Escalation"], ["presets", "🎙 Presets"]];
 
-  // Save helpers
+  // Save helpers — write to Sheet then re-fetch to confirm
   const saveToSheet = async (tab, rows) => {
     if (!SHEET_ENABLED) throw new Error("Sheet not connected");
     await sheetPost("replace_all", tab, { rows });
+    // Re-fetch so local state is confirmed from sheet (and other clients pick it up via poll)
+    if (refreshMaster) setTimeout(refreshMaster, 800);
   };
 
   function OrgNode({ name, allUsers, depth }) {
@@ -5136,7 +5201,7 @@ export default function App() {
         {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} machines={machines} permissions={permissions} />}
         {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} permissions={permissions} />}
         {page === 4 && <EscalationsPage actions={actions} audit={audit} user={user} setPage={setPage} users={users} plants={plants} setActions={setActions} permissions={permissions} />}
-        {page === 99 && user?.role === "Admin" && <MasterPage plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} permissions={permissions} setPermissions={setPermissions} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets} machines={machines} setMachines={setMachines} />}
+        {page === 99 && user?.role === "Admin" && <MasterPage plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} permissions={permissions} setPermissions={setPermissions} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets} machines={machines} setMachines={setMachines} refreshMaster={fetchData} />}
       </Shell>
       {showSupport && <SupportModal user={user} onClose={() => setShowSupport(false)} />}
       {showProfile && <UserProfilePanel user={user} users={users} actions={actions} onClose={() => setShowProfile(false)} />}
