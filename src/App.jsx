@@ -3,13 +3,13 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 /* ===================== GOOGLE SHEET CONFIG ===================== */
 // 1. Deploy Code.gs as a Web App (Apps Script → Deploy → Web App → Anyone)
 // 2. Paste the deployment URL below
-const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbzkxOs7ZMiioyG_gJiG_Vfyv0sJCLG_PZHZZm90G8lfqETVqPoPX5LrNvGLa3OxB7PHzA/exec";
-const _DEFAULT_SHEET_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzkxOs7ZMiioyG_gJiG_Vfyv0sJCLG_PZHZZm90G8lfqETVqPoPX5LrNvGLa3OxB7PHzA/exec";
+const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbzckBkgyI_28vf7-qShck8MgLCnVZIwnp_0mhMHeXcI8VzAnLHVWh6YdcUd_rrDc_CEnw/exec";
+const _DEFAULT_SHEET_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzckBkgyI_28vf7-qShck8MgLCnVZIwnp_0mhMHeXcI8VzAnLHVWh6YdcUd_rrDc_CEnw/exec";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://mcs-action.onrender.com";
 
 const SHEET_ID = import.meta.env.VITE_SHEET_ID || "1OR4J17WrhQg9rqFV3uIhLCDG9UDCoQ5lc9-8ZXoNSOo";
 // SHEET_ENABLED is true when a custom deployment URL is provided via env var
-const SHEET_ENABLED = !!import.meta.env.VITE_SHEET_SCRIPT_URL && SHEET_SCRIPT_URL !== _DEFAULT_SHEET_SCRIPT_URL;
+const SHEET_ENABLED = true; // URL is already hardcoded
 
 // CSV read URL (no auth needed for publicly shared sheets)
 const csvUrl = (tab) =>
@@ -101,7 +101,20 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   const [persistedAudit, setPersistedAuditRaw] = useState([]);
 
   const fetchData = useCallback(async () => {
-    if (!SHEET_ENABLED) { setDbReady(true); return; }
+    if (!SHEET_ENABLED) {
+      // Even without write access, still read Machines from the public CSV
+      try {
+        const mc = await sheetGet("Machines").catch(() => []);
+        const sanitize = (arr, prefix) => (Array.isArray(arr) ? arr : [])
+          .filter(x => x && Object.values(x).some(v => v !== "" && v !== null && v !== undefined))
+          .map((x, i) => ({ ...x, id: (x.id !== undefined && x.id !== null && String(x.id).trim()) ? x.id : `${prefix}-${i}` }));
+        if (mc.length) setMachinesRaw(sanitize(mc, "mc"));
+      } catch (e) {
+        console.warn("Machines read failed:", e.message);
+      }
+      setDbReady(true);
+      return;
+    }
     try {
       const [u, p, d, a, m, pr, em, pm, ps, mc, rs, au] = await Promise.all([
         sheetGet("Users"),
@@ -203,7 +216,7 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   useEffect(() => { syncToSheet("EscalationMatrix", escMatrix); }, [escMatrix, syncToSheet]);
   // NOTE: Permissions, Machines, MeetingPresets are master data — only synced via
   // the explicit "Save to Sheet" button in MasterPage, not on every toggle.
-  // This prevents the toggle→re-fetch→revert race condition.
+  // Machines auto-sync removed: it raced with the manual Save button causing silent failures.
   useEffect(() => { syncToSheet("Reasons", reasons); }, [reasons, syncToSheet]);
   useEffect(() => { syncToSheet("Audit", persistedAudit); }, [persistedAudit, syncToSheet]);
 
@@ -294,7 +307,7 @@ const DEFAULT_PLANTS = [];
 const DEFAULT_DEPTS = [];
 const DEFAULT_USERS = [];
 const MEETING_TYPES = ["Furnace Daily Review", "Daily Problem-Solving", "Daily Plant Head Review", "Weekly Plant Head", "Safety Review"];
-const STATUS_LIST = ["IN PROCESS", "NOT STARTED", "COMPLETED", "DROPPED"];
+const STATUS_LIST = ["NOT STARTED", "IN PROCESS", "COMPLETED", "DROPPED"];
 const PRIORITY_LIST = ["CRITICAL", "WARNING", "NORMAL"];
 const SECTIONS = ["Production", "Maintenance", "Quality", "Safety", "Electrical", "Mechanical", "Instrumentation", "Stores & Logistics", "Management", "General"];
 const ATTENDEE_MAP = {
@@ -966,7 +979,7 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
           </div>
         </div>
       </aside>
-      <main style={{ flex: 1, overflow: "auto", minWidth: 0, position: "relative" }}>
+      <main style={{ flex: 1, overflow: "hidden", minWidth: 0, position: "relative", display: "flex", flexDirection: "column", height: "100vh" }}>
 
         {/* Floating "Meeting Running" pill when away from Work page */}
         {activeMtg && page !== 1 && (
@@ -978,7 +991,7 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
           </div>
         )}
 
-        <div style={{ padding: 28, minHeight: "100vh", paddingTop: 20 }}>{children}</div>
+        <div style={{ padding: 28, paddingTop: 20, flex: 1, overflowY: "auto", minHeight: 0 }}>{children}</div>
       </main>
       <button className="fab" onClick={onQuickAdd} title="Quick add action">+</button>
     </div>
@@ -2532,7 +2545,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   if (running && exitConfirm) setExitConfirm(false);
 
   const pendingRelated = (relatedActions || [])
-    .filter(a => a.status !== "COMPLETED" && a.status !== "DROPPED")
+    .filter(a => a.status !== "DROPPED")
     .sort((a, b) => {
       const over_a = isOverdue(a) ? -1 : 0, over_b = isOverdue(b) ? -1 : 0;
       if (over_a !== over_b) return over_a - over_b;
@@ -3437,11 +3450,11 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     return { ...a, ...patch };
   }));
   const upStatus = (id, status) => {
-    // If moving a pendingConfirmation action to COMPLETED, clear any
-    // PENDING CONFIRM-only status filter so the card stays visible in COMPLETED column.
     if (status === "COMPLETED") {
+      // If the status filter is active and doesn't include COMPLETED, add it
+      // so the action stays visible in the Kanban board after being dropped.
       setFiltersPersist(f => {
-        if (f.status.length > 0 && f.status.includes("PENDING CONFIRM") && !f.status.includes("COMPLETED")) {
+        if (f.status.length > 0 && !f.status.includes("COMPLETED")) {
           return { ...f, status: [...f.status, "COMPLETED"] };
         }
         return f;
@@ -3565,7 +3578,13 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
       {openFilter && <div style={{ position: "fixed", inset: 0, zIndex: 599 }} onClick={() => setOpenFilter(null)} />}
       {view === "table" && <TableView fa={fa} upStatus={upStatus} setSel={a => { setSel(a); }} canEdit={canEdit} upAction={upAction} sortState={userSortPref[userKey]} onSortChange={s => { userSortPref[userKey] = s; }} users={users} />}
       {view === "board" && <BoardView fa={fa} setSel={setSel} users={users} />}
-      {view === "kanban" && <KanbanView fa={fa} upStatus={upStatus} canEdit={canEdit} users={users} setSel={setSel} />}
+      {view === "kanban" && <KanbanView
+  fa={fa}
+  upStatus={upStatus}
+  canEdit={canEdit}
+  users={users}
+  setSel={setSel}
+/>}
       {view === "timeline" && <TimelineView fa={fa} />}
       {sel && <ActionDetailPanel action={sel} onClose={() => setSel(null)} onUpdate={(id, patch) => { upAction(id, patch); setSel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} machines={machines} permissions={permissions} />}
     </div>
@@ -3720,7 +3739,14 @@ function KanbanView({ fa, upStatus, canEdit, users, setSel }) {
   const handleMouseUp = () => { clearTimeout(holdTimerRef.current); setHeldId(null); };
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, alignItems: "start" }}>
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+      gap: 14,
+      alignItems: "start",
+      width: "100%",
+      paddingBottom: 100
+    }}>
       {STATUS_LIST.map(col => {
         const c = SC[col] || { bg: "#eee", text: "#333", dot: "#aaa" };
         const glow = HOLD_GLOW[col] || { border: T.navy, shadow: "0 0 0 3px rgba(39,34,98,.2), 0 8px 24px rgba(39,34,98,.15)", bg: "#F4F3FB" };
@@ -3741,8 +3767,8 @@ function KanbanView({ fa, upStatus, canEdit, users, setSel }) {
             }}
             style={{
               borderRadius: 12,
-              border: isDragOver ? `2px dashed ${c.dot}` : "2px solid transparent",
-              background: isDragOver ? c.dot + "18" : c.bg,
+              border: isDragOver ? `2px dashed ${c.dot}` : `2px solid ${c.dot}22`,
+              background: isDragOver ? c.dot + "14" : "#F7F7FC",
               transition: "background .18s, border-color .18s",
               minHeight: 220,
             }}>
@@ -3811,7 +3837,7 @@ function KanbanView({ fa, upStatus, canEdit, users, setSel }) {
                       <span style={{ fontFamily: "monospace", fontSize: 10, color: isHeld ? glow.border : T.text2, fontWeight: isHeld ? 700 : 500, transition: "color .15s" }}>{a.sn}</span>
                       <PBadge p={a.priority} />
                     </div>
-                    <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.45, marginBottom: 9, color: T.text }}>{a.text.slice(0, 65)}{a.text.length > 65 ? "…" : ""}</div>
+                    <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.45, marginBottom: 9, color: T.text, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{a.text}</div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <Avatar name={a.responsible} size={20} users={users || []} />
                       <span style={{ fontSize: 10, color: isOverdue(a) ? T.red : T.text2 }}>{fmt(a.due)}</span>
@@ -4558,15 +4584,16 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
     const u = { ...cleanForm, id: cleanForm.id || "U" + String(users.length + 1).padStart(2, "0"), initials: cleanForm.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(), color: cleanForm.color || COLORS[users.length % 6] };
     if (modal.mode === "edit") setUsers(p => p.map(x => x.id === u.id ? u : x)); else setUsers(p => [...p, u]); close();
   };
-  const TABS = [["users", "👥 Users"], ["plants", "🏭 Plants"], ["depts", "🗂 Depts"], ["machines", "⚙ Machines"], ["org", "🌳 Org"], ["perms", "🔐 Perms"], ["escmatrix", "🚨 Escalation"], ["presets", "🎙 Presets"]];
+  const TABS = [["users", "👥 Users"], ["plants", "🏭 Plants"], ["depts", "🗂 Depts"], ["machines", "⚙ Machines"], ["org", "🌳 Org"], ["escmatrix", "🚨 Escalation"], ["presets", "🎙 Presets"]];
 
   // Save helpers — write to Sheet; no re-fetch since CSV cache lags up to 90s
   const saveToSheet = async (tab, rows) => {
     if (!SHEET_ENABLED) throw new Error("Sheet not connected");
     // Always clean blank keys before sending
     const cleaned = (Array.isArray(rows) ? rows : []).map(cleanRow).filter(r => Object.keys(r).length > 0);
-    if (cleaned.length === 0) throw new Error("Nothing to save");
-    await sheetPost("replace_all", tab, { rows: cleaned });
+    if (cleaned.length === 0) throw new Error("Nothing to save — add at least one entry first");
+    const result = await sheetPost("replace_all", tab, { rows: cleaned });
+    if (result && result.ok === false) throw new Error(result.error || "Sheet write failed");
     if (lastWriteRef?.current) lastWriteRef.current[tab] = Date.now();
   };
 
@@ -4725,6 +4752,7 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>{d.icon || "🗂"}</span><button className="btn btn-ghost btn-sm" onClick={() => openEdit("depts", d)}>Edit</button></div>
             <div style={{ fontWeight: 700, fontSize: 14 }}>{d.name}</div>
             <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>HOD: {d.head || "—"}</div>
+            {d.plant && <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>Plant: {d.plant}</div>}
           </div>)}
           {depts.length === 0 && <Empty icon="🗂" title="No departments" sub="Click + Add to create a department." />}
         </div>
@@ -4732,7 +4760,7 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
 
       {/* ── MACHINES ── */}
       {tab === "machines" && <>
-        <SectionHeader title="Machines" sub="Registered equipment across all plants" onAdd={() => openAdd("machines")} onSave={() => saveToSheet("Machines", machines || [])} />
+        <SectionHeader title="Machines" sub="Registered equipment across all plants" onAdd={() => openAdd("machines")} onSave={() => saveToSheet("Machines", (machines || []))} />
         {/* Mobile cards */}
         <div style={{ display: "none" }} className="master-mobile-cards">
           {(machines || []).map(m => (
@@ -4780,90 +4808,6 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
         <div style={{ minWidth: 600, display: "flex", flexDirection: "column", gap: 32, alignItems: "center" }}>
           {roots.map(u => <div key={u.id} style={{ width: "100%", display: "flex", justifyContent: "center" }}><OrgNode name={u.name} allUsers={users} depth={0} /></div>)}
           {roots.length === 0 && <Empty icon="🌳" title="No org structure" sub="Add users with superior relationships to build the organogram." />}
-        </div>
-      </div>}
-
-      {/* ── PERMISSIONS ── */}
-      {tab === "perms" && <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <div style={{ padding: "16px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-          <div>
-            <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 15, color: T.navy }}>Permission Center</div>
-            <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>Configure access rights for each user. Admin users always have full access.</div>
-          </div>
-          <SectionSaveButton onSave={savePermissions} />
-        </div>
-        {/* Mobile perm cards */}
-        <div style={{ padding: 14, display: "none" }} className="master-mobile-cards">
-          {users.map(u => {
-            const isAdmin = u.role === "Admin" || u.role === "MD" || u.role === "Plant Head";
-            const perms = permissions?.[u.id] || { canEditMeetings: false, canCreateProjects: false, canEditActions: false, canViewDashboard: true, canManageEscalations: false };
-            const toggle = (key) => { if (isAdmin) return; setPermissions && setPermissions(prev => ({ ...prev, [u.id]: { id: u.id, name: u.name, ...perms, [key]: !perms[key] } })); };
-            const PERM_LABELS = [["canEditMeetings","Edit Meetings"],["canCreateProjects","Create Projects"],["canEditActions","Edit Actions"],["canViewDashboard","View Dashboard"],["canManageEscalations","Manage Escalations"]];
-            return (
-              <div key={u.id} className="card" style={{ padding: 14, marginBottom: 10 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                  <div style={{ width: 34, height: 34, borderRadius: "50%", background: isAdmin ? T.amber : T.navy, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>{(u.name || "?").slice(0, 2).toUpperCase()}</div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>{u.name}</div>
-                    <div style={{ fontSize: 11, color: T.text2 }}>{u.role} · {u.dept || u.plant}</div>
-                  </div>
-                  {isAdmin && <span style={{ fontSize: 10, background: T.amber, color: "#fff", borderRadius: 4, padding: "2px 6px", fontWeight: 700 }}>ADMIN</span>}
-                </div>
-                {PERM_LABELS.map(([pkey, label]) => (
-                  <div key={pkey} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: `1px solid ${T.border}` }}>
-                    <span style={{ fontSize: 12, color: T.text }}>{label}</span>
-                    {isAdmin ? <span style={{ fontSize: 14 }}>✅</span> : (
-                      <button onClick={() => toggle(pkey)} style={{ background: perms[pkey] ? T.green : "#e2e8f0", border: "none", borderRadius: 12, width: 42, height: 22, cursor: "pointer", position: "relative", flexShrink: 0 }}>
-                        <span style={{ position: "absolute", top: 2, left: perms[pkey] ? 22 : 2, width: 18, height: 18, borderRadius: "50%", background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,.3)", transition: "left .2s", display: "block" }} />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-        {/* Desktop table */}
-        <div className="master-desktop-table" style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 600 }}>
-            <thead>
-              <tr style={{ background: T.bg }}>
-                <th style={{ padding: "10px 16px", textAlign: "left", fontWeight: 700, color: T.text2, fontSize: 12, borderBottom: `1px solid ${T.border}` }}>User</th>
-                {[["Edit Mtgs"],["Projects"],["Actions"],["Dashboard"],["Escalations"]].map(([h]) => (
-                  <th key={h} style={{ padding: "10px 10px", textAlign: "center", fontWeight: 700, color: T.text2, fontSize: 12, borderBottom: `1px solid ${T.border}`, whiteSpace: "nowrap" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u, i) => {
-                const isAdmin = u.role === "Admin" || u.role === "MD" || u.role === "Plant Head";
-                const perms = permissions?.[u.id] || { canEditMeetings: false, canCreateProjects: false, canEditActions: false, canViewDashboard: true, canManageEscalations: false };
-                const toggle = (key) => { if (isAdmin) return; setPermissions && setPermissions(prev => ({ ...prev, [u.id]: { id: u.id, name: u.name, ...perms, [key]: !perms[key] } })); };
-                return (
-                  <tr key={u.id} style={{ background: i % 2 === 0 ? "transparent" : T.bg }}>
-                    <td style={{ padding: "10px 16px", borderBottom: `1px solid ${T.border}` }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ width: 32, height: 32, borderRadius: "50%", background: isAdmin ? T.amber : T.navy, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 12, flexShrink: 0 }}>{(u.name || "?").slice(0, 2).toUpperCase()}</div>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: 12 }}>{u.name}</div>
-                          <div style={{ fontSize: 11, color: T.text2 }}>{u.role}</div>
-                        </div>
-                        {isAdmin && <span style={{ fontSize: 10, background: T.amber, color: "#fff", borderRadius: 4, padding: "2px 5px", fontWeight: 700 }}>ADMIN</span>}
-                      </div>
-                    </td>
-                    {["canEditMeetings","canCreateProjects","canEditActions","canViewDashboard","canManageEscalations"].map(pkey => (
-                      <td key={pkey} style={{ padding: "10px 10px", textAlign: "center", borderBottom: `1px solid ${T.border}` }}>
-                        {isAdmin ? <span style={{ fontSize: 16 }} title="Admin: always granted">✅</span>
-                          : <button onClick={() => toggle(pkey)} style={{ background: perms[pkey] ? T.green : "#e2e8f0", border: "none", borderRadius: 12, width: 42, height: 22, cursor: "pointer", position: "relative", flexShrink: 0 }} title={perms[pkey] ? "Enabled" : "Disabled"}>
-                              <span style={{ position: "absolute", top: 2, left: perms[pkey] ? 22 : 2, width: 18, height: 18, borderRadius: "50%", background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,.3)", transition: "left .2s", display: "block" }} />
-                            </button>}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
         </div>
       </div>}
 
@@ -4961,6 +4905,7 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
             </div>}
             {modal.type === "depts" && <div style={{ display: "grid", gap: 12 }}>
               <div><Lbl t="Dept Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+              <div><Lbl t="Plant" /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value }))}><option value="">All Plants</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
               <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 10 }}>
                 <div><Lbl t="Icon" /><input value={form.icon || ""} onChange={e => setForm(f => ({ ...f, icon: e.target.value }))} /></div>
                 <div><Lbl t="HOD" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
@@ -4970,12 +4915,21 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
             {modal.type === "machines" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Machine Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Furnace Line 1" /></div>
               <div><Lbl t="Plant" /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value }))}><option value="">Select plant…</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
-              <div><Lbl t="Department" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select dept…</option>{depts.map(d => <option key={d.id}>{d.name}</option>)}</select></div>
+              <div><Lbl t="Department" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select dept…</option>{(form.plant ? depts.filter(d => d.plant === form.plant) : depts).map(d => <option key={d.id}>{d.name}</option>)}</select></div>
               <div><Lbl t="Machine Type" /><input value={form.type || ""} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} placeholder="e.g. Furnace, Crane, Press" /></div>
               <div><Lbl t="Asset No." /><input value={form.assetNo || ""} onChange={e => setForm(f => ({ ...f, assetNo: e.target.value }))} placeholder="e.g. AST-001" /></div>
               <div style={{ gridColumn: "1/-1", display: "flex", gap: 10, justifyContent: "flex-end" }}>
                 <button className="btn btn-ghost" onClick={close}>Cancel</button>
-                <button className="btn btn-navy" onClick={() => { if (!form.name) return; const mc = { ...form, id: form.id || "MC" + String((machines || []).length + 1).padStart(2, "0") }; if (modal.mode === "edit") setMachines(pp => pp.map(x => x.id === mc.id ? mc : x)); else setMachines(pp => [...(pp || []), mc]); close(); }}>Save</button>
+                <button className="btn btn-navy" onClick={() => {
+                  if (!form.name) return;
+                  const mc = { ...form, id: form.id || "MC" + String((machines || []).length + 1).padStart(2, "0") };
+                  const updated = modal.mode === "edit"
+                    ? (machines || []).map(x => x.id === mc.id ? mc : x)
+                    : [...(machines || []), mc];
+                  setMachines(updated);
+                  saveToSheet("Machines", updated).catch(err => console.warn("Machine save failed:", err));
+                  close();
+                }}>Save</button>
               </div>
             </div>}
           </div>
@@ -5173,11 +5127,11 @@ export default function App() {
     return { ...a, ...patch };
   }));
 
+  // Sidebar Actions badge = open (non-completed, non-dropped) actions in user's plant scope
   const pendingForMe = actions.filter(a => {
-    if (!a.pendingConfirmation) return false;
-    const allocatorU = users.find(u => u.name === a.allocatedBy);
-    const allocSuperior = allocatorU?.superior ? users.find(u => u.name === allocatorU.superior) : null;
-    return user?.name === a.allocatedBy || user?.name === allocSuperior?.name || user?.role === "Admin";
+    if (a.status === "COMPLETED" || a.status === "DROPPED") return false;
+    if (user?.role === "Admin" || user?.plant === "All") return true;
+    return !a.plant || a.plant === user?.plant;
   }).length;
 
   // Notification system
