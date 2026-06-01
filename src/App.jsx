@@ -27,9 +27,16 @@ async function sheetPost(action, tab, payload) {
   if (!SHEET_ENABLED) return null;
   const res = await fetch(SHEET_SCRIPT_URL, {
     method: "POST",
+    headers: { "Content-Type": "text/plain" },
     body: JSON.stringify({ action, tab, ...payload }),
   });
-  return res.json();
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    const snippet = text.slice(0, 200).replace(/<[^>]+>/g, " ").trim();
+    throw new Error("GAS returned non-JSON: " + (snippet || res.status));
+  }
 }
 
 function parseCsv(text) {
@@ -4573,10 +4580,11 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
   const [tab, setTab] = useState("users");
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
+  const [mcSaveStatus, setMcSaveStatus] = useState(null);
   const COLORS = ["#272262", "#5B56A6", "#E69903", "#7C80B0", "#1E8449", "#C0392B"];
-  const openAdd = t => { setModal({ type: t, mode: "add" }); setForm({}); };
-  const openEdit = (t, d) => { setModal({ type: t, mode: "edit" }); setForm({ ...d }); };
-  const close = () => { setModal(null); setForm({}); };
+  const openAdd = t => { setModal({ type: t, mode: "add" }); setForm({}); setMcSaveStatus(null); };
+  const openEdit = (t, d) => { setModal({ type: t, mode: "edit" }); setForm({ ...d }); setMcSaveStatus(null); };
+  const close = () => { setModal(null); setForm({}); setMcSaveStatus(null); };
   useEscClose(close);
   const saveUser = () => {
     if (!form.name || !form.role || !form.plant) return;
@@ -4918,18 +4926,35 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
               <div><Lbl t="Department" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select dept…</option>{(form.plant ? depts.filter(d => d.plant === form.plant) : depts).map(d => <option key={d.id}>{d.name}</option>)}</select></div>
               <div><Lbl t="Machine Type" /><input value={form.type || ""} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} placeholder="e.g. Furnace, Crane, Press" /></div>
               <div><Lbl t="Asset No." /><input value={form.assetNo || ""} onChange={e => setForm(f => ({ ...f, assetNo: e.target.value }))} placeholder="e.g. AST-001" /></div>
+              {mcSaveStatus && mcSaveStatus !== "saving" && mcSaveStatus !== "ok" && (
+                <div style={{ gridColumn: "1/-1", padding: "8px 12px", background: "#FEF3CD", border: "1px solid #F5C842", borderRadius: 8, fontSize: 12, color: "#7D4E00" }}>
+                  ⚠ Sheet save failed: {mcSaveStatus}. Machine saved locally — use "Save to Sheet" button to retry.
+                </div>
+              )}
+              {mcSaveStatus === "ok" && (
+                <div style={{ gridColumn: "1/-1", padding: "8px 12px", background: "#D4EDDA", border: "1px solid #28A745", borderRadius: 8, fontSize: 12, color: "#155724" }}>
+                  ✓ Saved to Sheet successfully.
+                </div>
+              )}
               <div style={{ gridColumn: "1/-1", display: "flex", gap: 10, justifyContent: "flex-end" }}>
                 <button className="btn btn-ghost" onClick={close}>Cancel</button>
-                <button className="btn btn-navy" onClick={() => {
+                <button className="btn btn-navy" disabled={mcSaveStatus === "saving"} onClick={async () => {
                   if (!form.name) return;
                   const mc = { ...form, id: form.id || "MC" + String((machines || []).length + 1).padStart(2, "0") };
                   const updated = modal.mode === "edit"
                     ? (machines || []).map(x => x.id === mc.id ? mc : x)
                     : [...(machines || []), mc];
                   setMachines(updated);
-                  saveToSheet("Machines", updated).catch(err => console.warn("Machine save failed:", err));
-                  close();
-                }}>Save</button>
+                  setMcSaveStatus("saving");
+                  try {
+                    await saveToSheet("Machines", updated);
+                    setMcSaveStatus("ok");
+                    setTimeout(() => { setMcSaveStatus(null); close(); }, 800);
+                  } catch (err) {
+                    console.error("Machine sheet save failed:", err);
+                    setMcSaveStatus(err.message || "Unknown error");
+                  }
+                }}>{mcSaveStatus === "saving" ? "Saving…" : "Save"}</button>
               </div>
             </div>}
           </div>
