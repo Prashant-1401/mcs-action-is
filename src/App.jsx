@@ -4922,8 +4922,8 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
             </div>}
             {modal.type === "machines" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Machine Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Furnace Line 1" /></div>
-              <div><Lbl t="Plant" /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value }))}><option value="">Select plant…</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
-              <div><Lbl t="Department" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select dept…</option>{(form.plant ? depts.filter(d => d.plant === form.plant) : depts).map(d => <option key={d.id}>{d.name}</option>)}</select></div>
+              <div><Lbl t="Plant" /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value, dept: "" }))}><option value="">Select plant…</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
+              <div><Lbl t="Department" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select dept…</option>{(form.plant ? depts.filter(d => d.plant === form.plant || users.some(u => u.plant === form.plant && u.dept === d.name)) : depts).map(d => <option key={d.id}>{d.name}</option>)}</select></div>
               <div><Lbl t="Machine Type" /><input value={form.type || ""} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} placeholder="e.g. Furnace, Crane, Press" /></div>
               <div><Lbl t="Asset No." /><input value={form.assetNo || ""} onChange={e => setForm(f => ({ ...f, assetNo: e.target.value }))} placeholder="e.g. AST-001" /></div>
               {mcSaveStatus && mcSaveStatus !== "saving" && mcSaveStatus !== "ok" && (
