@@ -3307,15 +3307,25 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
                         style={{ fontSize: 12, padding: "5px 8px", borderRadius: 8, border: `1.5px solid ${T.border}`, background: "#fff", color: T.text }}
                       >
                         <option value="COMPLETED">✅ Mark as Completed</option>
+                        <option value="IN PROCESS">🔄 Mark as In Process</option>
+                        <option value="NOT STARTED">⏸ Mark as Not Started</option>
                         <option value="DROPPED">🚫 Mark as Dropped</option>
                       </select>
-                      <button className={markCompleteStatus === "DROPPED" ? "btn btn-red btn-sm" : "btn btn-green btn-sm"} onClick={() => {
-                        if (markCompleteStatus === "DROPPED") {
-                          onUpdate(action.id, { status: "DROPPED", closedOn: todayStr(), pendingConfirmation: false });
-                        } else {
-                          requestCompletion();
+                      <button
+                        className={
+                          markCompleteStatus === "DROPPED" ? "btn btn-red btn-sm" :
+                          markCompleteStatus === "COMPLETED" ? "btn btn-green btn-sm" :
+                          "btn btn-ghost btn-sm"
                         }
-                      }}>Confirm →</button>
+                        onClick={() => {
+                          if (markCompleteStatus === "DROPPED") {
+                            onUpdate(action.id, { status: "DROPPED", closedOn: todayStr(), pendingConfirmation: false });
+                          } else if (markCompleteStatus === "COMPLETED") {
+                            requestCompletion();
+                          } else {
+                            onUpdate(action.id, { status: markCompleteStatus, closedOn: null, pendingConfirmation: false });
+                          }
+                        }}>Confirm →</button>
                     </div>
                   )}
                   {!isAssignee && canMsg && (
@@ -4322,17 +4332,13 @@ function EscalationsPage({ actions, audit, user, setPage, users, plants, setActi
     })
     : dedupedAudit;
 
-  // Group by responsible person (no duplicates per action)
-  const byPerson = {};
-  filteredAudit.forEach(e => {
+  // Build flat list of escalated actions sorted by due date
+  const escalatedActions = filteredAudit.map(e => {
     const action = actions.find(a => a.sn === e.sn);
-    const responsible = action?.responsible || "Unknown";
-    if (!byPerson[responsible]) byPerson[responsible] = { name: responsible, count: 0, escalations: [], actions: [] };
-    byPerson[responsible].count++;
-    byPerson[responsible].escalations.push(e);
-    if (action) byPerson[responsible].actions.push(action); // already deduped above
-  });
-  const personList = Object.values(byPerson).sort((a, b) => b.count - a.count);
+    return { ...e, action };
+  }).filter(e => e.action).sort((a, b) => new Date(a.action.due || 8640000000000000) - new Date(b.action.due || 8640000000000000));
+
+  const uniquePeople = new Set(escalatedActions.map(e => e.action?.responsible)).size;
   const resolvedToday = filteredAudit.filter(e => {
     const a = actions.find(x => x.sn === e.sn);
     return a && a.status === "COMPLETED" && a.closedOn === new Date().toISOString().split("T")[0];
@@ -4340,7 +4346,7 @@ function EscalationsPage({ actions, audit, user, setPage, users, plants, setActi
 
   return (
     <div className="fade-in">
-      <PageHeader title="Escalation Alerts" sub="Overdue actions escalated by priority level">
+      <PageHeader title="Escalation Alerts" sub="Overdue actions sorted by due date">
         {/* My / All filter toggle */}
         <div style={{ display: "flex", background: T.bg, borderRadius: 8, padding: 3, border: `1.5px solid ${T.border}` }}>
           <button onClick={() => setFilterMode("mine")} style={{ padding: "5px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: filterMode === "mine" ? T.navy : "transparent", color: filterMode === "mine" ? "#fff" : T.text2, transition: "all .18s" }}>My Scope</button>
@@ -4350,7 +4356,7 @@ function EscalationsPage({ actions, audit, user, setPage, users, plants, setActi
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 24 }}>
         {[
           { label: "Total Escalated", value: filteredAudit.length, icon: "🚨", color: T.red },
-          { label: "People Affected", value: personList.length, icon: "👤", color: T.amber },
+          { label: "People Affected", value: uniquePeople, icon: "👤", color: T.amber },
           { label: "Critical Level", value: filteredAudit.filter(e => e.level >= 3).length, icon: "🔴", color: T.red },
           { label: "Resolved Today", value: resolvedToday, icon: "✅", color: T.green },
         ].map((k, i) => (
@@ -4364,57 +4370,30 @@ function EscalationsPage({ actions, audit, user, setPage, users, plants, setActi
       </div>
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ padding: "14px 20px", borderBottom: `1.5px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, fontSize: 14, color: T.navy }}>Escalated Actions by Person</div>
-          <div style={{ fontSize: 11, color: T.text2 }}>{filteredAudit.length} unique escalated actions · click to expand</div>
+          <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, fontSize: 14, color: T.navy }}>Escalated Actions by Due Date</div>
+          <div style={{ fontSize: 11, color: T.text2 }}>{escalatedActions.length} escalated actions · sorted earliest due first</div>
         </div>
         <table>
-          <thead><tr><th>Responsible</th><th>Escalations</th><th>Open Actions</th><th>Highest Level</th><th>Reason</th><th></th></tr></thead>
+          <thead><tr><th>SN</th><th>Action</th><th>Responsible</th><th>Due Date</th><th>Overdue</th><th>Level</th><th>Status</th><th>Priority</th></tr></thead>
           <tbody>
-            {personList.length === 0 && <tr><td colSpan={6}><Empty icon="🔇" title="No escalations in scope" sub="All actions within thresholds, or nothing in your reporting scope." /></td></tr>}
-            {personList.map(p => {
-              const maxLevel = Math.max(...p.escalations.map(e => e.level || 1));
-              const lastEsc = p.escalations[p.escalations.length - 1];
-              const levelColor = maxLevel >= 3 ? T.red : maxLevel === 2 ? "#884E00" : T.amber;
-              const levelBg = maxLevel >= 3 ? T.redL : maxLevel === 2 ? "#FDEBD0" : T.amberL;
-              const isExpanded = sel?.name === p.name;
+            {escalatedActions.length === 0 && <tr><td colSpan={8}><Empty icon="🔇" title="No escalations in scope" sub="All actions within thresholds, or nothing in your reporting scope." /></td></tr>}
+            {escalatedActions.map(e => {
+              const a = e.action;
+              const over = isOverdue(a);
+              const days = daysOver(a);
+              const levelColor = e.level >= 3 ? T.red : e.level === 2 ? "#884E00" : T.amber;
+              const levelBg = e.level >= 3 ? T.redL : e.level === 2 ? "#FDEBD0" : T.amberL;
               return (
-                <React.Fragment key={p.name}>
-                  <tr style={{ cursor: "pointer", background: isExpanded ? T.bg : "" }} onClick={() => setSel(isExpanded ? null : p)}>
-                    <td><div style={{ display: "flex", alignItems: "center", gap: 8 }}><Avatar name={p.name} size={30} users={users || []} /><div><div style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</div><div style={{ fontSize: 11, color: T.text2 }}>{(users || []).find(u => u.name === p.name)?.role || "—"}</div></div></div></td>
-                    <td><span style={{ background: T.redL, color: T.red, padding: "3px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700 }}>{p.count}</span></td>
-                    <td style={{ fontWeight: 600, fontSize: 13, color: p.actions.filter(a => a.status !== "COMPLETED" && a.status !== "DROPPED").length > 0 ? T.amber : T.green }}>{p.actions.filter(a => a.status !== "COMPLETED" && a.status !== "DROPPED").length}</td>
-                    <td><span style={{ background: levelBg, color: levelColor, padding: "3px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700 }}>Level {maxLevel}</span></td>
-                    <td style={{ fontSize: 11, color: T.text2, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{lastEsc ? lastEsc.reason : "—"}</td>
-                    <td><button style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: T.navy, fontWeight: 600 }}>{isExpanded ? "▲" : "▼"}</button></td>
-                  </tr>
-                  {isExpanded && (
-                    <tr key={p.name + "_detail"}>
-                      <td colSpan={6} style={{ padding: 0 }}>
-                        <div style={{ padding: "14px 20px", background: T.bg, borderTop: `1px solid ${T.border}` }}>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                            {p.escalations.map((e) => {
-                              const action = actions.find(a => a.sn === e.sn);
-                              return (
-                                <div key={e.id || e.sn} style={{ background: "#fff", borderRadius: 8, padding: "10px 14px", border: `1px solid ${T.border}`, display: "flex", gap: 12, alignItems: "flex-start", cursor: "pointer", transition: "background .15s" }} onClick={() => { if (action) setActionDetail(action); }} onMouseEnter={ev => ev.currentTarget.style.background = T.bg} onMouseLeave={ev => ev.currentTarget.style.background = "#fff"}>
-                                  <span style={{ padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, flexShrink: 0, background: e.level >= 3 ? T.redL : e.level === 2 ? "#FDEBD0" : T.amberL, color: e.level >= 3 ? T.red : e.level === 2 ? "#884E00" : T.amber }}>L{e.level}</span>
-                                  <div style={{ flex: 1 }}>
-                                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>{e.sn}</div>
-                                    <div style={{ fontSize: 12, color: T.text, marginBottom: 3 }}>{e.text.slice(0, 80)}{e.text.length > 80 ? "…" : ""}</div>
-                                    <div style={{ fontSize: 11, color: T.text2 }}>Escalated to: <b>{e.target}</b> · {e.reason}</div>
-                                  </div>
-                                  <div style={{ textAlign: "right" }}>
-                                    {action && <SBadge s={action.status} />}
-                                    <div style={{ fontSize: 10, color: T.text2, marginTop: 4 }}>{new Date(e.ts).toLocaleDateString("en-IN")}</div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
+                <tr key={e.id || e.sn} style={{ cursor: "pointer", transition: "background .15s" }} onClick={() => setActionDetail(a)} onMouseEnter={ev => { Array.from(ev.currentTarget.cells).forEach(c => c.style.background = T.bg); }} onMouseLeave={ev => { Array.from(ev.currentTarget.cells).forEach(c => c.style.background = ""); }}>
+                  <td style={{ fontFamily: "monospace", fontSize: 11, color: T.text2 }}>{a.sn}</td>
+                  <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500, fontSize: 13 }}>{a.text}</td>
+                  <td><div style={{ display: "flex", alignItems: "center", gap: 6 }}><Avatar name={a.responsible} size={24} users={users || []} /><span style={{ fontSize: 12 }}>{a.responsible || "—"}</span></div></td>
+                  <td style={{ fontSize: 12, color: over ? T.red : T.text, fontWeight: over ? 700 : 400 }}>{fmt(a.due)}</td>
+                  <td style={{ fontSize: 12, fontWeight: 700, color: over ? T.red : T.green }}>{over ? `${days}d late` : "On time"}</td>
+                  <td><span style={{ background: levelBg, color: levelColor, padding: "3px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700 }}>L{e.level}</span></td>
+                  <td><SBadge s={a.status} /></td>
+                  <td><PBadge p={a.priority} /></td>
+                </tr>
               );
             })}
           </tbody>
@@ -5128,6 +5107,14 @@ export default function App() {
     localStorage.setItem("mcs_session_page", page);
   }, [page]);
 
+  // Seed in-memory audit from persisted Sheet data on first load.
+  // Dependency is intentionally dbReady only — running on persistedAudit would create a sync loop.
+  useEffect(() => {
+    if (dbReady && Array.isArray(persistedAudit) && persistedAudit.length > 0) {
+      setAudit(persistedAudit);
+    }
+  }, [dbReady]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Global timer only — transcript now driven by real STT inside MeetingRoom
   useEffect(() => {
     if (mtgRunning && globalActiveMtg) {
@@ -5149,11 +5136,18 @@ export default function App() {
   useEffect(() => {
     const t = setTimeout(() => runEscalation(actions, (updater) => {
       setAudit(updater);
-      // Also persist audit entries to Google Sheet via persistedAudit state
+      // Persist audit to Sheet, deduplicating by SN+level to prevent
+      // duplicate rows accumulating across sessions / re-runs.
       setPersistedAudit(prev => {
-        const current = typeof prev === "function" ? prev([]) : prev;
+        const current = Array.isArray(prev) ? prev : [];
         const updated = typeof updater === "function" ? updater(current) : updater;
-        return updated;
+        const seen = new Set();
+        return updated.filter(e => {
+          const key = `${e.sn}_${e.level}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        }).slice(0, 100);
       });
     }, escMatrix), 1500);
     return () => clearTimeout(t);
