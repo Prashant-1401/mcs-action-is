@@ -434,7 +434,7 @@ const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Sora:wght@700;800&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 body{background:#F5F5FB;color:#1A1532;font-family:'Inter',sans-serif;font-size:14px;}
-input,select,textarea{font-family:'Inter',sans-serif;font-size:13px;background:#fff;border:1.5px solid #E8E8F0;border-radius:8px;padding:8px 12px;color:#1A1532;outline:none;width:100%;transition:border-color .18s;direction:ltr;unicode-bidi:plaintext;}
+input,select,textarea{font-family:'Inter',sans-serif;font-size:13px;background:#fff;border:1.5px solid #E8E8F0;border-radius:8px;padding:8px 12px;color:#1A1532;outline:none;width:100%;transition:border-color .18s;direction:ltr;unicode-bidi:normal;}
 input:focus,select:focus,textarea:focus{border-color:#272262;box-shadow:0 0 0 3px rgba(39,34,98,.08);}
 input::placeholder,textarea::placeholder{color:#B2BEC3;}
 ::-webkit-scrollbar{width:5px;height:5px;}::-webkit-scrollbar-thumb{background:#CBD5E0;border-radius:3px;}
@@ -3151,6 +3151,8 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
   // Feature 6: inline edit state (track per-field editing)
   const [editingField, setEditingField] = useState(null);
   const [fieldVal, setFieldVal] = useState("");
+  const [markCompleteStatus, setMarkCompleteStatus] = useState("COMPLETED");
+  const textareaRef = useRef(null);
 
   // Determine who can interact/confirm
   const assignee = action.responsible;
@@ -3186,12 +3188,14 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
     const sysMsg = { id: Date.now(), author: "System", authorInitials: "SYS", authorColor: T.red, text: `${user?.name} has rejected the completion and reopened this action.`, ts: new Date().toISOString() };
     onUpdate(action.id, { status: "IN PROCESS", pendingConfirmation: false, messages: [...msgs, sysMsg] });
   };
-  const startEdit = (field, val) => { setEditingField(field); setFieldVal(val || ""); };
+  const startEdit = (field, val) => { setEditingField(field); setFieldVal(val || ""); setTimeout(() => { if (textareaRef.current) { textareaRef.current.value = val || ""; textareaRef.current.focus(); textareaRef.current.setSelectionRange((val||"").length, (val||"").length); } }, 0); };
   const commitEdit = (field) => {
     if (field === editingField) {
-      const isCompletedStatus = field === "status" && fieldVal === "COMPLETED";
+      // For textarea fields, read from the ref (uncontrolled) to avoid cursor-jump bug
+      const actualVal = (textareaRef.current && editingField === field) ? textareaRef.current.value : fieldVal;
+      const isCompletedStatus = field === "status" && actualVal === "COMPLETED";
       onUpdate(action.id, {
-        [field]: fieldVal,
+        [field]: actualVal,
         closedOn: isCompletedStatus ? todayStr() : action.closedOn,
         ...(isCompletedStatus ? { pendingConfirmation: false } : {})
       });
@@ -3212,7 +3216,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
             {type === "select" ? <select value={fieldVal} onChange={e => setFieldVal(e.target.value)} style={{ fontSize: 12, padding: "4px 8px", flex: 1, border: `1.5px solid ${T.navy}`, borderRadius: 8 }} autoFocus>
               {opts.map(o => <option key={o}>{o}</option>)}
             </select>
-              : type === "textarea" ? <textarea value={fieldVal} onChange={e => setFieldVal(e.target.value)} style={{ flex: 1, fontSize: 12, height: 52, resize: "none", border: `1.5px solid ${T.navy}`, borderRadius: 8 }} autoFocus />
+              : type === "textarea" ? <textarea ref={textareaRef} defaultValue={fieldVal} dir="ltr" style={{ flex: 1, fontSize: 12, height: 72, resize: "vertical", border: `1.5px solid ${T.navy}`, borderRadius: 8, padding: "6px 8px" }} />
                 : <input type={type || "text"} value={fieldVal} onChange={e => setFieldVal(e.target.value)} style={{ flex: 1, fontSize: 12, padding: "4px 8px", border: `1.5px solid ${T.navy}`, borderRadius: 8 }} autoFocus />
             }
             <button onClick={() => commitEdit(field)} style={{ background: T.green, border: "none", color: "#fff", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>✓</button>
@@ -3295,7 +3299,25 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
             <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
               {user?.role !== "Guest" && !isPendingConfirm && action.status !== "COMPLETED" && action.status !== "DROPPED" && (
                 <>
-                  {isAssignee && <button className="btn btn-green btn-sm" onClick={requestCompletion}>Mark Complete →</button>}
+                  {isAssignee && (
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <select
+                        value={markCompleteStatus}
+                        onChange={e => setMarkCompleteStatus(e.target.value)}
+                        style={{ fontSize: 12, padding: "5px 8px", borderRadius: 8, border: `1.5px solid ${T.border}`, background: "#fff", color: T.text }}
+                      >
+                        <option value="COMPLETED">✅ Mark as Completed</option>
+                        <option value="DROPPED">🚫 Mark as Dropped</option>
+                      </select>
+                      <button className={markCompleteStatus === "DROPPED" ? "btn btn-red btn-sm" : "btn btn-green btn-sm"} onClick={() => {
+                        if (markCompleteStatus === "DROPPED") {
+                          onUpdate(action.id, { status: "DROPPED", closedOn: todayStr(), pendingConfirmation: false });
+                        } else {
+                          requestCompletion();
+                        }
+                      }}>Confirm →</button>
+                    </div>
+                  )}
                   {!isAssignee && canMsg && (
                     <select value={action.status} onChange={e => onUpdate(action.id, { status: e.target.value, closedOn: e.target.value === "COMPLETED" ? todayStr() : null })} style={{ fontSize: 12, padding: "5px 8px" }}>
                       {STATUS_LIST.map(s => <option key={s}>{s}</option>)}
