@@ -3,11 +3,11 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 /* ===================== GOOGLE SHEET CONFIG ===================== */
 // 1. Deploy Code.gs as a Web App (Apps Script → Deploy → Web App → Anyone)
 // 2. Paste the deployment URL below
-const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbzckBkgyI_28vf7-qShck8MgLCnVZIwnp_0mhMHeXcI8VzAnLHVWh6YdcUd_rrDc_CEnw/exec";
-const _DEFAULT_SHEET_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzckBkgyI_28vf7-qShck8MgLCnVZIwnp_0mhMHeXcI8VzAnLHVWh6YdcUd_rrDc_CEnw/exec";
+const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbwpQzuncyO55SSdouC3EdAcFLy3mxfyyO_-xAJx0xb3WU6GoS91VSKgOU-rtBnIbWKKxg/exec";
+const _DEFAULT_SHEET_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwpQzuncyO55SSdouC3EdAcFLy3mxfyyO_-xAJx0xb3WU6GoS91VSKgOU-rtBnIbWKKxg/exec";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://mcs-action.onrender.com";
 
-const SHEET_ID = import.meta.env.VITE_SHEET_ID || "1OR4J17WrhQg9rqFV3uIhLCDG9UDCoQ5lc9-8ZXoNSOo";
+const SHEET_ID = import.meta.env.VITE_SHEET_ID || "1jQzssEsr6ULGyepmePjbITdzHRihttTrSvOoj32FyGY";
 // SHEET_ENABLED is true when a custom deployment URL is provided via env var
 const SHEET_ENABLED = true; // URL is already hardcoded
 
@@ -214,6 +214,13 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
     const cleaned = Array.isArray(data) ? data.map(cleanRow) : data;
     sheetPost("replace_all", tab, { rows: cleaned });
   }, []);
+  // Audit uses append_all — never replace — so history survives page reloads.
+  // Only rows with new IDs are written; existing ones are skipped by the GAS handler.
+  const syncAuditToSheet = useCallback((data) => {
+    if (!SHEET_ENABLED || !fetchDoneRef.current) return;
+    if (!Array.isArray(data) || data.length === 0) return;
+    sheetPost("append_all", "Audit", { rows: data.map(cleanRow) });
+  }, []);
   useEffect(() => { syncToSheet("Users", users); }, [users, syncToSheet]);
   useEffect(() => { syncToSheet("Plants", plants); }, [plants, syncToSheet]);
   useEffect(() => { syncToSheet("Departments", depts); }, [depts, syncToSheet]);
@@ -225,7 +232,7 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   // the explicit "Save to Sheet" button in MasterPage, not on every toggle.
   // Machines auto-sync removed: it raced with the manual Save button causing silent failures.
   useEffect(() => { syncToSheet("Reasons", reasons); }, [reasons, syncToSheet]);
-  useEffect(() => { syncToSheet("Audit", persistedAudit); }, [persistedAudit, syncToSheet]);
+  useEffect(() => { syncAuditToSheet(persistedAudit); }, [persistedAudit]);
 
   // ── Master data polling — re-fetch org/config tabs every 60s ──
   // This ensures every logged-in user picks up Admin changes without a full reload.
@@ -4891,6 +4898,7 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
             </div>
             {modal.type === "users" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Full Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+              <div style={{ gridColumn: "1/-1" }}><Lbl t="Username" req /><input value={form.username || ""} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} placeholder="Login username" /></div>
               <div><Lbl t="Role" req /><select value={form.role || ""} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}><option value="">Select</option>{["MD", "Plant Head", "HOD", "Shift Engineer", "Supervisor", "Operator"].map(r => <option key={r}>{r}</option>)}</select></div>
               <div><Lbl t="Plant" req /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value }))}><option value="">Select</option><option>All</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
               <div><Lbl t="Department" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select</option>{depts.map(d => <option key={d.id}>{d.name}</option>)}</select></div>
@@ -5111,7 +5119,15 @@ export default function App() {
   // Dependency is intentionally dbReady only — running on persistedAudit would create a sync loop.
   useEffect(() => {
     if (dbReady && Array.isArray(persistedAudit) && persistedAudit.length > 0) {
-      setAudit(persistedAudit);
+      // Deduplicate on read — handles stale duplicate rows written before this fix
+      const seen = new Set();
+      const deduped = persistedAudit.filter(e => {
+        const key = `${e.sn}_${e.level}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      setAudit(deduped);
     }
   }, [dbReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
