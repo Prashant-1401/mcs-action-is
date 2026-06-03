@@ -87,6 +87,21 @@ function parseCsvRow(line) {
   return result;
 }
 
+function ensureArray(val) {
+  if (Array.isArray(val)) return val;
+  if (typeof val === "string" && val.trim()) {
+    const trimmed = val.trim();
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {}
+    }
+    return trimmed.split(",").map(s => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 /* ─── useSheetDB hook ───────────────────────────────────────────────────── */
 // Replaces all hardcoded seeds with live Sheet data.
 // Falls back to seeds if Sheet is unavailable.
@@ -144,7 +159,7 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
       if (p.length) setPlantsRaw(sanitize(p, "p"));
       if (d.length) setDeptsRaw(sanitize(d, "d"));
       if (a.length) setActionsRaw(sanitize(a, "a"));
-      if (m.length) setMeetingsRaw(sanitize(m, "m"));
+      if (m.length) setMeetingsRaw(sanitize(m, "m").map(mt => ({ ...mt, attendees: ensureArray(mt.attendees) })));
       if (pr.length) setProjectsRaw(sanitize(pr, "pr"));
       if (em.length) setEscRaw(sanitize(em, "e"));
       if (pm.length) {
@@ -160,8 +175,8 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
         const pMap = { attendeeMap: {}, instructions: {} };
         ps.forEach(row => {
           if (row.type) {
-            pMap.attendeeMap[row.type] = row.attendees || [];
-            pMap.instructions[row.type] = row.instructions || [];
+            pMap.attendeeMap[row.type] = ensureArray(row.attendees);
+            pMap.instructions[row.type] = ensureArray(row.instructions);
           }
         });
         setPresetsRaw(pMap);
@@ -271,7 +286,7 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
           if (!rows.length) return;
           if (isObj === "presets") {
             const pMap = { attendeeMap: {}, instructions: {} };
-            rows.forEach(row => { if (row.type) { pMap.attendeeMap[row.type] = row.attendees || []; pMap.instructions[row.type] = row.instructions || []; } });
+            rows.forEach(row => { if (row.type) { pMap.attendeeMap[row.type] = ensureArray(row.attendees); pMap.instructions[row.type] = ensureArray(row.instructions); } });
             set(prev => changed(prev, pMap) ? pMap : prev);
           } else if (isObj) {
             const pObj = {};
@@ -1720,7 +1735,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
   };
   const userMeetings = visibleMeetings.filter(m =>
     m.facilitator === user?.name ||
-    (m.attendees || mtgPresets?.attendeeMap?.[m.type] || []).includes(user?.name)
+    ensureArray(m.attendees || mtgPresets?.attendeeMap?.[m.type]).includes(user?.name)
   );
   const conflictIds = new Set();
   userMeetings.forEach((a, i) => {
@@ -1756,7 +1771,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {visibleMeetings.map((m, idx) => {
-              const attendees = m.attendees || mtgPresets?.attendeeMap?.[m.type] || [];
+              const attendees = ensureArray(m.attendees || mtgPresets?.attendeeMap?.[m.type]);
               const linkedProject = (projects || []).find(p => p.name === m.project);
               const hasConflict = conflictIds.has(m.id);
               return (
@@ -1949,12 +1964,12 @@ function AddProjectModal({ plants, users, onSave, onClose }) {
 function MeetingPlanPanel({ mtg, canEdit, projects, users, plants, onSave, onClose, mtgPresets }) {
   useEscClose(onClose);
   const [editMode, setEditMode] = useState(false);
-  const defaultInstructions = mtgPresets?.instructions?.[mtg.type] || ["Follow meeting agenda", "Capture all action points", "Assign clear owners and due dates", "Confirm previous actions before closing"];
-  const defaultAttendees = mtgPresets?.attendeeMap?.[mtg.type] || [];
+  const defaultInstructions = ensureArray(mtgPresets?.instructions?.[mtg.type] || ["Follow meeting agenda", "Capture all action points", "Assign clear owners and due dates", "Confirm previous actions before closing"]);
+  const defaultAttendees = ensureArray(mtgPresets?.attendeeMap?.[mtg.type]);
   const [draft, setDraft] = useState({
     ...mtg,
-    guidelines: mtg.guidelines || [...defaultInstructions],
-    attendees: mtg.attendees || [...defaultAttendees],
+    guidelines: ensureArray(mtg.guidelines || defaultInstructions),
+    attendees: ensureArray(mtg.attendees || defaultAttendees),
   });
   const up = (k, v) => setDraft(x => ({ ...x, [k]: v }));
   const guidelines = draft.guidelines;
@@ -2169,8 +2184,8 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   const lastAnalyzedCharCountRef = useRef(0); // tracks total chars of txLines already analyzed
   const [batchCountdown, setBatchCountdown] = useState(120); // seconds until next analysis
   const batchCountdownRef = useRef(null);
-  const instructions = mtgPresets?.instructions?.[mtg.type] || ["Follow meeting agenda", "Capture all action points", "Assign clear owners and due dates", "Confirm previous actions before closing"];
-  const attendees = mtgPresets?.attendeeMap?.[mtg.type] || [];
+  const instructions = ensureArray(mtg.guidelines || mtgPresets?.instructions?.[mtg.type] || ["Follow meeting agenda", "Capture all action points", "Assign clear owners and due dates", "Confirm previous actions before closing"]);
+  const attendees = ensureArray(mtg.attendees || mtgPresets?.attendeeMap?.[mtg.type]);
 
   // Auto-scroll transcript
   useEffect(() => { if (txRef.current) txRef.current.scrollTop = txRef.current.scrollHeight; }, [txLines, sttInterim]);
@@ -4836,7 +4851,7 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
           <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 15, color: T.navy }}>Meeting Presets</div>
           <SectionSaveButton onSave={() => {
             const allTypes = Array.from(new Set([...Object.keys(mtgPresets.attendeeMap || {}), ...Object.keys(mtgPresets.instructions || {})]));
-            const rows = allTypes.map(t => ({ type: t, attendees: (mtgPresets.attendeeMap || {})[t] || [], instructions: (mtgPresets.instructions || {})[t] || [] }));
+            const rows = allTypes.map(t => ({ type: t, attendees: ensureArray((mtgPresets.attendeeMap || {})[t]), instructions: ensureArray((mtgPresets.instructions || {})[t]) }));
             return saveToSheet("MeetingPresets", rows);
           }} />
         </div>
@@ -4854,9 +4869,9 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
                         onMouseEnter={e => e.currentTarget.style.background = T.bg}
                         onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                         <input type="checkbox"
-                          checked={(mtgPresets?.attendeeMap?.[type] || []).includes(u.name)}
+                          checked={ensureArray(mtgPresets?.attendeeMap?.[type]).includes(u.name)}
                           onChange={e => {
-                            const cur = mtgPresets?.attendeeMap?.[type] || [];
+                            const cur = ensureArray(mtgPresets?.attendeeMap?.[type]);
                             const next = e.target.checked ? [...cur, u.name] : cur.filter(n => n !== u.name);
                             setMtgPresets(prev => ({ ...prev, attendeeMap: { ...prev.attendeeMap, [type]: next } }));
                           }}
@@ -4871,14 +4886,14 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
                       </label>
                     ))}
                   </div>
-                  <div style={{ fontSize: 11, color: T.text2, marginTop: 5 }}>{(mtgPresets?.attendeeMap?.[type] || []).length} selected</div>
+                  <div style={{ fontSize: 11, color: T.text2, marginTop: 5 }}>{ensureArray(mtgPresets?.attendeeMap?.[type]).length} selected</div>
                 </div>
                 <div>
                   <Lbl t="Guidelines / Instructions (one per line)" />
-                  <textarea value={(mtgPresets?.instructions?.[type] || []).join("\n")}
+                  <textarea value={ensureArray(mtgPresets?.instructions?.[type]).join("\n")}
                     onChange={e => { const next = e.target.value.split("\n").filter(l => l.trim() !== ""); setMtgPresets(prev => ({ ...prev, instructions: { ...prev.instructions, [type]: next } })); }}
                     style={{ fontSize: 12, height: 160, resize: "vertical" }} />
-                  <div style={{ fontSize: 11, color: T.text2, marginTop: 5 }}>{(mtgPresets?.instructions?.[type] || []).length} guideline{(mtgPresets?.instructions?.[type] || []).length !== 1 ? "s" : ""}</div>
+                  <div style={{ fontSize: 11, color: T.text2, marginTop: 5 }}>{ensureArray(mtgPresets?.instructions?.[type]).length} guideline{ensureArray(mtgPresets?.instructions?.[type]).length !== 1 ? "s" : ""}</div>
                 </div>
               </div>
             </div>
