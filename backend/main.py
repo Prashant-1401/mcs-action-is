@@ -3,10 +3,10 @@ main.py — MCS Backend API  v2 (Integrated with wacrm WhatsApp Gateway)
 Uses google-genai SDK v2+ (replaces deprecated google-generativeai).
 Run: uvicorn main:app --reload --port 8000
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os, json, smtplib, datetime, requests
 from email.message import EmailMessage
 from dotenv import load_dotenv
@@ -19,14 +19,31 @@ load_dotenv(os.path.join(os.getcwd(), ".env"))
 # ── FastAPI app ────────────────────────────────────────────────────────────
 app = FastAPI(title="MCS Backend API")
 
-# Updated in production to explicitly accept your wacrm and frontend domains
+from email_escalation import router as email_router
+app.include_router(email_router)
+
+# Origins locked via env var. Wildcard + credentials is invalid and unsafe.
+_origins_env = os.environ.get("ALLOWED_ORIGINS", "")
+ALLOWED_ORIGINS = [o.strip() for o in _origins_env.split(",") if o.strip()]
+if not ALLOWED_ORIGINS:
+    print("WARNING: ALLOWED_ORIGINS not set. Falling back to '*' with credentials disabled.")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS or ["*"],
+    allow_credentials=bool(ALLOWED_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── API key auth ───────────────────────────────────────────────────────────
+API_KEY = os.environ.get("API_KEY", "")
+
+async def require_api_key(x_api_key: Optional[str] = Header(None)):
+    if not API_KEY:
+        return  # auth disabled if not configured; set API_KEY in Render to enable
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 # ── Gemini client (NEW SDK: google-genai) ─────────────────────────────────
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -43,31 +60,18 @@ def gemini_generate(prompt: str) -> str:
     """Call Gemini with the new SDK. Falls back to Ollama if unavailable."""
     if not gemini_client:
         return call_ollama_fallback(prompt)
-    try:
-        response = gemini_client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt
-        )
-        return response.text
-    except Exception as e:
-        print(f"Gemini failed ({GEMINI_MODEL}): {e}")
+    # Try configured model, then each fallback model, skipping duplicates.
+    fallback_models = [m for m in ["gemini-2.0-flash", "gemini-2.0-flash-lite"] if m != GEMINI_MODEL]
+    for model_id in [GEMINI_MODEL] + fallback_models:
         try:
             response = gemini_client.models.generate_content(
-                model="gemini-2.0-flash",
+                model=model_id,
                 contents=prompt
             )
             return response.text
-        except Exception as e2:
-            print(f"Gemini fallback also failed: {e2}")
-            try:
-                response = gemini_client.models.generate_content(
-                    model="gemini-2.0-flash-lite",
-                    contents=prompt
-                )
-                return response.text
-            except Exception as e3:
-                print(f"Gemini flash-lite also failed: {e3}")
-                return call_ollama_fallback(prompt)
+        except Exception as e:
+            print(f"Gemini failed ({model_id}): {e}")
+    return call_ollama_fallback(prompt)
 
 # ── Ollama local fallback ──────────────────────────────────────────────────
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3")
@@ -87,17 +91,19 @@ def call_ollama_fallback(prompt: str) -> str:
         return ""
 
 # ── Email setup ────────────────────────────────────────────────────────────
-SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
+# Standardized on SMTP_HOST/SMTP_PASSWORD (matches email_escalation.py).
+# Legacy SMTP_SERVER/SMTP_PASS still read as fallback for existing Render config.
+SMTP_SERVER = os.environ.get("SMTP_HOST", os.environ.get("SMTP_SERVER", "smtp.gmail.com"))
 SMTP_PORT   = int(os.environ.get("SMTP_PORT", 587))
 SMTP_USER   = os.environ.get("SMTP_USER", "")
-SMTP_PASS   = os.environ.get("SMTP_PASS", "")
+SMTP_PASS   = os.environ.get("SMTP_PASSWORD", os.environ.get("SMTP_PASS", ""))
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@adroit.in")
 TEAM_EMAIL  = os.environ.get("TEAM_EMAIL", "team@adroit.in")
 
 def send_email(to_emails: List[str], subject: str, html_content: str):
     if not SMTP_USER or not SMTP_PASS:
-        print(f"\n--- DEMO EMAIL ---\nTO: {to_emails}\nSUBJECT: {subject}\n{html_content}\n---")
-        return True
+        print(f"WARNING: SMTP not configured — email NOT sent (demo mode). TO: {to_emails} SUBJECT: {subject}")
+        return False
     try:
         msg = EmailMessage()
         msg['Subject'] = subject
@@ -149,13 +155,15 @@ def clean_json_response(text: str) -> str:
             start = text.index("```json") + 7
             end   = text.rindex("```")
             return text[start:end].strip()
-        except: pass
+        except Exception as e:
+            print(f"clean_json_response: fenced-json extraction failed: {e}")
     elif "```" in text:
         try:
             start = text.index("```") + 3
             end   = text.rindex("```")
             return text[start:end].strip()
-        except: pass
+        except Exception as e:
+            print(f"clean_json_response: fenced-block extraction failed: {e}")
     try:
         first_obj = text.find('{')
         first_arr = text.find('[')
@@ -165,7 +173,8 @@ def clean_json_response(text: str) -> str:
         ends      = [x for x in [last_obj,  last_arr]  if x != -1]
         if starts and ends:
             return text[min(starts):max(ends)+1].strip()
-    except: pass
+    except Exception as e:
+        print(f"clean_json_response: bracket extraction failed: {e}")
     return text
 
 # ── Request models ─────────────────────────────────────────────────────────
@@ -210,36 +219,19 @@ async def health():
         "gemini_configured": bool(GEMINI_API_KEY),
         "gemini_model": GEMINI_MODEL,
         "smtp_configured": bool(SMTP_USER and SMTP_PASS),
-        "wacrm_gateway_configured": bool(WACRM_ALERT_URL)
+        "wacrm_gateway_configured": bool(WACRM_ALERT_URL),
+        "api_key_auth_enabled": bool(API_KEY),
+        "cors_locked": bool(ALLOWED_ORIGINS)
     }
 
 @app.get("/api/ping")
 async def ping():
     return {"ok": True, "gemini_ready": bool(gemini_client)}
 
-@app.post("/api/email/escalate")
-async def email_escalate(req: EmailEscalateReq):
-    # 1. Dispatch the legacy Email Alert Chain
-    subject = f"Escalation Alert Level {req.level} — {req.target}"
-    body = f"<h2>Escalated Actions — Level {req.level}</h2><ul>"
-    
-    whatsapp_body = f"⚠️ *MCS Escalation Alert Level {req.level}*\nTarget: {req.target}\n\n*Items Pending Allocation:*\n"
-    
-    for a in req.actions:
-        body += f"<li><b>{a.get('sn')}</b>: {a.get('text')} (Priority: {a.get('priority')})</li>"
-        whatsapp_body += f"• *[{a.get('sn')}]* {a.get('text')} (Priority: {a.get('priority')})\n"
-        
-    body += "</ul>"
-    send_email([ADMIN_EMAIL], subject, body)
-    
-    # 2. Concurrently push a WhatsApp copy if a phone string is available
-    if req.phone:
-        whatsapp_body += "\nPlease access your dashboard console to manage updates immediately."
-        send_whatsapp_alert(req.phone, whatsapp_body)
-        
-    return {"status": "ok"}
+# Legacy /api/email/escalate removed — superseded by email_router (email_escalation.py).
+# EmailEscalateReq kept only if still referenced by frontend; delete once confirmed unused.
 
-@app.post("/api/email/share-insights")
+@app.post("/api/email/share-insights", dependencies=[Depends(require_api_key)])
 async def email_share_insights(req: InsightsShareReq):
     # 1. Execute standard Email Insights Delivery
     subject = f"Real-time Insights — {req.meeting_type} @ {req.plant}"
@@ -256,6 +248,7 @@ async def email_share_insights(req: InsightsShareReq):
     send_email(req.recipients or [TEAM_EMAIL], subject, body)
     
     # 2. Iterate and broadcast clear summaries to phone list
+    wa_failed = []
     if req.phones:
         for p in req.phones:
             wa_insights = f"📋 *Real-time Insights Summaries*\n{req.meeting_type} @ {req.plant}\n"
@@ -268,11 +261,12 @@ async def email_share_insights(req: InsightsShareReq):
                     wa_insights += "\n*Key Decisions:*\n"
                     for dec in ins.get('decisions', []):
                         wa_insights += f"• {dec}\n"
-            send_whatsapp_alert(p, wa_insights)
+            if not send_whatsapp_alert(p, wa_insights):
+                wa_failed.append(p)
 
-    return {"status": "ok"}
+    return {"status": "ok", "whatsapp_failed": wa_failed}
 
-@app.post("/api/meetings/extract-insights")
+@app.post("/api/meetings/extract-insights", dependencies=[Depends(require_api_key)])
 async def extract_insights(req: MeetingReviewReq):
     today = datetime.date.today().strftime("%Y-%m-%d")
     prompt = f"""
@@ -312,7 +306,7 @@ TRANSCRIPT:
         print(f"Parse failed: {e}\nRaw: {text[:300]}")
         return {"error": f"AI returned unreadable response: {text[:80]}", "topics": [], "actions": []}
 
-@app.post("/api/meetings/analyze-paragraph")
+@app.post("/api/meetings/analyze-paragraph", dependencies=[Depends(require_api_key)])
 async def analyze_paragraph(req: ParagraphAnalysisReq):
     lang_note = ""
     if req.source_lang == "hi":
@@ -350,7 +344,7 @@ Paragraph: "{req.paragraph}"
         print(f"Paragraph parse failed: {e}\nRaw: {text[:300]}")
         return {"actions": [], "decisions": [], "risks": [], "keyPoints": [], "error": f"AI returned unreadable response: {text[:80]}"}
 
-@app.post("/api/translate")
+@app.post("/api/translate", dependencies=[Depends(require_api_key)])
 async def translate_text(req: TranslateReq):
     if not req.text or len(req.text.strip()) < 2:
         return {"translated": req.text, "original": req.text}
