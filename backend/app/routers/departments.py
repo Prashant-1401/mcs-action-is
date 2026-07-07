@@ -1,0 +1,59 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.database import get_db
+from app.models.models import Department
+from app.schemas.schemas import DepartmentCreate, DepartmentUpdate
+
+router = APIRouter(prefix="/api/departments", tags=["Departments"])
+
+
+@router.get("/")
+async def list_departments(plant_id: str = None, db: AsyncSession = Depends(get_db)):
+    q = select(Department)
+    if plant_id:
+        q = q.where(Department.plant_id == plant_id)
+    result = await db.execute(q)
+    return result.scalars().all()
+
+
+@router.get("/{dept_id}")
+async def get_department(dept_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Department).where(Department.id == dept_id))
+    dept = result.scalar_one_or_none()
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found")
+    return dept
+
+
+@router.post("/")
+async def create_department(data: DepartmentCreate, db: AsyncSession = Depends(get_db)):
+    dept = Department(**data.model_dump())
+    db.add(dept)
+    await db.commit()
+    await db.refresh(dept)
+    return dept
+
+
+@router.patch("/{dept_id}")
+async def update_department(dept_id: str, data: DepartmentUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Department).where(Department.id == dept_id))
+    dept = result.scalar_one_or_none()
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found")
+    for k, v in data.model_dump(exclude_unset=True).items():
+        setattr(dept, k, v)
+    await db.commit()
+    await db.refresh(dept)
+    return dept
+
+
+@router.delete("/{dept_id}")
+async def delete_department(dept_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Department).where(Department.id == dept_id))
+    dept = result.scalar_one_or_none()
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found")
+    await db.delete(dept)
+    await db.commit()
+    return {"ok": True}

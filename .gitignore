@@ -1,6 +1,11 @@
-node_modules
+node_modules/
 dist/
 backend/.env
 backend/venv/
-backend/__pycache__/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+backend/.pytest_cache/
 .env
+.DS_Store
+*.log

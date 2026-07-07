@@ -3145,7 +3145,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
       </div>
 
       {showSidePanel && <AddActionPanel users={users} plants={plants} depts={depts} defaultPlant={mtg.plant} defaultSrc={mtg.type} reasons={reasons} onSave={a => { setFastActions(p => Array.isArray(p) ? [...p, { ...a, id: Date.now() }] : [{ ...a, id: Date.now() }]); setShowSidePanel(false); }} onClose={() => setShowSidePanel(false)} />}
-      {selAction && <ActionDetailPanel action={selAction} onClose={() => setSelAction(null)} onUpdate={() => { }} user={user} users={users} allUsers={users} plants={plants} permissions={permissions} />}
+      {selAction && <ActionDetailPanel action={selAction} onClose={() => setSelAction(null)} onUpdate={() => { }} user={currentUser} users={users} allUsers={users} plants={plants} />}
     </div>
   );
 }
@@ -3336,7 +3336,7 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
                   <div><Lbl t="Department" /><select value={r.section || "General"} onChange={e => up(r.id, "section", e.target.value)}><option value="General">General</option>{depts.filter(d => !r.plant || r.plant === "All" || !d.plant || d.plant === "All Plants" || d.plant === r.plant).map(d => <option key={d.id} value={d.name}>{d.name}</option>)}{SECTIONS.filter(s => s !== "General" && !depts.filter(d => !r.plant || r.plant === "All" || !d.plant || d.plant === "All Plants" || d.plant === r.plant).find(d => d.name === s)).map(s => <option key={s}>{s}</option>)}</select></div>
                   <div><Lbl t="Priority" /><select value={r.priority} onChange={e => up(r.id, "priority", e.target.value)}>{PRIORITY_LIST.map(p => <option key={p}>{p}</option>)}</select></div>
-                  <div><Lbl t="Plant" /><select value={r.plant || ""} onChange={e => setActions(actions.map(a => a.id === r.id ? { ...a, plant: e.target.value, section: "General" } : a))}>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
+                  <div><Lbl t="Plant" /><select value={r.plant || ""} onChange={e => setDraft(d => d.map(a => a.id === r.id ? { ...a, plant: e.target.value, section: "General" } : a))}>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
                 </div>
               </div>
             );
