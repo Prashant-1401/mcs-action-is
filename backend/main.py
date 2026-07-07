@@ -53,8 +53,9 @@ if not GEMINI_API_KEY:
 from google import genai as google_genai
 gemini_client = google_genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-# gemini-2.0-flash: best balance of reliability, JSON instruction-following, and free-tier quota
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+# gemini-2.0-flash / gemini-2.0-flash-lite shut down June 1, 2026.
+# gemini-2.5-flash-lite matches old pricing ($0.10/$0.40 per 1M tokens).
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
 
 def gemini_generate(prompt: str) -> str:
     """Call Gemini with the new SDK."""
@@ -62,7 +63,7 @@ def gemini_generate(prompt: str) -> str:
         print("Gemini client not initialized.")
         return ""
     # Try configured model, then each fallback model, skipping duplicates.
-    fallback_models = [m for m in ["gemini-2.0-flash", "gemini-2.0-flash-lite"] if m != GEMINI_MODEL]
+    fallback_models = [m for m in ["gemini-2.5-flash-lite", "gemini-2.5-flash"] if m != GEMINI_MODEL]
     for model_id in [GEMINI_MODEL] + fallback_models:
         try:
             response = gemini_client.models.generate_content(
