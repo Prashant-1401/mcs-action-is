@@ -3,9 +3,10 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 /* ===================== GOOGLE SHEET CONFIG ===================== */
 // 1. Deploy Code.gs as a Web App (Apps Script → Deploy → Web App → Anyone)
 // 2. Paste the deployment URL below
-const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbwpQzuncyO55SSdouC3EdAcFLy3mxfyyO_-xAJx0xb3WU6GoS91VSKgOU-rtBnIbWKKxg/exec";
-const _DEFAULT_SHEET_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwpQzuncyO55SSdouC3EdAcFLy3mxfyyO_-xAJx0xb3WU6GoS91VSKgOU-rtBnIbWKKxg/exec";
+const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbyM33c-SCiBrAC8RUjN-6OWOopRzozcnMWTdBs64vzltCtBhIsn1N8iYLOdZGJjrbHrVg/exec";
+const _DEFAULT_SHEET_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyM33c-SCiBrAC8RUjN-6OWOopRzozcnMWTdBs64vzltCtBhIsn1N8iYLOdZGJjrbHrVg/exec";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://mcs-action.onrender.com";
+const API_KEY = import.meta.env.VITE_API_KEY || "";
 
 const SHEET_ID = import.meta.env.VITE_SHEET_ID || "1jQzssEsr6ULGyepmePjbITdzHRihttTrSvOoj32FyGY";
 // SHEET_ENABLED is true when a custom deployment URL is provided via env var
@@ -106,7 +107,7 @@ function ensureArray(val) {
 // Replaces all hardcoded seeds with live Sheet data.
 // Falls back to seeds if Sheet is unavailable.
 function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
-  defaultActions, defaultMeetings, defaultProjects, defaultEscMatrix, defaultPermissions, defaultPresets, defaultMachines }) {
+  defaultActions, defaultMeetings, defaultProjects, defaultEscMatrix, defaultPresets, defaultMachines, defaultRoles }) {
   const [dbReady, setDbReady] = useState(false);
   const [dbError, setDbError] = useState(null);
   const [users, setUsersRaw] = useState(defaultUsers);
@@ -116,11 +117,11 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   const [meetings, setMeetingsRaw] = useState(defaultMeetings);
   const [projects, setProjectsRaw] = useState(defaultProjects);
   const [escMatrix, setEscRaw] = useState(defaultEscMatrix);
-  const [permissions, setPermsRaw] = useState(defaultPermissions);
   const [mtgPresets, setPresetsRaw] = useState(defaultPresets);
   const [machines, setMachinesRaw] = useState(defaultMachines || []);
   const [reasons, setReasonsRaw] = useState([]);
   const [persistedAudit, setPersistedAuditRaw] = useState([]);
+  const [roles, setRolesRaw] = useState(defaultRoles || []);
 
   const fetchData = useCallback(async () => {
     if (!SHEET_ENABLED) {
@@ -138,7 +139,7 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
       return;
     }
     try {
-      const [u, p, d, a, m, pr, em, pm, ps, mc, rs, au] = await Promise.all([
+      const [u, p, d, a, m, pr, em, ps, mc, rs, au, ro] = await Promise.all([
         sheetGet("Users"),
         sheetGet("Plants"),
         sheetGet("Departments"),
@@ -146,11 +147,11 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
         sheetGet("Meetings"),
         sheetGet("Projects"),
         sheetGet("EscalationMatrix"),
-        sheetGet("Permissions"),
         sheetGet("MeetingPresets"),
         sheetGet("Machines"),
         sheetGet("Reasons").catch(() => []),
         sheetGet("Audit").catch(() => []),
+        sheetGet("Roles").catch(() => []),
       ]);
       const sanitize = (arr, prefix) => (Array.isArray(arr) ? arr : [])
         .filter(x => x && Object.values(x).some(v => v !== "" && v !== null && v !== undefined))
@@ -162,13 +163,6 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
       if (m.length) setMeetingsRaw(sanitize(m, "m").map(mt => ({ ...mt, attendees: ensureArray(mt.attendees) })));
       if (pr.length) setProjectsRaw(sanitize(pr, "pr"));
       if (em.length) setEscRaw(sanitize(em, "e"));
-      if (pm.length) {
-        const pObj = {};
-        // Script stores Permissions with key=id; keep the row under that id key
-        // and ensure name is preserved for lookup fallback
-        pm.forEach(row => { if (row.id !== undefined && row.id !== null && String(row.id).trim()) pObj[String(row.id)] = row; });
-        setPermsRaw(pObj);
-      }
       if (rs.length) setReasonsRaw(rs);
       if (au.length) setPersistedAuditRaw(sanitize(au, "au"));
       if (ps.length) {
@@ -182,6 +176,7 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
         setPresetsRaw(pMap);
       }
       if (mc.length) setMachinesRaw(sanitize(mc, "mc"));
+      if (ro && ro.length) setRolesRaw(sanitize(ro, "r"));
       setDbReady(true);
     } catch (e) {
       console.warn("Sheet load failed, using seeds:", e.message);
@@ -203,11 +198,11 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   const setMeetings = useCallback((fnOrVal) => { setMeetingsRaw(fnOrVal); }, []);
   const setProjects = useCallback((fnOrVal) => { setProjectsRaw(fnOrVal); }, []);
   const setEscMatrix = useCallback((fnOrVal) => { setEscRaw(fnOrVal); }, []);
-  const setPermissions = useCallback((fnOrVal) => { setPermsRaw(fnOrVal); }, []);
   const setMtgPresets = useCallback((fnOrVal) => { setPresetsRaw(fnOrVal); }, []);
   const setMachines = useCallback((fnOrVal) => { setMachinesRaw(fnOrVal); }, []);
   const setReasons = useCallback((fnOrVal) => { setReasonsRaw(fnOrVal); }, []);
   const setPersistedAudit = useCallback((fnOrVal) => { setPersistedAuditRaw(fnOrVal); }, []);
+  const setRoles = useCallback((fnOrVal) => { setRolesRaw(fnOrVal); }, []);
 
   // ── Sync state changes to sheet via effects (only after initial load) ──
   // fetchDoneRef is set true only after a delay post-load, preventing the
@@ -248,6 +243,7 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   // Machines auto-sync removed: it raced with the manual Save button causing silent failures.
   useEffect(() => { syncToSheet("Reasons", reasons); }, [reasons, syncToSheet]);
   useEffect(() => { syncAuditToSheet(persistedAudit); }, [persistedAudit]);
+  useEffect(() => { syncToSheet("Roles", roles); }, [roles, syncToSheet]);
 
   // ── Master data polling — re-fetch org/config tabs every 60s ──
   // This ensures every logged-in user picks up Admin changes without a full reload.
@@ -262,8 +258,8 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
       { key: "Departments",      tab: "Departments",      set: setDeptsRaw,   prefix: "d",  isObj: false },
       { key: "EscalationMatrix", tab: "EscalationMatrix", set: setEscRaw,     prefix: "e",  isObj: false },
       { key: "Machines",         tab: "Machines",         set: setMachinesRaw,prefix: "mc", isObj: false },
-      { key: "Permissions",      tab: "Permissions",      set: setPermsRaw,   prefix: null, isObj: true  },
       { key: "MeetingPresets",   tab: "MeetingPresets",   set: setPresetsRaw, prefix: null, isObj: "presets" },
+      { key: "Roles",            tab: "Roles",            set: setRolesRaw,   prefix: "r",  isObj: false },
     ];
     const sanitize = (arr, prefix) => (Array.isArray(arr) ? arr : [])
       .filter(x => x && Object.values(x).some(v => v !== "" && v !== null && v !== undefined))
@@ -321,11 +317,11 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
     meetings, setMeetings,
     projects, setProjects,
     escMatrix, setEscMatrix,
-    permissions, setPermissions,
     mtgPresets, setMtgPresets,
     machines, setMachines,
     reasons, setReasons,
     persistedAudit, setPersistedAudit,
+    roles, setRoles,
   };
 }
 
@@ -337,6 +333,13 @@ const DEFAULT_DEPTS = [];
 const DEFAULT_USERS = [];
 const MEETING_TYPES = ["Furnace Daily Review", "Daily Problem-Solving", "Daily Plant Head Review", "Weekly Plant Head", "Safety Review"];
 const STATUS_LIST = ["NOT STARTED", "IN PROCESS", "COMPLETED", "DROPPED"];
+// Legacy actions may have status literally saved as "PENDING CONFIRM" from
+// before the pendingConfirmation flag existed. It's not in STATUS_LIST, so it
+// must never be trusted as a real status — normalize it back to IN PROCESS.
+const normalizeStatus = s => (s === "PENDING CONFIRM" ? "IN PROCESS" : s);
+const displayStatus = a => (a.pendingConfirmation && a.status !== "COMPLETED" && a.status !== "DROPPED")
+  ? "PENDING CONFIRM"
+  : normalizeStatus(a.status);
 const PRIORITY_LIST = ["CRITICAL", "WARNING", "NORMAL"];
 const SECTIONS = ["Production", "Maintenance", "Quality", "Safety", "Electrical", "Mechanical", "Instrumentation", "Stores & Logistics", "Management", "General"];
 const ATTENDEE_MAP = {
@@ -356,27 +359,36 @@ const MTG_INSTRUCTIONS = {
 const SEED_PROJECTS = [];
 const SEED_MEETINGS = [];
 const SEED_ACTIONS = [];
-// Permissions are managed entirely from the Google Sheet (Permissions tab).
-// This returns an empty object so the sheet is always the source of truth.
-const DEFAULT_PERMISSIONS_SEED = () => ({});
+const isGuestRole = (role) => role === "Guest" || role === "Guest User";
+// Resolve permissions for a user dynamically using roles hierarchy level.
+const getPerms = (user) => {
+  if (!user) return { canEditMeetings: false, canCreateProjects: false, canEditActions: false, canViewDashboard: false, canManageEscalations: false };
+  
+  // Resolve level from roles in localStorage or fallback
+  let level = 1;
+  if (user.role === "Admin") level = 8;
+  else {
+    let roles = [];
+    try {
+      const saved = localStorage.getItem("mcs_roles");
+      if (saved) roles = JSON.parse(saved);
+    } catch (e) {}
+    
+    const rObj = roles.find(r => r.name === user.role);
+    if (rObj && rObj.level !== undefined) level = Number(rObj.level);
+    else {
+      const fallbacks = { "Guest": 1, "Guest User": 1, "Operator": 2, "Supervisor": 3, "Shift Engineer": 4, "HOD": 5, "Plant Head": 6, "MD": 7, "Admin": 8 };
+      level = fallbacks[user.role] ?? 1;
+    }
+  }
 
-// Resolve permissions for a user — looks up by id (string-coerced) or name fallback.
-// If no explicit row exists, ALL perms default to true (open access).
-// Only explicitly stored false values lock a permission.
-const getPerms = (user, permissions) => {
-  if (!user || !permissions) return { canEditMeetings: true, canCreateProjects: true, canEditActions: true, canViewDashboard: true, canManageEscalations: true };
-  // Try by id (coerce both sides to string to avoid number/string mismatch)
-  const byId = permissions[String(user.id)] || permissions[user.id];
-  // Try by name as fallback
-  const byName = !byId ? Object.values(permissions).find(p => p.name === user.name || p.id === user.name) : null;
-  const row = byId || byName;
-  if (!row) return { canEditMeetings: true, canCreateProjects: true, canEditActions: true, canViewDashboard: true, canManageEscalations: true };
+  // Base level-based permissions (reversed hierarchy: higher level = more access)
   return {
-    canEditMeetings:     row.canEditMeetings     !== false && row.canEditMeetings     !== "false",
-    canCreateProjects:   row.canCreateProjects   !== false && row.canCreateProjects   !== "false",
-    canEditActions:      row.canEditActions      !== false && row.canEditActions      !== "false",
-    canViewDashboard:    row.canViewDashboard    !== false && row.canViewDashboard    !== "false",
-    canManageEscalations:row.canManageEscalations!== false && row.canManageEscalations!== "false",
+    canEditMeetings:     level >= 5,
+    canCreateProjects:   level >= 5,
+    canEditActions:      level >= 2,
+    canViewDashboard:    level >= 2,
+    canManageEscalations: level >= 7,
   };
 };
 
@@ -409,40 +421,188 @@ const getSuperiors = (userName, allUsers) => {
   }
   return chain;
 };
+// ── ROLE-WISE ESCALATION MATRIX ────────────────────────────────────────────
+// When an action becomes overdue, the alert walks UP the responsible user's
+// role hierarchy. Level 1 fires the first alert to the responsible's direct
+// superior role; Level 2 fires the next level up; Level 3 reaches the top (MD).
+//
+//   Operator        → Supervisor → HOD        → Plant Head → MD
+//   Supervisor      → HOD        → Plant Head → MD
+//   Shift Engineer  → HOD        → Plant Head → MD
+//   HOD             → Plant Head → MD
+//   Plant Head      → MD
+//
+// MD & Admin sit at the top of the hierarchy and are not escalated further.
+// Each level triggers at a higher overdue threshold (24h → 72h → 168h).
+const ROLE_HIERARCHY = ["Operator", "Supervisor", "Shift Engineer", "HOD", "Plant Head", "MD", "Admin"];
+
 const DEFAULT_ESC_MATRIX = [
-  { id: "E1", level: 1, label: "Level 1 — Supervisor Alert", overdueDays: 0, overdueHrs: 0, target: "Supervisor", notifyMethod: "In-App", priorities: ["CRITICAL", "WARNING", "NORMAL"], applicableTo: "All", color: "#E69903", active: true, description: "Immediate alert when action passes due date" },
-  { id: "E2", level: 2, label: "Level 2 — HOD Escalation", overdueDays: 1, overdueHrs: 24, target: "HOD", notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING"], applicableTo: "All", color: "#E67E22", active: true, description: "Escalate to department head after 1 day overdue" },
-  { id: "E3", level: 3, label: "Level 3 — Plant Head Review", overdueDays: 3, overdueHrs: 72, target: "Plant Head", notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING"], applicableTo: "All", color: "#C0392B", active: true, description: "Escalate to plant head after 3 days overdue" },
-  { id: "E4", level: 4, label: "Level 4 — MD Intervention", overdueDays: 7, overdueHrs: 168, target: "MD", notifyMethod: "In-App + Email", priorities: ["CRITICAL"], applicableTo: "All", color: "#7B241C", active: false, description: "Critical actions unresolved beyond 7 days reach MD" },
+  // ── Level 1 — first escalation (24h overdue) → direct superior ──
+  { id: "E1-OP",  level: 1, fromRole: "Operator",       targetRole: "Supervisor", label: "Level 1 — Operator → Supervisor", overdueDays: 1, overdueHrs: 24,  target: "Supervisor", notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING", "NORMAL"], applicableTo: "All", color: "#E69903", active: true, description: "Operator's overdue action → direct superior (Supervisor)" },
+  { id: "E1-SV",  level: 1, fromRole: "Supervisor",     targetRole: "HOD",        label: "Level 1 — Supervisor → HOD",      overdueDays: 1, overdueHrs: 24,  target: "HOD",        notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING", "NORMAL"], applicableTo: "All", color: "#E69903", active: true, description: "Supervisor's overdue action → HOD" },
+  { id: "E1-SE",  level: 1, fromRole: "Shift Engineer", targetRole: "HOD",        label: "Level 1 — Shift Engineer → HOD",  overdueDays: 1, overdueHrs: 24,  target: "HOD",        notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING", "NORMAL"], applicableTo: "All", color: "#E69903", active: true, description: "Shift-in-charge's overdue action → HOD" },
+  { id: "E1-HD",  level: 1, fromRole: "HOD",            targetRole: "Plant Head", label: "Level 1 — HOD → Plant Head",      overdueDays: 1, overdueHrs: 24,  target: "Plant Head", notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING", "NORMAL"], applicableTo: "All", color: "#E69903", active: true, description: "HOD's overdue action → Plant Head" },
+  { id: "E1-PH",  level: 1, fromRole: "Plant Head",     targetRole: "MD",         label: "Level 1 — Plant Head → MD",       overdueDays: 1, overdueHrs: 24,  target: "MD",         notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING", "NORMAL"], applicableTo: "All", color: "#E69903", active: true, description: "Plant Head's overdue action → MD" },
+
+  // ── Level 2 — second escalation (72h overdue) → one more level up ──
+  { id: "E2-OP",  level: 2, fromRole: "Operator",       targetRole: "HOD",        label: "Level 2 — Operator → HOD",        overdueDays: 3, overdueHrs: 72,  target: "HOD",        notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING"],           applicableTo: "All", color: "#E67E22", active: true, description: "Operator's action still in process → HOD" },
+  { id: "E2-SV",  level: 2, fromRole: "Supervisor",     targetRole: "Plant Head", label: "Level 2 — Supervisor → Plant Head", overdueDays: 3, overdueHrs: 72,  target: "Plant Head", notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING"],           applicableTo: "All", color: "#E67E22", active: true, description: "Supervisor's action still in process → Plant Head" },
+  { id: "E2-SE",  level: 2, fromRole: "Shift Engineer", targetRole: "Plant Head", label: "Level 2 — Shift Engineer → Plant Head", overdueDays: 3, overdueHrs: 72, target: "Plant Head", notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING"],           applicableTo: "All", color: "#E67E22", active: true, description: "Shift-in-charge's action still in process → Plant Head" },
+  { id: "E2-HD",  level: 2, fromRole: "HOD",            targetRole: "MD",         label: "Level 2 — HOD → MD",              overdueDays: 3, overdueHrs: 72,  target: "MD",         notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING"],           applicableTo: "All", color: "#E67E22", active: true, description: "HOD's action still in process → MD" },
+
+  // ── Level 3 — final escalation (168h overdue) → MD ──
+  { id: "E3-OP",  level: 3, fromRole: "Operator",       targetRole: "Plant Head", label: "Level 3 — Operator → Plant Head", overdueDays: 7, overdueHrs: 168, target: "Plant Head", notifyMethod: "In-App + Email", priorities: ["CRITICAL"],                       applicableTo: "All", color: "#C0392B", active: true, description: "Operator's action unresolved 7 days → Plant Head" },
+  { id: "E3-SV",  level: 3, fromRole: "Supervisor",     targetRole: "MD",         label: "Level 3 — Supervisor → MD",       overdueDays: 7, overdueHrs: 168, target: "MD",         notifyMethod: "In-App + Email", priorities: ["CRITICAL"],                       applicableTo: "All", color: "#C0392B", active: true, description: "Supervisor's action unresolved 7 days → MD" },
+  { id: "E3-SE",  level: 3, fromRole: "Shift Engineer", targetRole: "MD",         label: "Level 3 — Shift Engineer → MD",   overdueDays: 7, overdueHrs: 168, target: "MD",         notifyMethod: "In-App + Email", priorities: ["CRITICAL"],                       applicableTo: "All", color: "#C0392B", active: true, description: "Shift-in-charge's action unresolved 7 days → MD" },
 ];
 
-function runEscalation(actions, setAudit, matrix) {
+// Helper: resolve the role hierarchy walk-up for a given role.
+// Returns the ordered list of roles strictly above the given role
+// (e.g. "Supervisor" → ["Shift Engineer", "HOD", "Plant Head", "MD", "Admin"]).
+// Note: we skip Shift Engineer when walking up from Supervisor because both
+// "Supervisor" and "Shift Engineer" are shift-level in-charge roles — the
+// first *management* level above either is "HOD". Override via matrix config.
+const ROLES_ABOVE = (role) => {
+  const idx = ROLE_HIERARCHY.indexOf(role);
+  if (idx < 0) return ["MD"]; // unknown role → escalate straight to MD
+  // Skip Shift Engineer when walking up from Operator/Supervisor
+  const above = ROLE_HIERARCHY.slice(idx + 1);
+  if ((role === "Operator" || role === "Supervisor") && above[0] === "Shift Engineer") {
+    return above.slice(1);
+  }
+  return above;
+};
+
+const getEscBadgeStyle = (lvl) => {
+  const num = Number(lvl);
+  if (num >= 5) return { bg: T.redL, color: T.red };
+  if (num === 4) return { bg: "#FADBD8", color: "#C0392B" };
+  if (num === 3) return { bg: "#FDEBD0", color: "#D35400" };
+  if (num === 2) return { bg: "#FFF3CD", color: "#E67E22" };
+  return { bg: "#FFF9E7", color: "#E69903" };
+};
+
+// Shared helper: resolve the current escalation state (if any) for a single action.
+// Used by the Escalations page and the Team page (Master Setup) so the "who is
+// currently escalated, and to which level/superiors" logic lives in one place.
+function resolveEscalationState(action, matrix, users) {
+  if (action.status === "COMPLETED" || action.status === "DROPPED" || !action.due) return null;
+  const now = new Date();
+  const due = new Date(action.due + "T23:59:59");
+  const hrsOverdue = (now - due) / 3600000;
+  if (hrsOverdue < 0) return null;
+
   const normP = (p) => Array.isArray(p) ? p : (typeof p === "string" && p.trim() ? p.split(",").map(x => x.trim()).filter(Boolean) : ["CRITICAL", "WARNING", "NORMAL"]);
-  const tiers = (matrix || DEFAULT_ESC_MATRIX).filter(t => t.active).map(t => ({ ...t, priorities: normP(t.priorities) })).sort((a, b) => b.overdueHrs - a.overdueHrs);
+  const normS = (s) => Array.isArray(s) ? s : (typeof s === "string" && s.trim() ? s.split(",").map(x => x.trim()).filter(Boolean) : []);
+  const activeTiers = (matrix || DEFAULT_ESC_MATRIX)
+    .filter(t => t.active)
+    .map(t => ({ ...t, priorities: normP(t.priorities), superiors: normS(t.superiors) }));
+
+  const respUser = (users || []).find(u => u.name === action.responsible);
+  const respRole = respUser?.role || action.responsibleRole || "";
+
+  const matched = activeTiers
+    .filter(t => (t.fromRole || "") === respRole && hrsOverdue >= t.overdueHrs && t.priorities.includes(action.priority || "NORMAL"))
+    .sort((a, b) => a.level - b.level);
+  if (matched.length === 0) return null;
+
+  const matchedTier = matched[matched.length - 1];
+
+  return {
+    tier: matchedTier,
+    allMatchedTiers: matched,
+    hrsOverdue,
+    daysOverdue: Math.floor(hrsOverdue / 24),
+    fromRole: respRole,
+  };
+}
+
+function runEscalation(actions, setAudit, matrix, users) {
+  const normP = (p) => Array.isArray(p) ? p : (typeof p === "string" && p.trim() ? p.split(",").map(x => x.trim()).filter(Boolean) : ["CRITICAL", "WARNING", "NORMAL"]);
+  // Group active tiers by fromRole so we can look up the chain for each action's responsible user
+  const allTiers = (matrix || DEFAULT_ESC_MATRIX)
+    .filter(t => t.active)
+    .map(t => ({ ...t, priorities: normP(t.priorities) }));
+  const byRole = {};
+  allTiers.forEach(t => {
+    const key = t.fromRole || "*";
+    if (!byRole[key]) byRole[key] = [];
+    byRole[key].push(t);
+  });
+
   const now = new Date(), alerts = [];
   const emailPayloads = {};
 
+  // Build a quick name → role lookup from the users list
+  const roleByName = {};
+  (users || []).forEach(u => { if (u && u.name) roleByName[u.name] = u.role; });
+
   actions.forEach(a => {
     if (a.status === "COMPLETED" || a.status === "DROPPED" || !a.due) return;
-    const hrs = (now - new Date(a.due)) / 3600000;
+    const hrs = (now - new Date(a.due + "T23:59:59")) / 3600000;
     if (hrs < 0) return;
-    const tier = tiers.find(t => hrs >= t.overdueHrs && t.priorities.includes(a.priority || "NORMAL"));
-    if (tier) {
-      alerts.push({ id: Date.now() + Math.random(), ts: now.toISOString(), sn: a.sn, text: a.text, level: tier.level, target: tier.target, reason: `${Math.floor(hrs)}h overdue — ${tier.label}` });
-      if (tier.notifyMethod.includes("Email")) {
-        if (!emailPayloads[tier.level]) emailPayloads[tier.level] = { actions: [], target: tier.target, level: tier.level };
-        emailPayloads[tier.level].actions.push(a);
-      }
-    }
+
+    // Resolve responsible user's role — this drives which escalation chain applies
+    const respRole = roleByName[a.responsible] || a.responsibleRole || "";
+    const applicableTiers = byRole[respRole] || [];
+
+    // Walk up the chain: every tier whose overdueHrs threshold has been met
+    // AND whose priority filter matches the action's priority fires an alert.
+    // Higher levels (with larger overdueHrs) build on lower levels — the alert
+    // keeps climbing the hierarchy until it reaches MD or the action is closed.
+    applicableTiers
+      .filter(t => hrs >= t.overdueHrs && t.priorities.includes(a.priority || "NORMAL"))
+      .sort((x, y) => x.level - y.level)
+      .forEach(tier => {
+        alerts.push({
+          id: Date.now() + Math.random(),
+          ts: now.toISOString(),
+          sn: a.sn,
+          text: a.text,
+          level: tier.level,
+          target: tier.targetRole || tier.target,
+          fromRole: tier.fromRole,
+          targetRole: tier.targetRole,
+          reason: `${Math.floor(hrs)}h overdue — ${tier.fromRole} → ${tier.targetRole} (Level ${tier.level})`,
+        });
+        if (tier.notifyMethod && tier.notifyMethod.includes("Email")) {
+          const key = `${tier.fromRole}_${tier.level}`;
+          if (!emailPayloads[key]) emailPayloads[key] = { actions: [], target: tier.targetRole, level: tier.level, tierLabel: tier.label, fromRole: tier.fromRole, targetRole: tier.targetRole };
+          emailPayloads[key].actions.push(a);
+        }
+      });
   });
-  if (alerts.length) setAudit(p => [...alerts.slice(0, 5), ...p].slice(0, 100));
+
+  // Dedupe by sn+level — same action can fire the same level only once
+  const seen = new Set();
+  const deduped = alerts.filter(a => {
+    const key = `${a.sn}_${a.level}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  if (deduped.length) setAudit(p => {
+    const existing = Array.isArray(p) ? p : [];
+    const existingKeys = new Set(existing.map(e => `${e.sn}_${e.level}`));
+    const fresh = deduped.filter(a => !existingKeys.has(`${a.sn}_${a.level}`));
+    return [...fresh, ...existing].slice(0, 100);
+  });
+
+  // Strip sensitive fields before sending users to the backend
+  const usersForEmail = (users || []).map(u => ({
+    name:     u.name     || "",
+    email:    u.email    || "",
+    role:     u.role     || "",
+    superior: u.superior || "",
+  }));
 
   Object.values(emailPayloads).forEach(payload => {
     if (payload.actions.length > 0 && API_BASE_URL) {
       fetch(`${API_BASE_URL}/api/email/escalate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({ ...payload, users: usersForEmail })
       }).catch(e => console.warn("Escalation email failed", e));
     }
   });
@@ -597,6 +757,29 @@ function LoginPage({ onLogin }) {
     }
     setLoading(false);
   };
+  const loginAsGuest = async () => {
+    setLoading(true); setErrMsg("");
+    try {
+      let guestUser = null;
+      try {
+        const res = await fetch(csvUrl("Users"));
+        if (res.ok) {
+          const text = await res.text();
+          const sheetUsers = parseCsv(text);
+          guestUser = sheetUsers.find(a => ["guest", "guest user"].includes(String(a.role).trim().toLowerCase()) || String(a.username).trim().toLowerCase() === "guest");
+        }
+      } catch (e) {
+        console.warn("Could not load users for guest lookup, falling back to mock guest", e);
+      }
+      if (!guestUser) {
+        guestUser = { id: "GUEST", name: "Guest User", username: "guest", role: "Guest User", plant: "All", dept: "Management", initials: "GU", color: "#7F8C8D", masterAccess: false };
+      }
+      onLogin(guestUser);
+    } catch (err) {
+      setErrMsg("Guest login failed");
+    }
+    setLoading(false);
+  };
   return (
     <div style={{ minHeight: "100vh", background: `linear-gradient(135deg,${T.navy} 0%,#3D378C 100%)`, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ width: 420, background: "#fff", borderRadius: 20, padding: 36, boxShadow: "0 24px 80px rgba(0,0,0,.25)" }}>
@@ -634,10 +817,16 @@ function LoginPage({ onLogin }) {
           </div>
         </div>
         {errMsg && <div style={{ background: T.redL, color: T.red, padding: "8px 12px", borderRadius: 8, fontSize: 12, marginBottom: 14, fontWeight: 500 }}>{errMsg}</div>}
-        <button className="btn btn-navy" style={{ width: "100%", justifyContent: "center", fontSize: 14, padding: "12px 0" }} onClick={tryLogin} disabled={loading}>
-          {loading ? <><Spin /> Signing in…</> : "Sign In"}
-        </button>
-        <div style={{ textAlign: "center", marginTop: 20, fontSize: 10, color: T.text2 }}>Powered by Adroit × Signet</div>      </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <button className="btn btn-navy" style={{ width: "100%", justifyContent: "center", fontSize: 14, padding: "12px 0" }} onClick={tryLogin} disabled={loading}>
+            {loading ? <><Spin /> Signing in…</> : "Sign In"}
+          </button>
+          <button className="btn btn-ghost" style={{ width: "100%", justifyContent: "center", fontSize: 14, padding: "12px 0", border: `1.5px solid ${T.border}`, color: T.navy }} onClick={loginAsGuest} disabled={loading}>
+            🚪 Access as Guest User
+          </button>
+        </div>
+        <div style={{ textAlign: "center", marginTop: 20, fontSize: 10, color: T.text2 }}>Powered by Adroit × Signet</div>
+      </div>
     </div>
   );
 }
@@ -902,18 +1091,14 @@ function AdminNotifManager({ users, onClose }) {
     </div>
   );
 }
-function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCount, auditCount, activeMtg, onResumeActiveMtg, mtgRunning, mtgElapsed, notifications, onMarkAllRead, unreadCount, users, actions, onShowSupport, onShowProfile, onShowAdminNotifs, permissions }) {
+function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCount, auditCount, activeMtg, onResumeActiveMtg, mtgRunning, mtgElapsed, notifications, onMarkAllRead, unreadCount, users, actions, onShowSupport, onShowProfile, onShowAdminNotifs }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const isAdmin = user?.role === "Admin";
-  const userPerms = getPerms(user, permissions);
+  const userPerms = getPerms(user);
   const canAccessPage = (id) => {
-    if (isAdmin) return true;
-    if (id === 0 || id === 1) return true;
-    if (id === 2) return userPerms.canEditActions;
-    if (id === 3) return userPerms.canViewDashboard;
-    if (id === 4) return userPerms.canManageEscalations;
-    return false;
+    if (id === 99) return isAdmin || user?.masterAccess === true || user?.masterAccess === "true";
+    return true;
   };
   const hms = s => `${String(Math.floor(s / 3600)).padStart(2, "0")}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
@@ -939,7 +1124,6 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
                 <span style={{ flex: 1 }}>{n.label}</span>
                 {!allowed && <span style={{ fontSize: 10, opacity: 0.5 }}>🔒</span>}
                 {allowed && n.id === 2 && pendingCount > 0 && <span style={{ background: T.red, color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{pendingCount}</span>}
-                {allowed && n.id === 4 && auditCount > 0 && <span style={{ background: T.amber, color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{auditCount}</span>}
                 {active && <span style={{ width: 3, height: 20, borderRadius: 2, background: T.amber, position: "absolute", right: 8 }} />}
               </button>
             );
@@ -978,7 +1162,7 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
               </>
             )}
           </div>
-          {isAdmin && (
+          {(isAdmin || user?.masterAccess === true || user?.masterAccess === "true") && (
             <button onClick={() => setPage(99)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "10px 18px", border: "none", cursor: "pointer", background: page === 99 ? "rgba(255,255,255,.1)" : "transparent", color: "rgba(255,255,255,.45)", fontSize: 12, fontFamily: "'Inter',sans-serif", transition: "all .2s" }}>
               <span style={{ fontSize: 14 }}>⚙</span><span>Master Setup</span>
             </button>
@@ -999,8 +1183,8 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
                   <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{user?.name}</div>
                   <div style={{ fontSize: 11, color: T.text2 }}>{user?.role} — {user?.plant}</div>
                 </div>
-                {user?.role !== "Guest" && <button onClick={() => { setShowUserMenu(false); onShowProfile && onShowProfile(); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", border: "none", background: "transparent", cursor: "pointer", color: T.text, fontSize: 13, fontWeight: 600, borderRadius: 8 }}>👤 My Profile</button>}
-                {user?.role !== "Guest" && user?.role !== "Admin" && Number(page) !== 3 && Number(page) !== 4 && <button onClick={() => { setShowUserMenu(false); onShowSupport && onShowSupport(); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", border: "none", background: "transparent", cursor: "pointer", color: T.navy, fontSize: 13, fontWeight: 600, borderRadius: 8 }}>💬 Get Support</button>}
+                {!isGuestRole(user?.role) && <button onClick={() => { setShowUserMenu(false); onShowProfile && onShowProfile(); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", border: "none", background: "transparent", cursor: "pointer", color: T.text, fontSize: 13, fontWeight: 600, borderRadius: 8 }}>👤 My Profile</button>}
+                {!isGuestRole(user?.role) && user?.role !== "Admin" && Number(page) !== 3 && Number(page) !== 4 && <button onClick={() => { setShowUserMenu(false); onShowSupport && onShowSupport(); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", border: "none", background: "transparent", cursor: "pointer", color: T.navy, fontSize: 13, fontWeight: 600, borderRadius: 8 }}>💬 Get Support</button>}
                 {isAdmin && Number(page) !== 3 && Number(page) !== 4 && <button onClick={() => { setShowUserMenu(false); onShowAdminNotifs && onShowAdminNotifs(); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", border: "none", background: "transparent", cursor: "pointer", color: T.amber, fontSize: 13, fontWeight: 600, borderRadius: 8 }}>🔔 Notification Rules</button>}
                 <button onClick={() => { setShowUserMenu(false); onLogout(); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", border: "none", background: "transparent", cursor: "pointer", color: T.red, fontSize: 13, fontWeight: 600, borderRadius: 8 }}>🚪 Sign Out</button>
               </div>
@@ -1022,7 +1206,7 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
 
         <div style={{ padding: 28, paddingTop: 20, flex: 1, overflowY: "auto", minHeight: 0 }}>{children}</div>
       </main>
-      <button className="fab" onClick={onQuickAdd} title="Quick add action">+</button>
+      {userPerms.canEditActions && <button className="fab" onClick={onQuickAdd} title="Quick add action">+</button>}
     </div>
   );
 }
@@ -1104,7 +1288,7 @@ function ActionSidePanel({ action, onClose, onUpdate, users, plants, depts, curr
   );
 }
 
-function HomePage({ actions, setActions, user, setPage, users, meetings, plants, depts, setGlobalActiveMtg, permissions }) {
+function HomePage({ actions, setActions, user, setPage, users, meetings, plants, depts, setGlobalActiveMtg }) {
   const now = new Date();
   // Scope: my plant OR all
   const myPlantActions = user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant);
@@ -1442,7 +1626,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
       </div>
 
       {/* Unified action detail panel — same as Actions page */}
-      {actionPanel && <ActionDetailPanel action={actionPanel} onClose={() => setActionPanel(null)} onUpdate={(id, patch) => { upAction(id, patch); setActionPanel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} permissions={permissions} />}
+      {actionPanel && <ActionDetailPanel action={actionPanel} onClose={() => setActionPanel(null)} onUpdate={(id, patch) => { upAction(id, patch); setActionPanel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} />}
 
       {/* Fix 6: Team sub modal */}
       {subModal && (
@@ -1697,7 +1881,7 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
 }
 
 /* ===================== WORK PAGE ===================== */
-function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, user, onProjectUpdate, allProjects, setProjects: setProjectsUp, allMeetings, setMeetings: setMeetingsUp, permissions, setPage, globalActiveMtg, setGlobalActiveMtg, mtgRunning, setMtgRunning, mtgElapsed, mtgTxLines, setMtgTxLines, mtgFastActions, setMtgFastActions, mtgInsights, setMtgInsights, clearMeetingState, mtgPresets, reasons }) {
+function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, user, onProjectUpdate, allProjects, setProjects: setProjectsUp, allMeetings, setMeetings: setMeetingsUp, setPage, globalActiveMtg, setGlobalActiveMtg, mtgRunning, setMtgRunning, mtgElapsed, mtgTxLines, setMtgTxLines, mtgFastActions, setMtgFastActions, mtgInsights, setMtgInsights, clearMeetingState, mtgPresets, reasons }) {
   // activeMtg is now global — WorkPage just reads/writes it
   const activeMtg = globalActiveMtg;
   const setActiveMtg = (m) => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); };
@@ -1716,7 +1900,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
   const [mtgPlan, setMtgPlan] = useState(null);  // Feature 4: meeting plan view
 
   const isAdmin = user?.role === "Admin";
-  const userPerms = getPerms(user, permissions);
+  const userPerms = getPerms(user);
   // Feature 3: can create projects if admin or has permission
   const canCreateProject = isAdmin || userPerms.canCreateProjects;
   // Feature 4: can edit meetings if admin or has permission
@@ -1767,7 +1951,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
               🎙 Today's Meetings
               <span style={{ background: T.navy + "15", color: T.navy, borderRadius: 10, padding: "2px 9px", fontSize: 11, fontWeight: 700 }}>{visibleMeetings.length}</span>
             </div>
-            {user?.role !== "Guest" && <button className="btn btn-ghost btn-sm" onClick={() => setShowAddMtg(true)}>+ Schedule</button>}
+            {!isGuestRole(user?.role) && <button className="btn btn-ghost btn-sm" onClick={() => setShowAddMtg(true)}>+ Schedule</button>}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {visibleMeetings.map((m, idx) => {
@@ -1816,7 +2000,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
                     <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
                       {/* Feature 4: View Plan button */}
                       <button className="btn btn-ghost btn-sm" onClick={() => setMtgPlan(m)}>📋 Plan</button>
-                      {user?.role !== "Guest" && <button className="btn btn-green btn-sm" onClick={() => setActiveMtg(m)}>▶ Start</button>}
+                      {!isGuestRole(user?.role) && <button className="btn btn-green btn-sm" onClick={() => setActiveMtg(m)}>▶ Start</button>}
                     </div>
                   </div>
                 </div>
@@ -1910,7 +2094,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
         </div>
       </div>
       {charter && <ProjectCharterModal pr={charter} onClose={() => { setCharter(null); setCharterActionSel(null); }} actions={actions} meetings={meetings} user={user} users={users} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); onProjectUpdate(updated); }} onActionSelect={a => setCharterActionSel(a)} />}
-      {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={() => { }} user={user} users={users} allUsers={users} plants={plants} permissions={permissions} />}
+      {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={() => { }} user={user} users={users} allUsers={users} plants={plants} />}
       {showAddMtg && <AddMeetingModal plants={plants} users={users} projects={projects} onSave={m => { setMeetings(p => [...p, { ...m, id: "M" + Date.now(), completedSessions: [] }]); setShowAddMtg(false); }} onClose={() => setShowAddMtg(false)} />}
       {/* Feature 3: Add Project Modal */}
       {showAddProject && <AddProjectModal plants={plants} users={users} onSave={p => { setProjects(prev => [...prev, { ...p, id: "PR" + Date.now(), milestones: [], risks: "", team: [] }]); showAddProject && setShowAddProject(false); }} onClose={() => setShowAddProject(false)} />}
@@ -1926,9 +2110,10 @@ function AddProjectModal({ plants, users, onSave, onClose }) {
   const [f, setF] = useState({ name: "", plant: "", owner: "", start: "", end: "", priority: "NORMAL", status: "NOT STARTED", objective: "", scope: "", budget: "", sponsor: "" });
   const up = (k, v) => setF(x => ({ ...x, [k]: v }));
   const valid = f.name && f.plant && f.owner && f.start && f.end;
+  const submit = () => { if (valid) onSave(f); };
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="modal" style={{ width: 540, padding: 28 }} onClick={e => e.stopPropagation()}>
+      <div className="modal" style={{ width: 540, padding: 28 }} onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") { e.preventDefault(); submit(); } }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
           <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 16, fontWeight: 800, color: T.navy }}>Create New Project</h2>
           <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 22, color: T.text2 }}>×</button>
@@ -1953,7 +2138,7 @@ function AddProjectModal({ plants, users, onSave, onClose }) {
         </div>
         <div style={{ marginTop: 20, display: "flex", gap: 10, justifyContent: "flex-end" }}>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-navy" onClick={() => { if (valid) onSave(f); }} disabled={!valid}>Create Project</button>
+          <button className="btn btn-navy" onClick={submit} disabled={!valid}>Create Project</button>
         </div>
       </div>
     </div>
@@ -2085,9 +2270,10 @@ function AddMeetingModal({ plants, users, projects, onSave, onClose }) {
     { v: "yearly", l: "Yearly" },
   ];
   const canSave = f.name.trim() && f.plant && f.facilitator && f.time && f.project;
+  const submit = () => { if (canSave) onSave({ ...f, type: f.name }); };
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="modal" style={{ width: 500, padding: 28 }} onClick={e => e.stopPropagation()}>
+      <div className="modal" style={{ width: 500, padding: 28 }} onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") { e.preventDefault(); submit(); } }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
           <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 16, fontWeight: 800, color: T.navy }}>Schedule New Meeting</h2>
           <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 22, color: T.text2 }}>×</button>
@@ -2145,7 +2331,7 @@ function AddMeetingModal({ plants, users, projects, onSave, onClose }) {
         </div>
         <div style={{ marginTop: 20, display: "flex", gap: 10, justifyContent: "flex-end" }}>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-navy" disabled={!canSave} style={{ opacity: canSave ? 1 : .5, cursor: canSave ? "pointer" : "not-allowed" }} onClick={() => { if (canSave) onSave({ ...f, type: f.name }); }}>Schedule</button>
+          <button className="btn btn-navy" disabled={!canSave} style={{ opacity: canSave ? 1 : .5, cursor: canSave ? "pointer" : "not-allowed" }} onClick={submit}>Schedule</button>
         </div>
       </div>
     </div>
@@ -2218,7 +2404,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
       setTranslating(true);
       const res = await fetch(`${API_BASE_URL}/api/translate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
         body: JSON.stringify({ text: rawTxt.trim(), source: "hi", target: "en" })
       });
       const data = await res.json();
@@ -2245,7 +2431,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
 
       const res = await fetch(`${API_BASE_URL}/api/meetings/analyze-paragraph`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
         body: JSON.stringify({
           paragraph: para.trim(),
           meeting_type: mtg.type,
@@ -3050,7 +3236,7 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
     try {
       const res = await fetch(`${API_BASE_URL}/api/meetings/extract-insights`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
         body: JSON.stringify({
           transcript: txLines.join("\n"),
           meeting_type: mtg.type,
@@ -3163,7 +3349,7 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
 
 /* ===================== ACTION DETAIL SIDE PANEL ===================== */
 /* Completion workflow: assignee marks done → goes to allocatedBy + their superior for confirmation */
-function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, plants: panelPlants, machines: panelMachines, permissions }) {
+function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, plants: panelPlants, machines: panelMachines }) {
   useEscClose(onClose);
   const [msgText, setMsgText] = useState("");
   const messagesEndRef = useRef(null);
@@ -3185,7 +3371,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
   const isAllocator = user?.name === allocator;
   const isAllocatorSuperior = user?.name === allocatorSuperior?.name;
   const isAdmin = user?.role === "Admin";
-  const _hasEditPerm = isAdmin || getPerms(user, permissions).canEditActions;
+  const _hasEditPerm = isAdmin || getPerms(user).canEditActions;
   const canConfirm = isAllocator || isAllocatorSuperior || isAdmin;
   const canMsg = _hasEditPerm || isAssignee || isAllocator;
   const canEdit = _hasEditPerm && !isPendingConfirm && action.status !== "COMPLETED" && action.status !== "DROPPED";
@@ -3268,7 +3454,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
           </div>
           <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 15, fontWeight: 800, color: T.navy, lineHeight: 1.3, marginBottom: 10 }}>{action.text}</h2>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <SBadge s={isPendingConfirm ? "PENDING CONFIRM" : action.status} /><PBadge p={action.priority} />
+            <SBadge s={displayStatus(action)} /><PBadge p={action.priority} />
             {action.project && <Chip label={"🔗 " + action.project} color={T.amber} />}
           </div>
           {isPendingConfirm && (
@@ -3319,7 +3505,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
             <InlineField label="Remarks" field="remarks" value={action.remarks} type="textarea" />
             {/* Actions */}
             <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {user?.role !== "Guest" && !isPendingConfirm && action.status !== "COMPLETED" && action.status !== "DROPPED" && (
+              {!isGuestRole(user?.role) && !isPendingConfirm && action.status !== "COMPLETED" && action.status !== "DROPPED" && (
                 <>
                   {isAssignee && (
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -3437,7 +3623,7 @@ const userViewPref = {};
 const userSortPref = {};  // persist sort across page changes
 const userFilterPref = {}; // persist filters across page changes
 
-function ActionsPage({ actions, setActions, plants, depts, users, user, projects, machines, permissions }) {
+function ActionsPage({ actions, setActions, plants, depts, users, user, projects, machines }) {
   const userKey = user?.id || "guest";
   const [view, setView] = useState(userViewPref[userKey] || "table");
   // Multi-select filters: persistent across page changes
@@ -3451,7 +3637,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(null);
   const [openFilter, setOpenFilter] = useState(null);
-  const canEdit = user?.role === "Admin" || getPerms(user, permissions).canEditActions;
+  const canEdit = user?.role === "Admin" || getPerms(user).canEditActions;
   const allProjects = [...new Set(actions.map(a => a.project).filter(Boolean))];
 
   const changeView = v => { setView(v); userViewPref[userKey] = v; };
@@ -3493,7 +3679,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     if (filters.plant.length && !filters.plant.includes("All") && !filters.plant.includes(a.plant)) return false;
     if (filters.section.length && !filters.section.includes(a.section)) return false;
     if (filters.responsible.length && !filters.responsible.includes(a.responsible)) return false;
-    const aStatus = a.pendingConfirmation && a.status !== "COMPLETED" && a.status !== "DROPPED" ? "PENDING CONFIRM" : a.status;
+    const aStatus = displayStatus(a);
     if (filters.status.length && !filters.status.includes(aStatus)) return false;
     if (filters.priority.length && !filters.priority.includes(a.priority)) return false;
     const aProj = a.project || "None";
@@ -3645,9 +3831,10 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   canEdit={canEdit}
   users={users}
   setSel={setSel}
+  user={user}
 />}
       {view === "timeline" && <TimelineView fa={fa} />}
-      {sel && <ActionDetailPanel action={sel} onClose={() => setSel(null)} onUpdate={(id, patch) => { upAction(id, patch); setSel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} machines={machines} permissions={permissions} />}
+      {sel && <ActionDetailPanel action={sel} onClose={() => setSel(null)} onUpdate={(id, patch) => { upAction(id, patch); setSel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} machines={machines} />}
     </div>
   );
 }
@@ -3742,7 +3929,7 @@ function BoardView({ fa, setSel, users }) {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 12, padding: 14 }}>
               {ga.map((a, idx) => (
                 <div key={a.id || `board-${idx}`} style={{ background: T.bg, borderRadius: 10, padding: 12, border: `1.5px solid ${a.pendingConfirmation ? T.amber : isOverdue(a) ? T.red : T.border}`, cursor: "pointer" }} onClick={() => setSel(a)}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, gap: 4 }}><SBadge s={a.pendingConfirmation && a.status !== "COMPLETED" && a.status !== "DROPPED" ? "PENDING CONFIRM" : a.status} /><PBadge p={a.priority} /></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, gap: 4 }}><SBadge s={normalizeStatus(a.status)} /><PBadge p={a.priority} /></div>
                   <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.4, marginBottom: 8 }}>{a.text.slice(0, 70)}{a.text.length > 70 ? "…" : ""}</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <Avatar name={a.responsible} size={22} users={users || []} />
@@ -3758,7 +3945,7 @@ function BoardView({ fa, setSel, users }) {
   );
 }
 
-function KanbanView({ fa, upStatus, canEdit, users, setSel }) {
+function KanbanView({ fa, upStatus, canEdit, users, setSel, user }) {
   const dragIdRef = useRef(null);
   const [overCol, setOverCol] = useState(null);
   const [draggingId, setDraggingId] = useState(null);
@@ -3808,11 +3995,17 @@ function KanbanView({ fa, upStatus, canEdit, users, setSel }) {
       width: "100%",
       paddingBottom: 100
     }}>
-      {STATUS_LIST.map(col => {
-        const c = SC[col] || { bg: "#eee", text: "#333", dot: "#aaa" };
-        const glow = HOLD_GLOW[col] || { border: T.navy, shadow: "0 0 0 3px rgba(39,34,98,.2), 0 8px 24px rgba(39,34,98,.15)", bg: "#F4F3FB" };
+      {["Escalated Action", ...STATUS_LIST].map(col => {
+        const isEscalatedCol = col === "Escalated Action";
+        const c = isEscalatedCol ? { bg: T.redL, text: T.red, dot: T.red } : (SC[col] || { bg: "#eee", text: "#333", dot: "#aaa" });
+        const glow = isEscalatedCol ? { border: T.red, shadow: "0 0 0 3px rgba(192,57,43,.25), 0 8px 24px rgba(192,57,43,.18)", bg: "#FADBD8" } : (HOLD_GLOW[col] || { border: T.navy, shadow: "0 0 0 3px rgba(39,34,98,.2), 0 8px 24px rgba(39,34,98,.15)", bg: "#F4F3FB" });
         const isDragOver = overCol === col;
-        const colCards = fa.filter(a => a.status === col);
+        let colCards = [];
+        if (isEscalatedCol) {
+          colCards = fa.filter(a => isOverdue(a) && a.status !== "COMPLETED" && a.status !== "DROPPED");
+        } else {
+          colCards = fa.filter(a => normalizeStatus(a.status) === col);
+        }
 
         return (
           <div key={col}
@@ -3820,6 +4013,11 @@ function KanbanView({ fa, upStatus, canEdit, users, setSel }) {
             onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setOverCol(null); }}
             onDrop={e => {
               e.preventDefault();
+              if (isEscalatedCol) {
+                dragIdRef.current = null;
+                setOverCol(null);
+                return;
+              }
               const raw = e.dataTransfer.getData("text/plain");
               const id = dragIdRef.current ?? (raw !== "" ? Number(raw) : null);
               if (id != null && !isNaN(id)) upStatus(id, col);
@@ -3957,7 +4155,7 @@ function TimelineView({ fa }) {
 }
 
 /* ===================== DASHBOARD ===================== */
-function DashboardPage({ actions, plants, depts, users, audit, user, meetings, onViewEscalations, refreshData, setActions: setActionsUp, permissions }) {
+function DashboardPage({ actions, plants, depts, users, audit, user, meetings, onViewEscalations, refreshData, setActions: setActionsUp }) {
   const [drill, setDrill] = useState(null);
   const [deptDrill, setDeptDrill] = useState(null);
   const [mtgDrill, setMtgDrill] = useState(false);
@@ -3971,7 +4169,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
   if (plantF !== "All") fa = fa.filter(a => a.plant === plantF);
   if (deptF !== "All") fa = fa.filter(a => String(a.section ?? "").toLowerCase().trim() === String(deptF ?? "").toLowerCase().trim() || String(a.dept ?? "").toLowerCase().trim() === String(deptF ?? "").toLowerCase().trim());
 
-  const total = fa.length, comp = fa.filter(a => a.status === "COMPLETED").length, ip = fa.filter(a => a.status === "IN PROCESS").length;
+  const total = fa.length, comp = fa.filter(a => a.status === "COMPLETED").length, ip = fa.filter(a => normalizeStatus(a.status) === "IN PROCESS").length;
   const ns = fa.filter(a => a.status === "NOT STARTED").length, drop = fa.filter(a => a.status === "DROPPED").length;
   const over = fa.filter(isOverdue).length, crit = fa.filter(a => a.priority === "CRITICAL" && a.status !== "COMPLETED" && a.status !== "DROPPED").length;
   const pendingConf = fa.filter(a => a.pendingConfirmation).length;
@@ -3985,12 +4183,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
 
   // Build heat map rows: merge dept master + unique section values from actual actions
   // This ensures actions always appear even if section doesn't match any dept name
-  const deptNames = new Set(visibleDepts.map(d => String(d.name ?? "").toLowerCase().trim()));
-  const extraSections = [...new Set(fa.map(a => (a.section || "").trim()).filter(s => s && s !== "" && !deptNames.has(s.toLowerCase())))];
-  const heatmapRows = [
-    ...visibleDepts.map(d => ({ id: d.id, name: d.name, head: d.head, icon: d.icon || "🏭", fromDept: true })),
-    ...extraSections.map(s => ({ id: "sec_" + s, name: s, head: "—", icon: "📋", fromDept: false }))
-  ];
+  const heatmapRows = visibleDepts.map(d => ({ id: d.id, name: d.name, head: d.head, icon: d.icon || "🏭", fromDept: true }));
 
   const allSessions = (meetings || []).flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : []).map(s => ({ ...s, type: m.type, plant: m.plant })));
   const totalMtgMins = allSessions.reduce((s, x) => s + (x.duration || 0), 0);
@@ -4139,7 +4332,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
             ? <Empty icon="🔇" title="No escalations" sub="All within thresholds." />
             : audit.slice(0, 5).map(e => (
               <div key={e.id} style={{ display: "flex", gap: 10, padding: "10px 0", borderBottom: `1px solid ${T.border}`, alignItems: "flex-start" }}>
-                <span style={{ padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, flexShrink: 0, background: e.level === 3 ? T.redL : e.level === 2 ? "#FDEBD0" : T.amberL, color: e.level === 3 ? T.red : e.level === 2 ? "#884E00" : T.amber }}>L{e.level}</span>
+                <span style={{ padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, flexShrink: 0, background: getEscBadgeStyle(e.level).bg, color: getEscBadgeStyle(e.level).color }}>L{e.level}</span>
                 <div style={{ flex: 1 }}><div style={{ fontSize: 12, fontWeight: 500 }}>{e.text.slice(0, 55)}{e.text.length > 55 ? "…" : ""}</div><div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{e.target} · {e.reason}</div></div>
               </div>
             ))
@@ -4200,7 +4393,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
           pending: { title: "Pending Confirmation", icon: "⏳", color: T.amber, rows: fa.filter(a => a.pendingConfirmation) },
           aging: { title: "All Actions — Aging View", icon: "📊", color: T.navy, rows: fa },
           not_started: { title: "Not Started Actions", icon: "⭕", color: T.slate, rows: fa.filter(a => a.status === "NOT STARTED") },
-          in_process: { title: "In Process Actions", icon: "🔄", color: T.amber, rows: fa.filter(a => a.status === "IN PROCESS") },
+          in_process: { title: "In Process Actions", icon: "🔄", color: T.amber, rows: fa.filter(a => normalizeStatus(a.status) === "IN PROCESS") },
           dropped: { title: "Dropped Actions", icon: "🚫", color: T.text2, rows: fa.filter(a => a.status === "DROPPED") },
           escalated: { title: "Escalated Actions", icon: "🚨", color: T.red, rows: fa.filter(a => audit.find(e => e.sn === a.sn)) },
         };
@@ -4227,7 +4420,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
                       <div key={a.id} style={{ background: T.bg, borderRadius: 10, padding: "12px 14px", border: `1.5px solid ${isOverdue(a) ? T.red + "40" : T.border}`, cursor: "pointer", transition: "transform .15s" }} onClick={() => { setDrill(null); setActionDetail(a); }} onMouseEnter={e => e.currentTarget.style.transform = "translateY(-1px)"} onMouseLeave={e => e.currentTarget.style.transform = "none"}>
                         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
                           <span style={{ fontFamily: "monospace", fontSize: 10, color: T.text2 }}>{a.sn}</span>
-                          <div style={{ display: "flex", gap: 5 }}><SBadge s={a.pendingConfirmation && a.status !== "COMPLETED" && a.status !== "DROPPED" ? "PENDING CONFIRM" : a.status} /><PBadge p={a.priority} /></div>
+                          <div style={{ display: "flex", gap: 5 }}><SBadge s={displayStatus(a)} /><PBadge p={a.priority} /></div>
                         </div>
                         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, lineHeight: 1.4 }}>{a.text}</div>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -4312,188 +4505,165 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
           </div>
         );
       })()}
-      {actionDetail && <ActionDetailPanel action={actionDetail} onClose={() => setActionDetail(null)} onUpdate={(id, patch) => { if (setActionsUp) setActionsUp(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); setActionDetail(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} permissions={permissions} />}
+      {actionDetail && <ActionDetailPanel action={actionDetail} onClose={() => setActionDetail(null)} onUpdate={(id, patch) => { if (setActionsUp) setActionsUp(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); setActionDetail(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} />}
     </div>
   );
 }
 
-/* ===================== ESCALATIONS PAGE — Feature 9 ===================== */
-function EscalationsPage({ actions, audit, user, setPage, users, plants, setActions: setActionsUp, permissions }) {
-  const [sel, setSel] = useState(null);
-  const [filterMode, setFilterMode] = useState("mine"); // "mine" | "all"
-  const [actionDetail, setActionDetail] = useState(null);
 
-  // Get subordinates recursively
-  const getSubTree = (name, allUsers, visited = new Set()) => {
-    if (visited.has(name)) return [];
-    visited.add(name);
-    const directs = allUsers.filter(u => u.superior === name);
-    const all = [name, ...directs.map(d => d.name)];
-    directs.forEach(d => { all.push(...getSubTree(d.name, allUsers, visited).filter(n => !all.includes(n))); });
-    return all;
-  };
-  const mySubTree = user ? getSubTree(user.name, users || []) : [];
-
-  // Deduplicate audit: one entry per action SN (keep highest level)
-  const dedupedAudit = Object.values(
-    (audit || []).reduce((acc, e) => {
-      if (!acc[e.sn] || e.level > acc[e.sn].level) acc[e.sn] = e;
-      return acc;
-    }, {})
-  );
-
-  // Filter based on mode: "mine" = subordinates' escalated actions OR escalated up to user
-  const filteredAudit = filterMode === "mine"
-    ? dedupedAudit.filter(e => {
-      const action = actions.find(a => a.sn === e.sn);
-      if (!action) return false;
-      // Include if responsible is in my subtree, or if escalated to my level
-      const isSubordinate = mySubTree.includes(action.responsible) && action.responsible !== user?.name;
-      const escalatedToMe = e.target === user?.role || e.target === "All";
-      return isSubordinate || escalatedToMe;
-    })
-    : dedupedAudit;
-
-  // Build flat list of escalated actions sorted by due date
-  const escalatedActions = filteredAudit.map(e => {
-    const action = actions.find(a => a.sn === e.sn);
-    return { ...e, action };
-  }).filter(e => e.action).sort((a, b) => new Date(a.action.due || 8640000000000000) - new Date(b.action.due || 8640000000000000));
-
-  const uniquePeople = new Set(escalatedActions.map(e => e.action?.responsible)).size;
-  const resolvedToday = filteredAudit.filter(e => {
-    const a = actions.find(x => x.sn === e.sn);
-    return a && a.status === "COMPLETED" && a.closedOn === new Date().toISOString().split("T")[0];
-  }).length;
-
-  return (
-    <div className="fade-in">
-      <PageHeader title="Escalation Alerts" sub="Overdue actions sorted by due date">
-        {/* My / All filter toggle */}
-        <div style={{ display: "flex", background: T.bg, borderRadius: 8, padding: 3, border: `1.5px solid ${T.border}` }}>
-          <button onClick={() => setFilterMode("mine")} style={{ padding: "5px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: filterMode === "mine" ? T.navy : "transparent", color: filterMode === "mine" ? "#fff" : T.text2, transition: "all .18s" }}>My Scope</button>
-          <button onClick={() => setFilterMode("all")} style={{ padding: "5px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: filterMode === "all" ? T.navy : "transparent", color: filterMode === "all" ? "#fff" : T.text2, transition: "all .18s" }}>All</button>
-        </div>
-      </PageHeader>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 24 }}>
-        {[
-          { label: "Total Escalated", value: filteredAudit.length, icon: "🚨", color: T.red },
-          { label: "People Affected", value: uniquePeople, icon: "👤", color: T.amber },
-          { label: "Critical Level", value: filteredAudit.filter(e => e.level >= 3).length, icon: "🔴", color: T.red },
-          { label: "Resolved Today", value: resolvedToday, icon: "✅", color: T.green },
-        ].map((k, i) => (
-          <div key={i} className="card" style={{ padding: 16 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 9, background: k.color + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{k.icon}</div>
-              <div><div style={{ fontFamily: "'Sora',sans-serif", fontSize: 26, fontWeight: 800, color: k.color, lineHeight: 1 }}>{k.value}</div><div style={{ fontSize: 12, color: T.text2, fontWeight: 600 }}>{k.label}</div></div>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <div style={{ padding: "14px 20px", borderBottom: `1.5px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, fontSize: 14, color: T.navy }}>Escalated Actions by Due Date</div>
-          <div style={{ fontSize: 11, color: T.text2 }}>{escalatedActions.length} escalated actions · sorted earliest due first</div>
-        </div>
-        <table>
-          <thead><tr><th>SN</th><th>Action</th><th>Responsible</th><th>Due Date</th><th>Overdue</th><th>Level</th><th>Status</th><th>Priority</th></tr></thead>
-          <tbody>
-            {escalatedActions.length === 0 && <tr><td colSpan={8}><Empty icon="🔇" title="No escalations in scope" sub="All actions within thresholds, or nothing in your reporting scope." /></td></tr>}
-            {escalatedActions.map(e => {
-              const a = e.action;
-              const over = isOverdue(a);
-              const days = daysOver(a);
-              const levelColor = e.level >= 3 ? T.red : e.level === 2 ? "#884E00" : T.amber;
-              const levelBg = e.level >= 3 ? T.redL : e.level === 2 ? "#FDEBD0" : T.amberL;
-              return (
-                <tr key={e.id || e.sn} style={{ cursor: "pointer", transition: "background .15s" }} onClick={() => setActionDetail(a)} onMouseEnter={ev => { Array.from(ev.currentTarget.cells).forEach(c => c.style.background = T.bg); }} onMouseLeave={ev => { Array.from(ev.currentTarget.cells).forEach(c => c.style.background = ""); }}>
-                  <td style={{ fontFamily: "monospace", fontSize: 11, color: T.text2 }}>{a.sn}</td>
-                  <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500, fontSize: 13 }}>{a.text}</td>
-                  <td><div style={{ display: "flex", alignItems: "center", gap: 6 }}><Avatar name={a.responsible} size={24} users={users || []} /><span style={{ fontSize: 12 }}>{a.responsible || "—"}</span></div></td>
-                  <td style={{ fontSize: 12, color: over ? T.red : T.text, fontWeight: over ? 700 : 400 }}>{fmt(a.due)}</td>
-                  <td style={{ fontSize: 12, fontWeight: 700, color: over ? T.red : T.green }}>{over ? `${days}d late` : "On time"}</td>
-                  <td><span style={{ background: levelBg, color: levelColor, padding: "3px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700 }}>L{e.level}</span></td>
-                  <td><SBadge s={a.status} /></td>
-                  <td><PBadge p={a.priority} /></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {actionDetail && <ActionDetailPanel action={actionDetail} onClose={() => setActionDetail(null)} onUpdate={(id, patch) => { if (setActionsUp) setActionsUp(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); setActionDetail(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} permissions={permissions} />}
-    </div>
-  );
-}
 
 /* ===================== MASTER SETUP ===================== */
 /* ===================== ESCALATION MATRIX TAB ===================== */
-function EscMatrixTab({ escMatrix, setEscMatrix, onSave }) {
+function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, users = [], roles = [] }) {
   const PRIORITIES = ["CRITICAL", "WARNING", "NORMAL"];
-  const TARGETS = ["Supervisor", "HOD", "Plant Head", "MD", "All"];
+  const ROLES = roles.map(r => r.name).filter(Boolean);
+  const TARGETS = [...ROLES, "All"];
   const METHODS = ["In-App", "In-App + Email", "Email Only", "SMS + Email"];
   const [editRow, setEditRow] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
+  const [roleFilter, setRoleFilter] = useState("");
+  const [levelFilter, setLevelFilter] = useState("");
   const upDraft = (k, v) => setEditDraft(d => ({ ...d, [k]: v }));
+  
+  const checkCanModify = (rowId) => isAdmin || (canModify && canModify("escMatrix", rowId));
+
   // Normalize priorities field — sheet may store as comma-string
   const normPriorities = (p) => {
     if (Array.isArray(p)) return p;
     if (typeof p === "string" && p.trim()) return p.split(",").map(x => x.trim()).filter(Boolean);
     return ["CRITICAL", "WARNING", "NORMAL"];
   };
-  const startEdit = (tier) => { setEditRow(tier.id); setEditDraft({ ...tier, priorities: normPriorities(tier.priorities) }); };
-  const saveEdit = () => { setEscMatrix(m => m.map(t => t.id === editRow ? editDraft : t)); setEditRow(null); setEditDraft(null); };
+  // Superiors — specific named users (in addition to the generic target role) who
+  // should also be notified / can act on escalations at this tier.
+  const normSuperiors = (s) => {
+    if (Array.isArray(s)) return s;
+    if (typeof s === "string" && s.trim()) return s.split(",").map(x => x.trim()).filter(Boolean);
+    return [];
+  };
+  const startEdit = (tier) => { setEditRow(tier.id); setEditDraft({ ...tier, priorities: normPriorities(tier.priorities), superiors: normSuperiors(tier.superiors) }); };
+  const saveEdit = () => {
+    // Auto-build label from fromRole → targetRole if user didn't customise it
+    const finalDraft = { ...editDraft };
+    if (finalDraft.fromRole && finalDraft.targetRole && !finalDraft.label?.trim()) {
+      finalDraft.label = `Level ${finalDraft.level} — ${finalDraft.fromRole} → ${finalDraft.targetRole}`;
+    }
+    // Keep `target` field in sync with targetRole for backward compat with the sheet
+    finalDraft.target = finalDraft.targetRole || finalDraft.target;
+    setEscMatrix(m => m.map(t => t.id === editRow ? finalDraft : t));
+    setEditRow(null); setEditDraft(null);
+  };
   const cancelEdit = () => { setEditRow(null); setEditDraft(null); };
   const addTier = () => {
     const matrix = escMatrix || DEFAULT_ESC_MATRIX;
     const maxLvl = Math.max(...matrix.map(t => t.level), 0);
-    const newTier = { id: "E" + crypto.randomUUID().slice(0, 8), level: maxLvl + 1, label: `Level ${maxLvl + 1} — New Tier`, overdueDays: maxLvl * 3 + 3, overdueHrs: (maxLvl * 3 + 3) * 24, target: "HOD", notifyMethod: "In-App", priorities: ["CRITICAL"], applicableTo: "All", color: T.slate, active: true, description: "" };
+    const newTier = {
+      id: "E" + crypto.randomUUID().slice(0, 8),
+      level: maxLvl + 1,
+      fromRole: "Supervisor",
+      targetRole: "HOD",
+      label: `Level ${maxLvl + 1} — Supervisor → HOD`,
+      overdueDays: maxLvl * 3 + 3,
+      overdueHrs: (maxLvl * 3 + 3) * 24,
+      target: "HOD",
+      notifyMethod: "In-App + Email",
+      priorities: ["CRITICAL"],
+      applicableTo: "All",
+      color: T.slate,
+      active: true,
+      description: "",
+      superiors: [],
+    };
     setEscMatrix(m => [...m, newTier]);
-    setEditRow(newTier.id); setEditDraft({ ...newTier, priorities: [...newTier.priorities] });
+    setEditRow(newTier.id); setEditDraft({ ...newTier, priorities: [...newTier.priorities], superiors: [] });
   };
   const deleteTier = (id) => setEscMatrix(m => m.filter(t => t.id !== id));
   const toggleActive = (id) => setEscMatrix(m => m.map(t => t.id === id ? { ...t, active: !t.active } : t));
-  const matrix = (escMatrix || DEFAULT_ESC_MATRIX).slice().sort((a, b) => a.level - b.level).map(t => ({ ...t, priorities: normPriorities(t.priorities) }));
+
+  const allMatrix = (escMatrix || DEFAULT_ESC_MATRIX)
+    .map(t => ({ ...t, priorities: normPriorities(t.priorities), superiors: normSuperiors(t.superiors) }));
+
+  // Apply role + level filters
+  const matrix = allMatrix
+    .filter(t => !roleFilter || (t.fromRole || "") === roleFilter)
+    .filter(t => !levelFilter || t.level === Number(levelFilter))
+    .sort((a, b) => a.level - b.level || (a.fromRole || "").localeCompare(b.fromRole || ""));
+
+  // Build per-role escalation chains for the flow diagram (one chain per fromRole)
+  const rolesInUse = [...new Set(allMatrix.filter(t => t.active).map(t => t.fromRole).filter(Boolean))].sort();
+  const chainByRole = {};
+  rolesInUse.forEach(r => {
+    chainByRole[r] = allMatrix
+      .filter(t => t.active && t.fromRole === r)
+      .sort((a, b) => a.level - b.level);
+  });
+
   return (
     <div>
       {/* Header */}
       <div className="card" style={{ padding: "18px 22px", marginBottom: 14, background: `linear-gradient(135deg,${T.navy},#3D378C)`, color: "#fff" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
-            <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 16, marginBottom: 4 }}>🚨 Escalation Matrix</div>
-            <div style={{ fontSize: 12, opacity: .8 }}>Define when and to whom pending actions are escalated based on overdue duration and priority.</div>
+            <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 16, marginBottom: 4 }}>🚨 Role-Wise Escalation Matrix</div>
+            <div style={{ fontSize: 12, opacity: .8 }}>When an action goes overdue, alerts climb the responsible user's role hierarchy: Supervisor → HOD → Plant Head → MD.</div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {onSave && <SectionSaveButton onSave={onSave} />}
-            <button onClick={addTier} style={{ background: "rgba(255,255,255,.2)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ Add Level</button>
+            {(isAdmin || onSave) && <button onClick={addTier} style={{ background: "rgba(255,255,255,.2)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ Add Tier</button>}
           </div>
         </div>
       </div>
 
-      {/* Flow diagram */}
+      {/* Role-wise flow diagram — one chain per fromRole */}
       <div className="card" style={{ padding: "16px 22px", marginBottom: 14, overflow: "hidden" }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: T.text2, marginBottom: 12, textTransform: "uppercase", letterSpacing: .5 }}>Escalation Flow</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 0, overflowX: "auto", paddingBottom: 4 }}>
-          {matrix.filter(t => t.active).map((t, i, arr) => (
-            <div key={t.id} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-              <div style={{ textAlign: "center", minWidth: 110 }}>
-                <div style={{ width: 44, height: 44, borderRadius: "50%", background: t.color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, margin: "0 auto 6px", boxShadow: `0 0 0 3px ${t.color}30` }}>L{t.level}</div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: T.text }}>{t.target}</div>
-                <div style={{ fontSize: 10, color: T.text2, marginTop: 2 }}>{t.overdueDays === 0 ? "On due date" : `+${t.overdueDays}d overdue`}</div>
-              </div>
-              {i < arr.length - 1 && <div style={{ width: 48, height: 2, background: `linear-gradient(90deg,${t.color},${arr[i + 1].color})`, margin: "0 4px", flexShrink: 0, position: "relative" }}>
-                <div style={{ position: "absolute", right: -4, top: -4, color: arr[i + 1].color, fontSize: 14 }}>▶</div>
-              </div>}
+        <div style={{ fontSize: 11, fontWeight: 700, color: T.text2, marginBottom: 12, textTransform: "uppercase", letterSpacing: .5 }}>Escalation Chains by Responsible Role</div>
+        {rolesInUse.length === 0 && <div style={{ fontSize: 12, color: T.text2, fontStyle: "italic" }}>No active tiers defined.</div>}
+        {rolesInUse.map(role => {
+          const chain = chainByRole[role];
+          return (
+            <div key={role} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 4 }}>
+              <div style={{ flexShrink: 0, fontSize: 11, fontWeight: 700, color: T.navy, background: T.bg, padding: "5px 10px", borderRadius: 6, minWidth: 110 }}>{role}</div>
+              <div style={{ fontSize: 14, color: T.text2, flexShrink: 0 }}>→</div>
+              {chain.map((t, i, arr) => (
+                <div key={t.id} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+                  <div style={{ textAlign: "center", minWidth: 90 }}>
+                    <div style={{ width: 32, height: 32, borderRadius: "50%", background: t.color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 11, margin: "0 auto 4px", boxShadow: `0 0 0 2px ${t.color}30` }}>L{t.level}</div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: T.text }}>{t.targetRole || t.target}</div>
+                    <div style={{ fontSize: 9, color: T.text2, marginTop: 1 }}>+{t.overdueDays}d</div>
+                  </div>
+                  {i < arr.length - 1 && <div style={{ fontSize: 12, color: T.text2, margin: "0 4px", flexShrink: 0 }}>→</div>}
+                </div>
+              ))}
             </div>
-          ))}
-          {matrix.filter(t => t.active).length === 0 && <div style={{ fontSize: 12, color: T.text2, fontStyle: "italic" }}>No active tiers</div>}
-        </div>
+          );
+        })}
+      </div>
+
+      {/* Filters */}
+      <div className="card" style={{ padding: 12, marginBottom: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: T.text2, textTransform: "uppercase", letterSpacing: .4 }}>Filter:</span>
+        <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={{ width: 160, padding: "6px 10px" }}>
+          <option value="">All Roles</option>
+          {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <select value={levelFilter} onChange={e => setLevelFilter(e.target.value)} style={{ width: 130, padding: "6px 10px" }}>
+          <option value="">All Levels</option>
+          <option value="1">Level 1</option>
+          <option value="2">Level 2</option>
+          <option value="3">Level 3</option>
+          <option value="4">Level 4</option>
+          <option value="5">Level 5+</option>
+        </select>
+        {(roleFilter || levelFilter) && (
+          <button className="btn btn-ghost btn-sm" onClick={() => { setRoleFilter(""); setLevelFilter(""); }} style={{ padding: "6px 10px" }}>Clear</button>
+        )}
+        <span style={{ fontSize: 11, color: T.text2, marginLeft: "auto" }}>Showing {matrix.length} of {allMatrix.length} tiers</span>
       </div>
 
       {/* Tier cards */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {matrix.map(tier => {
           const isEditing = editRow === tier.id;
+          const editable = checkCanModify(tier.id);
           return (
             <div key={tier.id} className="card" style={{ padding: 0, overflow: "hidden", opacity: tier.active ? 1 : .55, border: `1.5px solid ${isEditing ? tier.color : T.border}`, transition: "all .2s" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", borderBottom: isEditing ? `1px solid ${T.border}` : "none", background: isEditing ? T.bg : "transparent" }}>
@@ -4503,40 +4673,69 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave }) {
                   <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{tier.description || "No description"}</div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <button onClick={() => toggleActive(tier.id)} title={tier.active ? "Disable" : "Enable"} style={{ background: tier.active ? T.green : "#e2e8f0", border: "none", borderRadius: 12, width: 42, height: 22, cursor: "pointer", transition: "all .2s", position: "relative", flexShrink: 0 }}>
-                    <span style={{ position: "absolute", top: 2, left: tier.active ? 22 : 2, width: 18, height: 18, borderRadius: "50%", background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,.3)", transition: "all .2s", display: "block" }} />
-                  </button>
-                  <span style={{ fontSize: 10, color: tier.active ? T.green : T.text2, fontWeight: 600, minWidth: 36 }}>{tier.active ? "ON" : "OFF"}</span>
-                  {!isEditing && <button onClick={() => startEdit(tier)} style={{ fontSize: 11, background: T.navy, color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontWeight: 600 }}>Edit</button>}
-                  {!isEditing && <button onClick={() => deleteTier(tier.id)} style={{ fontSize: 11, background: "transparent", color: T.red, border: `1px solid ${T.red}`, borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontWeight: 600 }}>Delete</button>}
+                  {editable && (
+                    <button onClick={() => toggleActive(tier.id)} title={tier.active ? "Disable" : "Enable"} style={{ background: tier.active ? T.green : "#e2e8f0", border: "none", borderRadius: 12, width: 42, height: 22, cursor: "pointer", transition: "all .2s", position: "relative", flexShrink: 0 }}>
+                      <span style={{ position: "absolute", top: 2, left: tier.active ? 22 : 2, width: 18, height: 18, borderRadius: "50%", background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,.3)", transition: "all .2s", display: "block" }} />
+                    </button>
+                  )}
+                  {editable && <span style={{ fontSize: 10, color: tier.active ? T.green : T.text2, fontWeight: 600, minWidth: 36 }}>{tier.active ? "ON" : "OFF"}</span>}
+                  {!isEditing && editable && <button onClick={() => startEdit(tier)} style={{ fontSize: 11, background: T.navy, color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontWeight: 600 }}>Edit</button>}
+                  {!isEditing && editable && <button onClick={() => deleteTier(tier.id)} style={{ fontSize: 11, background: "transparent", color: T.red, border: `1px solid ${T.red}`, borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontWeight: 600 }}>Delete</button>}
                   {isEditing && <button onClick={saveEdit} style={{ fontSize: 11, background: T.green, color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontWeight: 600 }}>Save</button>}
                   {isEditing && <button onClick={cancelEdit} style={{ fontSize: 11, background: "transparent", color: T.text2, border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontWeight: 600 }}>Cancel</button>}
                 </div>
               </div>
               {!isEditing && (
                 <div style={{ display: "flex", gap: 10, padding: "10px 18px", flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontSize: 11, background: T.bg, borderRadius: 6, padding: "4px 10px", color: T.text }}><b>From Role:</b> {tier.fromRole || "—"}</span>
+                  <span style={{ fontSize: 14, color: T.text2 }}>→</span>
+                  <span style={{ fontSize: 11, background: T.bg, borderRadius: 6, padding: "4px 10px", color: T.text }}><b>Escalate To:</b> {tier.targetRole || tier.target}</span>
                   <span style={{ fontSize: 11, background: T.bg, borderRadius: 6, padding: "4px 10px", color: T.text }}><b>Trigger:</b> {tier.overdueDays === 0 ? "On due date" : `${tier.overdueDays} day${tier.overdueDays !== 1 ? "s" : ""} overdue`}</span>
-                  <span style={{ fontSize: 11, background: T.bg, borderRadius: 6, padding: "4px 10px", color: T.text }}><b>Escalate to:</b> {tier.target}</span>
                   <span style={{ fontSize: 11, background: T.bg, borderRadius: 6, padding: "4px 10px", color: T.text }}><b>Notify via:</b> {tier.notifyMethod}</span>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {tier.priorities.map(p => <span key={p} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 10, fontWeight: 700, background: p === "CRITICAL" ? T.redL : p === "WARNING" ? T.amberL : "#E8F4F8", color: p === "CRITICAL" ? T.red : p === "WARNING" ? T.amber : "#1A6B8A" }}>{p}</span>)}
                   </div>
+                  {tier.superiors.length > 0 && (
+                    <span style={{ fontSize: 11, background: T.navy + "10", borderRadius: 6, padding: "4px 10px", color: T.navy }}><b>+ Superiors:</b> {tier.superiors.join(", ")}</span>
+                  )}
                 </div>
               )}
               {isEditing && editDraft && (
                 <div style={{ padding: "16px 18px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                  <div style={{ gridColumn: "1/-1" }}><Lbl t="Tier Label" req /><input value={editDraft.label} onChange={e => upDraft("label", e.target.value)} /></div>
+                  <div style={{ gridColumn: "1/-1" }}><Lbl t="Tier Label (auto-built if left blank)" /><input value={editDraft.label || ""} onChange={e => upDraft("label", e.target.value)} placeholder={`Level ${editDraft.level} — ${editDraft.fromRole} → ${editDraft.targetRole}`} /></div>
                   <div style={{ gridColumn: "1/-1" }}><Lbl t="Description" /><input value={editDraft.description || ""} onChange={e => upDraft("description", e.target.value)} placeholder="Brief explanation of this escalation level" /></div>
+                  <div>
+                    <Lbl t="From Role (responsible)" req />
+                    <select value={editDraft.fromRole || ""} onChange={e => {
+                      const fr = e.target.value;
+                      // Auto-suggest targetRole = next role up the hierarchy
+                      const above = ROLES_ABOVE(fr);
+                      const suggestedTarget = above[0] || "MD";
+                      upDraft("fromRole", fr);
+                      if (!editDraft.targetRole || editDraft.targetRole === "HOD") {
+                        upDraft("targetRole", suggestedTarget);
+                        upDraft("target", suggestedTarget);
+                      }
+                    }}>
+                      <option value="">— select —</option>
+                      {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <Lbl t="Escalate To Role" req />
+                    <select value={editDraft.targetRole || ""} onChange={e => { upDraft("targetRole", e.target.value); upDraft("target", e.target.value); }}>
+                      <option value="">— select —</option>
+                      {TARGETS.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <Lbl t="Level" req />
+                    <input type="number" min={1} max={10} value={editDraft.level} onChange={e => upDraft("level", +e.target.value)} />
+                  </div>
                   <div>
                     <Lbl t="Overdue Days (trigger)" req />
                     <input type="number" min={0} max={365} value={editDraft.overdueDays} onChange={e => { const d = +e.target.value; upDraft("overdueDays", d); upDraft("overdueHrs", d * 24); }} />
                     <div style={{ fontSize: 10, color: T.text2, marginTop: 3 }}>0 = triggers on due date</div>
-                  </div>
-                  <div>
-                    <Lbl t="Escalate To" req />
-                    <select value={editDraft.target} onChange={e => upDraft("target", e.target.value)}>
-                      {TARGETS.map(t => <option key={t}>{t}</option>)}
-                    </select>
                   </div>
                   <div>
                     <Lbl t="Notification Method" />
@@ -4547,7 +4746,7 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave }) {
                   <div>
                     <Lbl t="Badge Color" />
                     <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-                      {["#E69903", "#E67E22", "#C0392B", "#7B241C", "#1E8449", "#272262", "#7F8C8D"].map(c => (
+                      {["#E69903", "#E67E22", "#D35400", "#C0392B", "#7B241C", "#1E8449", "#272262", "#7F8C8D"].map(c => (
                         <button key={c} onClick={() => upDraft("color", c)} style={{ width: 24, height: 24, borderRadius: "50%", background: c, border: editDraft.color === c ? "3px solid #000" : "3px solid transparent", cursor: "pointer", padding: 0, outline: "none" }} />
                       ))}
                     </div>
@@ -4563,6 +4762,28 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave }) {
                       ))}
                     </div>
                   </div>
+                  <div style={{ gridColumn: "1/-1" }}>
+                    <Lbl t="Superiors (specific people to also notify/action at this level)" />
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, border: `1px solid ${T.border}`, borderRadius: 8, padding: 10, maxHeight: 140, overflowY: "auto" }}>
+                      {users.length === 0 && <span style={{ fontSize: 11, color: T.text2, fontStyle: "italic" }}>No users available.</span>}
+                      {users.map(u => {
+                        const checked = (editDraft.superiors || []).includes(u.name);
+                        return (
+                          <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 12, background: checked ? T.navy + "12" : T.bg, border: `1px solid ${checked ? T.navy : T.border}`, borderRadius: 20, padding: "3px 10px 3px 6px" }}>
+                            <input type="checkbox" checked={checked} onChange={e => {
+                              const arr = e.target.checked
+                                ? [...(editDraft.superiors || []), u.name]
+                                : (editDraft.superiors || []).filter(x => x !== u.name);
+                              upDraft("superiors", arr);
+                            }} style={{ width: 13, cursor: "pointer" }} />
+                            <span style={{ color: checked ? T.navy : T.text, fontWeight: checked ? 700 : 500 }}>{u.name}</span>
+                            <span style={{ color: T.text2, fontSize: 10 }}>({u.role})</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div style={{ fontSize: 10, color: T.text2, marginTop: 3 }}>These people are notified alongside the "Escalate To Role" and can also close the escalated action.</div>
+                  </div>
                   <div style={{ gridColumn: "1/-1", display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: T.amberL, borderRadius: 8 }}>
                     <span style={{ fontSize: 13 }}>⚠</span>
                     <span style={{ fontSize: 12, color: "#7A4500" }}>Changes take effect on the next escalation run. Active actions already escalated won't be re-triggered.</span>
@@ -4572,7 +4793,7 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave }) {
             </div>
           );
         })}
-        {matrix.length === 0 && <div className="card" style={{ padding: 32, textAlign: "center", color: T.text2 }}>No escalation tiers defined. Click <b>+ Add Level</b> to create one.</div>}
+        {matrix.length === 0 && <div className="card" style={{ padding: 32, textAlign: "center", color: T.text2 }}>No escalation tiers match the current filter. Click <b>+ Add Tier</b> to create one.</div>}
       </div>
     </div>
   );
@@ -4599,23 +4820,374 @@ function SectionSaveButton({ label = "💾 Save to Sheet", onSave }) {
   );
 }
 
-function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permissions, setPermissions, escMatrix, setEscMatrix, mtgPresets, setMtgPresets, machines, setMachines, refreshMaster, lastWriteRef }) {
+/* ── Team Page (Master Setup) ──────────────────────────────────────────────
+   Shows every team member with their plant/dept/role/superior and how many
+   of their actions are currently escalated. A person who qualifies as a
+   "superior" for a given escalated action (Admin, the team member's direct
+   superior, someone named in the tier's Superiors list, or someone whose
+   role matches the tier's "Escalate To" role) can close it right here. */
+function TeamPage({ users, actions, escMatrix, plants, depts, user, isAdmin, setActions }) {
+  const [search, setSearch] = useState("");
+  const [plantFilter, setPlantFilter] = useState("");
+  const [expanded, setExpanded] = useState(null);
+
+  const escByUser = {};
+  (actions || []).forEach(a => {
+    const state = resolveEscalationState(a, escMatrix, users);
+    if (!state) return;
+    const key = a.responsible || "—Unassigned";
+    if (!escByUser[key]) escByUser[key] = [];
+    escByUser[key].push({ action: a, ...state });
+  });
+
+  const canCloseEscalation = (member, escState) => {
+    if (!user) return false;
+    if (isAdmin) return true;
+    if (member?.superior && member.superior === user.name) return true;
+    if ((escState?.tier?.superiors || []).includes(user.name)) return true;
+    if (escState?.tier?.targetRole && escState.tier.targetRole === user.role) return true;
+    return false;
+  };
+
+  const closeEscalatedAction = (actionId, status) => {
+    setActions(p => p.map(a => a.id === actionId ? { ...a, status, closedOn: status === "COMPLETED" ? todayStr() : null, closedBy: user?.name || "", pendingConfirmation: false } : a));
+  };
+
+  const filteredUsers = (users || [])
+    .filter(u => !plantFilter || u.plant === plantFilter || u.plant === "All")
+    .filter(u => !search || u.name.toLowerCase().includes(search.toLowerCase()) || (u.role || "").toLowerCase().includes(search.toLowerCase()) || (u.dept || "").toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => (escByUser[b.name]?.length || 0) - (escByUser[a.name]?.length || 0) || a.name.localeCompare(b.name));
+
+  const totalEscalated = Object.values(escByUser).reduce((sum, arr) => sum + arr.length, 0);
+  const membersWithEsc = Object.keys(escByUser).filter(k => k !== "—Unassigned" && escByUser[k].length > 0).length;
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 14, marginBottom: 18 }}>
+        <KPICard icon="👥" value={(users || []).length} label="Team Members" sub="Registered across all plants" color={T.navy} />
+        <KPICard icon="🚨" value={totalEscalated} label="Escalated Actions" sub="Currently overdue past a tier threshold" color={T.red} alert={totalEscalated > 0} />
+        <KPICard icon="⚠️" value={membersWithEsc} label="Members With Escalations" sub="Team mates who need attention" color={T.amber} />
+      </div>
+
+      <div className="card" style={{ padding: 12, marginBottom: 16, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <input type="text" placeholder="Search by name, role, dept…" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 200, padding: "8px 12px" }} />
+        <select value={plantFilter} onChange={e => setPlantFilter(e.target.value)} style={{ width: 170 }}>
+          <option value="">All Plants</option>
+          {(plants || []).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+        </select>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {filteredUsers.map(m => {
+          const mine = escByUser[m.name] || [];
+          const isOpen = expanded === m.id;
+          return (
+            <div key={m.id} className="card" style={{ padding: 0, overflow: "hidden", border: mine.length > 0 ? `1.5px solid ${T.red}40` : "" }}>
+              <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, cursor: mine.length > 0 ? "pointer" : "default" }} onClick={() => mine.length > 0 && setExpanded(isOpen ? null : m.id)}>
+                <Avatar name={m.name} size={36} users={users} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: T.text }}>{m.name}</div>
+                  <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>
+                    {m.role} · {m.plant}{m.dept ? " · " + m.dept : ""}{m.superior ? " · Reports to " + m.superior : ""}
+                  </div>
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 20, background: mine.length > 0 ? T.redL : T.bg, color: mine.length > 0 ? T.red : T.text2 }}>
+                  {mine.length} escalated
+                </span>
+                {mine.length > 0 && <span style={{ fontSize: 12, color: T.text2 }}>{isOpen ? "▲" : "▼"}</span>}
+              </div>
+              {isOpen && mine.length > 0 && (
+                <div style={{ borderTop: `1px solid ${T.border}`, background: T.bg }}>
+                  {mine.sort((a, b) => b.tier.level - a.tier.level).map(item => {
+                    const a = item.action, canClose = canCloseEscalation(m, item);
+                    return (
+                      <div key={a.id} style={{ padding: "12px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                        <div style={{ flex: 1, minWidth: 220 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                            <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 11, background: "#fff", padding: "2px 6px", borderRadius: 4 }}>{a.sn}</span>
+                            <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, fontWeight: 700, background: item.tier.color + "20", color: item.tier.color }}>Level {item.tier.level} → {item.tier.targetRole || item.tier.target}</span>
+                            <span style={{ fontSize: 11, color: T.red, fontWeight: 600 }}>⚠️ {item.daysOverdue}d overdue</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: T.text }}>{a.text}</div>
+                          {item.tier.superiors?.length > 0 && <div style={{ fontSize: 10, color: T.text2, marginTop: 2 }}>Named superiors: {item.tier.superiors.join(", ")}</div>}
+                        </div>
+                        {canClose ? (
+                          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                            <button className="btn btn-green btn-sm" onClick={() => closeEscalatedAction(a.id, "COMPLETED")}>✓ Resolve</button>
+                            <button className="btn btn-ghost btn-sm" style={{ color: T.red }} onClick={() => closeEscalatedAction(a.id, "DROPPED")}>Drop</button>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 11, color: T.text2, fontStyle: "italic", flexShrink: 0 }}>Only {item.tier.targetRole || item.tier.target}, {m.superior || "their superior"}, or a named superior can close this</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {filteredUsers.length === 0 && <Empty icon="👥" title="No team members" sub="Add users under the Users tab to see them here." />}
+      </div>
+    </div>
+  );
+}
+
+/* ===================== ESCALATIONS PAGE ===================== */
+function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants, depts, user }) {
+  const [activeTab, setActiveTab] = useState("active");
+  const [search, setSearch] = useState("");
+  const [plantFilter, setPlantFilter] = useState("");
+  const [deptFilter, setDeptFilter] = useState("");
+  const [tierFilter, setTierFilter] = useState("");
+  const [selectedAction, setSelectedAction] = useState(null);
+  const [showOnlyMine, setShowOnlyMine] = useState(false);
+
+  const getActionEscalationState = (action, matrix) => resolveEscalationState(action, matrix, users);
+
+  const activeEscalations = actions.map(a => {
+    const escState = getActionEscalationState(a, escMatrix);
+    return escState ? { action: a, ...escState } : null;
+  }).filter(Boolean);
+
+  const filteredActive = activeEscalations.filter(item => {
+    const a = item.action;
+    const matchesSearch = a.sn.toLowerCase().includes(search.toLowerCase()) ||
+      a.text.toLowerCase().includes(search.toLowerCase()) ||
+      (a.responsible || "").toLowerCase().includes(search.toLowerCase());
+    const matchesPlant = !plantFilter || a.plant === plantFilter;
+    const matchesDept = !deptFilter || a.dept === deptFilter;
+    const matchesTier = !tierFilter || String(item.tier.level) === tierFilter;
+    const matchesMine = !showOnlyMine || a.responsible === user?.name;
+    return matchesSearch && matchesPlant && matchesDept && matchesTier && matchesMine;
+  });
+
+  const filteredHistory = audit.filter(log => {
+    const matchesSearch = log.sn.toLowerCase().includes(search.toLowerCase()) ||
+      log.text.toLowerCase().includes(search.toLowerCase()) ||
+      (log.reason || "").toLowerCase().includes(search.toLowerCase());
+    const matchesTier = !tierFilter || String(log.level) === tierFilter;
+    const action = actions.find(a => a.sn === log.sn);
+    const matchesMine = !showOnlyMine || (action && action.responsible === user?.name);
+    return matchesSearch && matchesTier && matchesMine;
+  });
+
+  const highestLevel = activeEscalations.length > 0
+    ? Math.max(...activeEscalations.map(e => e.tier.level))
+    : 0;
+
+  return (
+    <div className="fade-in" style={{ padding: "0 24px 24px", overflowY: "auto", flex: 1, height: "100%" }}>
+      <PageHeader title="Escalation Control Center" sub="Monitor overdue actions, review escalation alerts, and resolve blockers." />
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 16, marginBottom: 24 }}>
+        <KPICard icon="🚨" value={activeEscalations.length} label="Active Escalations" sub="Actions currently unresolved beyond due dates" color={T.red} alert={activeEscalations.length > 0} />
+        <KPICard icon="⚠️" value={highestLevel > 0 ? `Level ${highestLevel}` : "None"} label="Highest Active Level" sub={highestLevel > 0 ? "Requires management attention" : "No active escalations"} color={highestLevel > 0 ? T.amber : T.green} />
+        <KPICard icon="📋" value={audit.length} label="Total Escalation Triggers" sub="Logged history of escalation events" color={T.slate} />
+      </div>
+
+      <div className="card" style={{ padding: 16, marginBottom: 20, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", background: "#fff" }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <input type="text" placeholder="Search by SN, text, owner, reason..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", padding: "8px 12px" }} />
+        </div>
+        <div style={{ width: 150 }}>
+          <select value={plantFilter} onChange={e => setPlantFilter(e.target.value)}>
+            <option value="">All Plants</option>
+            {plants.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+          </select>
+        </div>
+        <div style={{ width: 160 }}>
+          <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)}>
+            <option value="">All Departments</option>
+            {depts.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
+          </select>
+        </div>
+        <div style={{ width: 140 }}>
+          <select value={tierFilter} onChange={e => setTierFilter(e.target.value)}>
+            <option value="">All Levels</option>
+            {[1, 2, 3, 4].map(l => <option key={l} value={String(l)}>Level {l}</option>)}
+          </select>
+        </div>
+        {(search || plantFilter || deptFilter || tierFilter || showOnlyMine) && (
+          <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(""); setPlantFilter(""); setDeptFilter(""); setTierFilter(""); setShowOnlyMine(false); }} style={{ padding: "8px 12px" }}>Reset</button>
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
+          <button onClick={() => setShowOnlyMine(false)}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 20,
+              border: "none",
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 600,
+              background: !showOnlyMine ? T.navy : T.bg,
+              color: !showOnlyMine ? "#fff" : T.text2,
+              transition: "all .2s"
+            }}>
+            Total ({activeEscalations.length})
+          </button>
+          <button onClick={() => setShowOnlyMine(true)}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 20,
+              border: "none",
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 600,
+              background: showOnlyMine ? T.navy : T.bg,
+              color: showOnlyMine ? "#fff" : T.text2,
+              transition: "all .2s"
+            }}>
+            My Escalations ({activeEscalations.filter(e => e.action.responsible === user?.name).length})
+          </button>
+        </div>
+      </div>
+
+      <div style={{ borderBottom: `2px solid ${T.border}`, marginBottom: 20, display: "flex", gap: 0 }}>
+        <button onClick={() => setActiveTab("active")} style={{ padding: "10px 18px", border: "none", cursor: "pointer", background: "transparent", fontSize: 13, fontWeight: activeTab === "active" ? 700 : 400, color: activeTab === "active" ? T.navy : T.text2, borderBottom: activeTab === "active" ? `3px solid ${T.navy}` : "3px solid transparent", transition: "all .2s" }}>
+          🚨 Active Escalations ({filteredActive.length})
+        </button>
+        <button onClick={() => setActiveTab("history")} style={{ padding: "10px 18px", border: "none", cursor: "pointer", background: "transparent", fontSize: 13, fontWeight: activeTab === "history" ? 700 : 400, color: activeTab === "history" ? T.navy : T.text2, borderBottom: activeTab === "history" ? `3px solid ${T.navy}` : "3px solid transparent", transition: "all .2s" }}>
+          📜 Alert Log History ({filteredHistory.length})
+        </button>
+      </div>
+
+      {activeTab === "active" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {filteredActive.map(item => {
+            const a = item.action;
+            const tColor = item.tier.color || T.red;
+            return (
+              <div key={a.id} className="card card-hover" onClick={() => setSelectedAction(a)} style={{ padding: "16px 20px", display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 16, borderLeft: `5px solid ${tColor}` }}>
+                <div style={{ flex: 1, minWidth: 260 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 12, background: T.bg, padding: "2px 6px", borderRadius: 4, color: T.text }}>{a.sn}</span>
+                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, fontWeight: 700, background: tColor + "20", color: tColor }}>Level {item.tier.level} — {item.tier.label}</span>
+                    <span style={{ fontSize: 11, color: T.red, fontWeight: 600 }}>⚠️ {item.daysOverdue}d Overdue</span>
+                  </div>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: T.text, marginBottom: 8 }}>{a.text}</div>
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11, color: T.text2 }}>
+                    <span>🏭 <b>Plant:</b> {a.plant}</span>
+                    <span>🗂 <b>Dept:</b> {a.dept || "—"}</span>
+                    {a.machine && <span>⚙ <b>Machine:</b> {a.machine}</span>}
+                    <span>📅 <b>Due Date:</b> {fmt(a.due)}</span>
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 11, color: T.text2, marginBottom: 2 }}>Responsible</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <Avatar name={a.responsible} size={24} users={users} />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{a.responsible}</span>
+                    </div>
+                  </div>
+                  <div style={{ borderLeft: `1px solid ${T.border}`, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={{ fontSize: 11, color: T.text2 }}>Escalation Path</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: T.navy }}>👥 {item.tier.target}</div>
+                    <div style={{ fontSize: 10, background: T.bg, padding: "2px 6px", borderRadius: 4, color: T.text2 }}>📢 {item.tier.notifyMethod}</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {filteredActive.length === 0 && (
+            <Empty icon="☀️" title="All Clear" sub="No active escalations. All tasks are within their due thresholds." />
+          )}
+        </div>
+      )}
+
+      {activeTab === "history" && (
+        <div className="card" style={{ padding: "20px 24px", background: "#fff" }}>
+          {filteredHistory.map((log, i) => (
+            <div key={log.id} style={{ display: "flex", gap: 16, position: "relative", paddingBottom: i < filteredHistory.length - 1 ? 24 : 0 }}>
+              {i < filteredHistory.length - 1 && (
+                <div style={{ position: "absolute", left: 15, top: 32, bottom: 0, width: 2, background: T.border }} />
+              )}
+              <div style={{ width: 32, height: 32, borderRadius: "50%", background: getEscBadgeStyle(log.level).bg, color: getEscBadgeStyle(log.level).color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, zIndex: 2, flexShrink: 0 }}>
+                L{log.level}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: T.text }}>Escalation Alert for <span style={{ fontFamily: "monospace", color: T.navy }}>{log.sn}</span></span>
+                  <span style={{ fontSize: 11, color: T.text2 }}>{new Date(log.ts).toLocaleString("en-IN")}</span>
+                </div>
+                <div style={{ fontSize: 13, color: T.text, marginBottom: 6, lineHeight: 1.4 }}>{log.text}</div>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11, color: T.text2 }}>
+                  <span>📢 <b>Target Notified:</b> {log.target}</span>
+                  <span>🔍 <b>Reason:</b> {log.reason}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+          {filteredHistory.length === 0 && (
+            <Empty icon="📋" title="Log Empty" sub="No escalation history logged yet." />
+          )}
+        </div>
+      )}
+
+      {selectedAction && (
+        <ActionDetailPanel
+          action={selectedAction}
+          onClose={() => setSelectedAction(null)}
+          onUpdate={(id, patch) => {
+            setActions(p => p.map(a => a.id === id ? { ...a, ...patch } : a));
+            setSelectedAction(p => p ? { ...p, ...patch } : p);
+          }}
+          user={user}
+          users={users}
+          allUsers={users}
+          plants={plants}
+        />
+      )}
+    </div>
+  );
+}
+
+function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers, escMatrix, setEscMatrix, mtgPresets, setMtgPresets, machines, setMachines, refreshMaster, lastWriteRef, roles = [], setRoles, actions, setActions }) {
+  const isAdmin = user?.role === "Admin";
   const [tab, setTab] = useState("users");
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
   const [mcSaveStatus, setMcSaveStatus] = useState(null);
   const COLORS = ["#272262", "#5B56A6", "#E69903", "#7C80B0", "#1E8449", "#C0392B"];
+  
+  const initialIds = useRef(null);
+  if (!initialIds.current && users.length > 0) {
+    initialIds.current = {
+      users: new Set(users.map(x => x.id)),
+      plants: new Set(plants.map(x => x.id)),
+      depts: new Set(depts.map(x => x.id)),
+      machines: new Set((machines || []).map(x => x.id)),
+      roles: new Set(roles.map(x => x.id)),
+      escMatrix: new Set((escMatrix || []).map(x => x.id)),
+    };
+  }
+
+  const canModify = (tabKey, rowId) => {
+    if (isAdmin) return true;
+    if (!initialIds.current || !initialIds.current[tabKey]) return false;
+    return !initialIds.current[tabKey].has(rowId);
+  };
+
   const openAdd = t => { setModal({ type: t, mode: "add" }); setForm({}); setMcSaveStatus(null); };
   const openEdit = (t, d) => { setModal({ type: t, mode: "edit" }); setForm({ ...d }); setMcSaveStatus(null); };
   const close = () => { setModal(null); setForm({}); setMcSaveStatus(null); };
   useEscClose(close);
   const saveUser = () => {
     if (!form.name || !form.role || !form.plant) return;
+    if (!isGuestRole(form.role) && (!form.username || !form.password)) return;
     const { _showPw, ...cleanForm } = form;
-    const u = { ...cleanForm, id: cleanForm.id || "U" + String(users.length + 1).padStart(2, "0"), initials: cleanForm.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(), color: cleanForm.color || COLORS[users.length % 6] };
+    const u = {
+      ...cleanForm,
+      username: isGuestRole(form.role) ? (form.username || "guest") : form.username,
+      password: isGuestRole(form.role) ? (form.password || "") : form.password,
+      id: cleanForm.id || "U" + String(users.length + 1).padStart(2, "0"),
+      initials: cleanForm.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
+      color: cleanForm.color || COLORS[users.length % 6]
+    };
     if (modal.mode === "edit") setUsers(p => p.map(x => x.id === u.id ? u : x)); else setUsers(p => [...p, u]); close();
   };
-  const TABS = [["users", "👥 Users"], ["plants", "🏭 Plants"], ["depts", "🗂 Depts"], ["machines", "⚙ Machines"], ["org", "🌳 Org"], ["escmatrix", "🚨 Escalation"], ["presets", "🎙 Presets"]];
+  const TABS = [["users", "👥 Users"], ["plants", "🏭 Plants"], ["depts", "🗂 Depts"], ["machines", "⚙ Machines"], ["roles", "🎭 Roles"], ["org", "🌳 Org"], ["team", "🧑‍🤝‍🧑 Team"], ["escmatrix", "🚨 Escalation"], ["presets", "🎙 Presets"]];
 
   // Save helpers — write to Sheet; no re-fetch since CSV cache lags up to 90s
   const saveToSheet = async (tab, rows) => {
@@ -4626,23 +5198,19 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
     const result = await sheetPost("replace_all", tab, { rows: cleaned });
     if (result && result.ok === false) throw new Error(result.error || "Sheet write failed");
     if (lastWriteRef?.current) lastWriteRef.current[tab] = Date.now();
-  };
 
-  // Permissions-specific save — normalises shape before sending
-  const savePermissions = async () => {
-    const rows = Object.values(permissions).map(row => cleanRow({
-      id: String(row.id ?? ""),
-      name: String(row.name ?? ""),
-      canEditMeetings: row.canEditMeetings ?? false,
-      canCreateProjects: row.canCreateProjects ?? false,
-      canEditActions: row.canEditActions ?? false,
-      canViewDashboard: row.canViewDashboard ?? true,
-      canManageEscalations: row.canManageEscalations ?? false,
-    })).filter(r => r.id !== "");
-    if (!SHEET_ENABLED) throw new Error("Sheet not connected");
-    if (rows.length === 0) throw new Error("No permissions to save");
-    await sheetPost("replace_all", "Permissions", { rows });
-    lastWriteRef?.current && (lastWriteRef.current["Permissions"] = Date.now());
+    const keyMap = {
+      "Users": "users",
+      "Plants": "plants",
+      "Departments": "depts",
+      "Machines": "machines",
+      "Roles": "roles",
+      "EscalationMatrix": "escMatrix"
+    };
+    const key = keyMap[tab];
+    if (key && initialIds.current && initialIds.current[key]) {
+      rows.forEach(r => { if (r.id) initialIds.current[key].add(r.id); });
+    }
   };
 
   function OrgNode({ name, allUsers, depth }) {
@@ -4724,7 +5292,7 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{u.name}</div>
                   <div style={{ fontSize: 11, color: T.text2 }}>{u.role} · {u.plant}</div>
                 </div>
-                <button className="btn btn-ghost btn-sm" onClick={() => openEdit("users", u)}>Edit</button>
+                {canModify("users", u.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("users", u)}>Edit</button>}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, fontSize: 12 }}>
                 <div><span style={{ color: T.text2 }}>Dept: </span>{u.dept || "—"}</div>
@@ -4732,9 +5300,9 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
                 <div><span style={{ color: T.text2 }}>Phone: </span>{u.phone || "—"}</div>
                 <div><span style={{ color: T.text2 }}>Password: </span>{u.password ? "••••••" : <span style={{ color: T.amber, fontWeight: 600 }}>Not set</span>}</div>
               </div>
-              <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
+              {canModify("users", u.id) && <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
                 <button className="btn btn-ghost btn-sm" style={{ color: T.red }} onClick={() => { if (window.confirm(`Remove "${u.name}"?`)) setUsers(p => p.filter(x => x.id !== u.id)); }}>✕ Remove</button>
-              </div>
+              </div>}
             </div>
           ))}
           {users.length === 0 && <Empty icon="👥" title="No users" sub="Click + Add to create the first user." />}
@@ -4752,8 +5320,8 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
                 <td style={{ fontSize: 12, color: T.text2 }}>{u.phone || "—"}</td>
                 <td style={{ fontSize: 12, color: T.text2 }}>{u.password ? "••••••••" : <span style={{ color: T.amber, fontWeight: 600 }}>Not set</span>}</td>
                 <td style={{ whiteSpace: "nowrap" }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => openEdit("users", u)}>Edit</button>
-                  <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove "${u.name}" from the system?`)) setUsers(p => p.filter(x => x.id !== u.id)); }}>✕</button>
+                  {canModify("users", u.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("users", u)}>Edit</button>}
+                  {canModify("users", u.id) && <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove "${u.name}" from the system?`)) setUsers(p => p.filter(x => x.id !== u.id)); }}>✕</button>}
                 </td>
               </tr>)}</tbody>
             </table>
@@ -4766,7 +5334,7 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
         <SectionHeader title="Plants" sub="Manufacturing plant locations" onAdd={() => openAdd("plants")} onSave={() => saveToSheet("Plants", plants)} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 14 }}>
           {plants.map(p => <div key={p.id} className="card" style={{ padding: 18 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>🏭</span><button className="btn btn-ghost btn-sm" onClick={() => openEdit("plants", p)}>Edit</button></div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>🏭</span>{canModify("plants", p.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("plants", p)}>Edit</button>}</div>
             <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 14, color: T.navy }}>{p.name}</div>
             <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>{p.location}</div>
             <HR /><div style={{ fontSize: 12 }}>Head: <b>{p.head}</b></div>
@@ -4780,7 +5348,7 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
         <SectionHeader title="Departments" sub="Sections within each plant" onAdd={() => openAdd("depts")} onSave={() => saveToSheet("Departments", depts)} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(190px,1fr))", gap: 14 }}>
           {depts.map(d => <div key={d.id} className="card" style={{ padding: 18 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>{d.icon || "🗂"}</span><button className="btn btn-ghost btn-sm" onClick={() => openEdit("depts", d)}>Edit</button></div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>{d.icon || "🗂"}</span>{canModify("depts", d.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("depts", d)}>Edit</button>}</div>
             <div style={{ fontWeight: 700, fontSize: 14 }}>{d.name}</div>
             <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>HOD: {d.head || "—"}</div>
             {d.plant && <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>Plant: {d.plant}</div>}
@@ -4802,10 +5370,10 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
                   <div style={{ fontSize: 12, color: T.text2, marginTop: 3 }}>{m.type || "—"} · {m.plant || "—"}</div>
                   <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>Dept: {m.dept || "—"} · Asset: {m.assetNo || "—"}</div>
                 </div>
-                <div style={{ display: "flex", gap: 6 }}>
+                {canModify("machines", m.id) && <div style={{ display: "flex", gap: 6 }}>
                   <button className="btn btn-ghost btn-sm" onClick={() => openEdit("machines", m)}>Edit</button>
                   <button className="btn btn-ghost btn-sm" style={{ color: T.red }} onClick={() => setMachines(p => p.filter(x => x.id !== m.id))}>✕</button>
-                </div>
+                </div>}
               </div>
             </div>
           ))}
@@ -4814,7 +5382,7 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
         {/* Desktop table */}
         <div className="card master-desktop-table" style={{ padding: 0, overflow: "hidden" }}>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ minWidth: 560 }}><thead><tr><th>Machine</th><th>Plant</th><th>Dept</th><th>Type</th><th>Asset No.</th><th></th></tr></thead>
+            <table style={{ minWidth: 560 }}><thead><tr><th>Machine</th><th>Plant</th><th>Dept</th><th>Type</th><th>Asset No.</th>{(isAdmin || user?.masterAccess) && <th></th>}</tr></thead>
               <tbody>
                 {(machines || []).map(m => <tr key={m.id}>
                   <td style={{ fontWeight: 600 }}>{m.name}</td>
@@ -4822,15 +5390,34 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
                   <td style={{ fontSize: 12 }}>{m.dept || "—"}</td>
                   <td style={{ fontSize: 12, color: T.text2 }}>{m.type || "—"}</td>
                   <td style={{ fontSize: 12, color: T.text2 }}>{m.assetNo || "—"}</td>
-                  <td>
-                    <button className="btn btn-ghost btn-sm" onClick={() => openEdit("machines", m)}>Edit</button>
-                    <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => setMachines(p => p.filter(x => x.id !== m.id))}>✕</button>
-                  </td>
+                  {(isAdmin || user?.masterAccess) && <td>
+                    {canModify("machines", m.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("machines", m)}>Edit</button>}
+                    {canModify("machines", m.id) && <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => setMachines(p => p.filter(x => x.id !== m.id))}>✕</button>}
+                  </td>}
                 </tr>)}
                 {(!machines || machines.length === 0) && <tr><td colSpan={6} style={{ textAlign: "center", padding: 24, color: T.text2, fontSize: 12 }}>No machines added yet.</td></tr>}
               </tbody>
             </table>
           </div>
+        </div>
+      </>}
+
+      {/* ── ROLES ── */}
+      {tab === "roles" && <>
+        <SectionHeader title="Roles" sub="System roles and access levels" onAdd={() => openAdd("roles")} onSave={() => saveToSheet("Roles", roles)} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 14 }}>
+          {roles.map(r => <div key={r.id} className="card" style={{ padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontSize: 26 }}>🎭</span>
+              {canModify("roles", r.id) && <div>
+                <button className="btn btn-ghost btn-sm" onClick={() => openEdit("roles", r)}>Edit</button>
+                <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove role "${r.name}"?`)) setRoles(prev => prev.filter(x => x.id !== r.id)); }}>✕</button>
+              </div>}
+            </div>
+            <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 14, color: T.navy }}>{r.name}</div>
+            <div style={{ fontSize: 12, color: T.text2, marginTop: 4 }}>Level: <b>{r.level ?? "—"}</b></div>
+          </div>)}
+          {roles.length === 0 && <Empty icon="🎭" title="No roles" sub="Click + Add to register a role." />}
         </div>
       </>}
 
@@ -4842,18 +5429,21 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
         </div>
       </div>}
 
+      {/* ── TEAM ── */}
+      {tab === "team" && <TeamPage users={users} actions={actions} escMatrix={escMatrix} plants={plants} depts={depts} user={user} isAdmin={isAdmin} setActions={setActions} />}
+
       {/* ── ESCALATION MATRIX ── */}
-      {tab === "escmatrix" && <EscMatrixTab escMatrix={escMatrix} setEscMatrix={setEscMatrix} onSave={() => saveToSheet("EscalationMatrix", escMatrix || [])} />}
+      {tab === "escmatrix" && <EscMatrixTab escMatrix={escMatrix} setEscMatrix={setEscMatrix} onSave={isAdmin || user?.masterAccess ? () => saveToSheet("EscalationMatrix", escMatrix || []) : null} isAdmin={isAdmin} canModify={canModify} users={users} roles={roles} />}
 
       {/* ── MEETING PRESETS ── */}
       {tab === "presets" && <div className="card" style={{ padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
           <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 15, color: T.navy }}>Meeting Presets</div>
-          <SectionSaveButton onSave={() => {
+          {isAdmin && <SectionSaveButton onSave={() => {
             const allTypes = Array.from(new Set([...Object.keys(mtgPresets.attendeeMap || {}), ...Object.keys(mtgPresets.instructions || {})]));
             const rows = allTypes.map(t => ({ type: t, attendees: ensureArray((mtgPresets.attendeeMap || {})[t]), instructions: ensureArray((mtgPresets.instructions || {})[t]) }));
             return saveToSheet("MeetingPresets", rows);
-          }} />
+          }} />}
         </div>
         <div style={{ display: "grid", gap: 16 }}>
           {MEETING_TYPES.map(type => (
@@ -4865,17 +5455,18 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
                   <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 180, overflowY: "auto", padding: "8px 10px", background: "#fff", border: `1px solid ${T.border}`, borderRadius: 8 }}>
                     {users.length === 0 && <div style={{ fontSize: 12, color: T.text2, fontStyle: "italic", padding: "4px 0" }}>No users added yet.</div>}
                     {users.map(u => (
-                      <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, cursor: "pointer", padding: "5px 4px", borderRadius: 5, transition: "background .1s" }}
+                      <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, cursor: isAdmin ? "pointer" : "default", padding: "5px 4px", borderRadius: 5, transition: "background .1s" }}
                         onMouseEnter={e => e.currentTarget.style.background = T.bg}
                         onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                         <input type="checkbox"
+                          disabled={!isAdmin}
                           checked={ensureArray(mtgPresets?.attendeeMap?.[type]).includes(u.name)}
                           onChange={e => {
                             const cur = ensureArray(mtgPresets?.attendeeMap?.[type]);
                             const next = e.target.checked ? [...cur, u.name] : cur.filter(n => n !== u.name);
                             setMtgPresets(prev => ({ ...prev, attendeeMap: { ...prev.attendeeMap, [type]: next } }));
                           }}
-                          style={{ width: 15, height: 15, flexShrink: 0, cursor: "pointer", accentColor: T.navy }} />
+                          style={{ width: 15, height: 15, flexShrink: 0, cursor: isAdmin ? "pointer" : "not-allowed", accentColor: T.navy }} />
                         <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                           <div style={{ width: 24, height: 24, borderRadius: "50%", background: u.color || T.navy, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, flexShrink: 0 }}>{u.initials || (u.name || "?").slice(0, 2).toUpperCase()}</div>
                           <div style={{ minWidth: 0 }}>
@@ -4891,8 +5482,9 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
                 <div>
                   <Lbl t="Guidelines / Instructions (one per line)" />
                   <textarea value={ensureArray(mtgPresets?.instructions?.[type]).join("\n")}
+                    disabled={!isAdmin}
                     onChange={e => { const next = e.target.value.split("\n").filter(l => l.trim() !== ""); setMtgPresets(prev => ({ ...prev, instructions: { ...prev.instructions, [type]: next } })); }}
-                    style={{ fontSize: 12, height: 160, resize: "vertical" }} />
+                    style={{ fontSize: 12, height: 160, resize: "vertical", cursor: isAdmin ? "auto" : "not-allowed" }} />
                   <div style={{ fontSize: 11, color: T.text2, marginTop: 5 }}>{ensureArray(mtgPresets?.instructions?.[type]).length} guideline{ensureArray(mtgPresets?.instructions?.[type]).length !== 1 ? "s" : ""}</div>
                 </div>
               </div>
@@ -4907,27 +5499,50 @@ function MasterPage({ plants, setPlants, depts, setDepts, users, setUsers, permi
           <div className="modal" style={{ width: "min(520px, calc(100vw - 32px))", padding: "24px 20px" }} onClick={e => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
               <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 16, fontWeight: 800, color: T.navy }}>
-                {modal.mode === "add" ? "Add" : "Edit"} {modal.type === "users" ? "User" : modal.type === "plants" ? "Plant" : modal.type === "machines" ? "Machine" : "Department"}
+                {modal.mode === "add" ? "Add" : "Edit"} {modal.type === "users" ? "User" : modal.type === "plants" ? "Plant" : modal.type === "machines" ? "Machine" : modal.type === "roles" ? "Role" : "Department"}
               </h2>
               <button onClick={close} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 22, color: T.text2, lineHeight: 1, padding: 0 }}>×</button>
             </div>
             {modal.type === "users" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Full Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-              <div style={{ gridColumn: "1/-1" }}><Lbl t="Username" req /><input value={form.username || ""} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} placeholder="Login username" /></div>
-              <div><Lbl t="Role" req /><select value={form.role || ""} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}><option value="">Select</option>{["MD", "Plant Head", "HOD", "Shift Engineer", "Supervisor", "Operator"].map(r => <option key={r}>{r}</option>)}</select></div>
-              <div><Lbl t="Plant" req /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value, dept: "" }))}><option value="">Select</option><option>All</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
-              <div><Lbl t="Department" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select</option>{depts.filter(d => !form.plant || form.plant === "All" || !d.plant || d.plant === "All Plants" || d.plant === form.plant).map(d => <option key={d.id}>{d.name}</option>)}</select></div>
+              <div style={{ gridColumn: "1/-1" }}><Lbl t="Username" req={!isGuestRole(form.role)} /><input value={form.username || ""} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} placeholder="Login username" /></div>
+              <div><Lbl t="Role" req /><select value={form.role || ""} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}><option value="">Select</option>{roles.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}</select></div>
+              <div><Lbl t="Plant" req /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value }))}><option value="">Select</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
+              <div><Lbl t="Dept" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select</option>{depts.filter(d => !form.plant || form.plant === "All" || !d.plant || d.plant === "All Plants" || d.plant === form.plant).map(d => <option key={d.id}>{d.name}</option>)}</select></div>
               <div><Lbl t="Superior (Reports To)" /><select value={form.superior || ""} onChange={e => setForm(f => ({ ...f, superior: e.target.value }))}><option value="">None (Top level)</option>{users.filter(u => u.id !== form.id).map(u => <option key={u.id} value={u.name}>{u.name} ({u.role})</option>)}</select></div>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Phone Number" /><input value={form.phone || ""} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+91-98000-00000" /></div>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Email Address" /><input type="email" value={form.email || ""} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@company.com" /></div>
               <div style={{ gridColumn: "1/-1" }}>
-                <Lbl t="Password" req />
+                <Lbl t="Password" req={!isGuestRole(form.role)} />
                 <div style={{ position: "relative" }}>
                   <input type={form._showPw ? "text" : "password"} value={form.password || ""} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Set login password" style={{ paddingRight: 44 }} />
                   <button type="button" onClick={() => setForm(f => ({ ...f, _showPw: !f._showPw }))} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", cursor: "pointer", fontSize: 16, color: T.text2, lineHeight: 1, padding: 0, display: "flex", alignItems: "center" }}>{form._showPw ? "🙈" : "👁"}</button>
                 </div>
               </div>
+              {isAdmin && (
+                <div style={{ gridColumn: "1/-1", display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                  <input type="checkbox" id="masterAccess" checked={form.masterAccess === true || form.masterAccess === "true"} onChange={e => setForm(f => ({ ...f, masterAccess: e.target.checked }))} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                  <label htmlFor="masterAccess" style={{ fontSize: 13, fontWeight: 500, color: T.navy, cursor: "pointer" }}>Grant Master Setup Access</label>
+                </div>
+              )}
               <div style={{ gridColumn: "1/-1", display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={saveUser}>Save</button></div>
+            </div>}
+            {modal.type === "roles" && <div style={{ display: "grid", gap: 12 }}>
+              <div><Lbl t="Role Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Enter role name" /></div>
+              <div><Lbl t="Hierarchy Level" req /><input type="number" min={1} value={form.level || ""} onChange={e => setForm(f => ({ ...f, level: e.target.value === "" ? "" : parseInt(e.target.value, 10) }))} placeholder="e.g. 1 (Highest) to 8 (Lowest)" /></div>
+              <div style={{ gridColumn: "1/-1", display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button className="btn btn-ghost" onClick={close}>Cancel</button>
+                <button className="btn btn-navy" onClick={() => {
+                  if (!form.name || form.level === undefined || form.level === "") return;
+                  const r = { ...form, id: form.id || "R" + String(roles.length + 1) };
+                  if (modal.mode === "edit") {
+                    setRoles(prev => prev.map(x => x.id === r.id ? r : x));
+                  } else {
+                    setRoles(prev => [...prev, r]);
+                  }
+                  close();
+                }}>Save</button>
+              </div>
             </div>}
             {modal.type === "plants" && <div style={{ display: "grid", gap: 12 }}>
               <div><Lbl t="Plant Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
@@ -5092,11 +5707,11 @@ export default function App() {
     meetings, setMeetings,
     projects, setProjects,
     escMatrix, setEscMatrix,
-    permissions, setPermissions,
     mtgPresets, setMtgPresets,
     machines, setMachines,
     reasons, setReasons,
     persistedAudit, setPersistedAudit,
+    roles, setRoles,
   } = useSheetDB({
     defaultUsers: DEFAULT_USERS,
     defaultPlants: DEFAULT_PLANTS,
@@ -5105,10 +5720,20 @@ export default function App() {
     defaultMeetings: SEED_MEETINGS,
     defaultProjects: SEED_PROJECTS,
     defaultEscMatrix: DEFAULT_ESC_MATRIX,
-    defaultPermissions: DEFAULT_PERMISSIONS_SEED(),
     defaultPresets: { attendeeMap: ATTENDEE_MAP, instructions: MTG_INSTRUCTIONS },
-    defaultMachines: []
+    defaultMachines: [],
+    defaultRoles: [
+      { id: "R1", name: "Guest User", level: 1 },
+      { id: "R2", name: "Operator", level: 2 },
+      { id: "R3", name: "Supervisor", level: 3 },
+      { id: "R4", name: "Shift Engineer", level: 4 },
+      { id: "R5", name: "HOD", level: 5 },
+      { id: "R6", name: "Plant Head", level: 6 },
+      { id: "R7", name: "MD", level: 7 },
+      { id: "R8", name: "Admin", level: 8 }
+    ]
   });
+
   // Global active meeting — persists across page navigation
   const [globalActiveMtg, setGlobalActiveMtg] = useState(null);
   // Global meeting runtime state — persists when user navigates away from Work page
@@ -5180,7 +5805,7 @@ export default function App() {
           return true;
         }).slice(0, 100);
       });
-    }, escMatrix), 1500);
+    }, escMatrix, users), 1500);
     return () => clearTimeout(t);
   }, [actions]);
 
@@ -5234,13 +5859,13 @@ export default function App() {
   return (
     <ErrorBoundary>
       <style>{CSS}</style>
-      <Shell page={page} setPage={setPage} user={user} onLogout={() => { setUser(null); setPage(0); clearMeetingState(); }} onQuickAdd={() => setShowQuickAdd(true)} pendingCount={pendingForMe} auditCount={audit.length} activeMtg={globalActiveMtg} onResumeActiveMtg={() => setPage(1)} mtgRunning={mtgRunning} mtgElapsed={mtgElapsed} notifications={notifs} unreadCount={unreadNotifs} onMarkAllRead={markAllRead} users={users} actions={actions} onShowSupport={() => setShowSupport(true)} onShowProfile={() => setShowProfile(true)} onShowAdminNotifs={() => setShowAdminNotifs(true)} permissions={permissions}>
-        {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} plants={plants} depts={depts} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} permissions={permissions} />}
-        {page === 1 && <WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows => { commitFinal(rows); clearMeetingState(); }} actions={actions} setActions={setActions} user={user} onProjectUpdate={updated => setProjects(p => p.map(x => x.id === updated.id ? updated : x))} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} permissions={permissions} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); }} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState} reasons={reasons} />}
-        {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} machines={machines} permissions={permissions} />}
-        {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} permissions={permissions} />}
-        {page === 4 && <EscalationsPage actions={actions} audit={audit} user={user} setPage={setPage} users={users} plants={plants} setActions={setActions} permissions={permissions} />}
-        {page === 99 && user?.role === "Admin" && <MasterPage plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} permissions={permissions} setPermissions={setPermissions} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets} machines={machines} setMachines={setMachines} refreshMaster={fetchData} lastWriteRef={lastWriteRef} />}
+      <Shell page={page} setPage={setPage} user={user} onLogout={() => { setUser(null); setPage(0); clearMeetingState(); }} onQuickAdd={() => setShowQuickAdd(true)} pendingCount={pendingForMe} auditCount={audit.length} activeMtg={globalActiveMtg} onResumeActiveMtg={() => setPage(1)} mtgRunning={mtgRunning} mtgElapsed={mtgElapsed} notifications={notifs} unreadCount={unreadNotifs} onMarkAllRead={markAllRead} users={users} actions={actions} onShowSupport={() => setShowSupport(true)} onShowProfile={() => setShowProfile(true)} onShowAdminNotifs={() => setShowAdminNotifs(true)}>
+        {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} plants={plants} depts={depts} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} />}
+        {page === 1 && <WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows => { commitFinal(rows); clearMeetingState(); }} actions={actions} setActions={setActions} user={user} onProjectUpdate={updated => setProjects(p => p.map(x => x.id === updated.id ? updated : x))} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); }} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState} reasons={reasons} />}
+        {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} machines={machines} />}
+        {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} />}
+        {page === 4 && <EscalationsPage actions={actions} setActions={setActions} audit={audit} users={users} escMatrix={escMatrix} plants={plants} depts={depts} user={user} />}
+        {page === 99 && (user?.role === "Admin" || user?.masterAccess === true || user?.masterAccess === "true") && <MasterPage user={user} plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets} machines={machines} setMachines={setMachines} refreshMaster={fetchData} lastWriteRef={lastWriteRef} roles={roles} setRoles={setRoles} actions={actions} setActions={setActions} />}
       </Shell>
       {showSupport && <SupportModal user={user} onClose={() => setShowSupport(false)} />}
       {showProfile && <UserProfilePanel user={user} users={users} actions={actions} onClose={() => setShowProfile(false)} />}
