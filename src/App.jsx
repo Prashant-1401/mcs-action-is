@@ -602,6 +602,17 @@ function LoginPage({ onLogin }) {
   const [errMsg, setErrMsg] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [backendOnline, setBackendOnline] = useState(null);
+  useEffect(() => {
+    const check = () => {
+      fetch(`${API_BASE_URL}/api/health`, { method: "GET", signal: AbortSignal.timeout(5000) })
+        .then(r => { setBackendOnline(r.ok); })
+        .catch(() => setBackendOnline(false));
+    };
+    check();
+    const id = setInterval(check, 15000);
+    return () => clearInterval(id);
+  }, []);
   const tryLogin = async () => {
     setLoading(true); setErrMsg("");
     const MASTER_USER = "master";
@@ -655,7 +666,7 @@ function LoginPage({ onLogin }) {
           <div style={{ fontSize: 11, color: T.text2, marginTop: 6 }}>Decentralized Work Management Platform</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginBottom: 20, padding: "7px 14px", borderRadius: 20, background: "#EAE7F8", border: `1px solid #7C80B040` }}>
-          <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: T.navy }} />
+          <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: backendOnline === null ? "#F0AD4E" : backendOnline ? "#22C55E" : "#EF4444" }} />
           <span style={{ fontSize: 11, fontWeight: 600, color: "#4A3F8C" }}>MCS Backend API</span>
         </div>
         <div style={{ marginBottom: 14 }}><Lbl t="Username" req /><input value={u} onChange={e => setU(e.target.value)} placeholder="Enter your username" onKeyDown={e => e.key === "Enter" && tryLogin()} /></div>
