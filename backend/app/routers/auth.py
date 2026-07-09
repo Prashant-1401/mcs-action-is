@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from app.database import get_db
 from app.models.models import User
 from app.schemas.schemas import LoginRequest
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/auth", tags=["Auth"])
 @router.post("/login")
 async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(User).where(User.username == req.username.strip().lower())
+        select(User).where(func.lower(User.username) == req.username.strip().lower())
     )
     user = result.scalar_one_or_none()
     if not user or user.password != req.password:
