@@ -40,6 +40,24 @@ def dispatch_escalation_email(actions: List[Dict[str, Any]], level: int, target:
     return send_email(target_emails, subject, body)
 
 
+def send_welcome_email(user_name: str, username: str, email: str, password: str = None) -> bool:
+    subject = "Welcome to MCS — Your Account Has Been Created"
+    login_url = f"{settings.frontend_url}"
+    body = f"""
+    <h2>Welcome to MCS (Management Control System)</h2>
+    <p>Hello <b>{user_name}</b>,</p>
+    <p>Your account has been created successfully. You can now log in to the MCS platform to track action items, manage meetings, and collaborate with your team.</p>
+    <table style="border-collapse:collapse; margin:16px 0;">
+      <tr><td style="padding:6px 12px; font-weight:bold;">Username:</td><td style="padding:6px 12px;">{username}</td></tr>
+      {f'<tr><td style="padding:6px 12px; font-weight:bold;">Password:</td><td style="padding:6px 12px;">{password}</td></tr>' if password else ''}
+    </table>
+    <p><a href="{login_url}" style="display:inline-block; padding:10px 24px; background:#1a73e8; color:#fff; text-decoration:none; border-radius:6px;">Log in to MCS</a></p>
+    <p>If you have any issues, please contact your system administrator.</p>
+    <hr><p style="color:#888; font-size:12px;">MCS — Adroit Industries x Signet Industries</p>
+    """
+    return send_email([email], subject, body)
+
+
 def share_insights_email(insights: List[Dict[str, Any]], meeting_type: str, plant: str, recipients: List[str]) -> bool:
     if not recipients:
         recipients = [settings.team_email]

@@ -15,8 +15,19 @@ from app.routers import (
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(migrate_schema)
     yield
     await engine.dispose()
+
+
+def migrate_schema(conn):
+    from sqlalchemy import inspect, text
+    inspector = inspect(conn)
+    columns = {c["name"] for c in inspector.get_columns("escalation_matrix")}
+    if "from_role" not in columns:
+        conn.execute(text(
+            "ALTER TABLE escalation_matrix ADD COLUMN from_role VARCHAR(50)"
+        ))
 
 
 app = FastAPI(
@@ -29,6 +40,15 @@ app = FastAPI(
 origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
 if not origins:
     origins = ["*"]
+else:
+    known = [
+        "https://mcs-control-management.vercel.app",
+        "https://mcs-control-management-g9uaoyxl1.vercel.app",
+        "http://localhost:5173",
+    ]
+    for o in known:
+        if o not in origins:
+            origins.append(o)
 
 app.add_middleware(
     CORSMiddleware,

@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     admin_email: str = "admin@adroit.in"
     team_email: str = "team@adroit.in"
     wacrm_alert_url: str = ""
+    frontend_url: str = "https://mcs-control-management.vercel.app"
 
     class Config:
         env_file = ".env"

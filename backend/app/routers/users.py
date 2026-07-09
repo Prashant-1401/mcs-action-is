@@ -4,6 +4,7 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.models import User
 from app.schemas.schemas import UserCreate, UserUpdate
+from app.services.email_service import send_welcome_email
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
 
@@ -32,6 +33,8 @@ async def create_user(data: UserCreate, db: AsyncSession = Depends(get_db)):
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    if user.email:
+        send_welcome_email(user.name, user.username, user.email, data.password)
     return user
 
 
@@ -70,6 +73,8 @@ async def bulk_upsert_users(rows: list[UserCreate], db: AsyncSession = Depends(g
                 setattr(existing, k, v)
         else:
             db.add(User(**data.model_dump()))
+            if data.email:
+                send_welcome_email(data.name, data.username, data.email, data.password)
         upserted += 1
     await db.commit()
     return {"ok": True, "upserted": upserted}
