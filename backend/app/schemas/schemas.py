@@ -201,11 +201,15 @@ class EscalationMatrixCreate(BaseModel):
     id: str
     level: int
     label: Optional[str] = None
+    from_role: Optional[str] = None
+    target_role: Optional[str] = None
     overdue_days: Optional[int] = 0
     overdue_hrs: Optional[int] = 0
     target: Optional[str] = None
     notify_method: Optional[str] = None
     applicable_to: Optional[str] = "All"
+    priorities: Optional[List[str]] = None
+    superiors: Optional[List[str]] = None
     color: Optional[str] = None
     active: Optional[bool] = True
     description: Optional[str] = None
@@ -214,11 +218,15 @@ class EscalationMatrixCreate(BaseModel):
 class EscalationMatrixUpdate(BaseModel):
     level: Optional[int] = None
     label: Optional[str] = None
+    from_role: Optional[str] = None
+    target_role: Optional[str] = None
     overdue_days: Optional[int] = None
     overdue_hrs: Optional[int] = None
     target: Optional[str] = None
     notify_method: Optional[str] = None
     applicable_to: Optional[str] = None
+    priorities: Optional[List[str]] = None
+    superiors: Optional[List[str]] = None
     color: Optional[str] = None
     active: Optional[bool] = None
     description: Optional[str] = None

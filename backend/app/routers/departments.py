@@ -57,3 +57,19 @@ async def delete_department(dept_id: str, db: AsyncSession = Depends(get_db)):
     await db.delete(dept)
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/bulk")
+async def bulk_upsert_departments(rows: list[DepartmentCreate], db: AsyncSession = Depends(get_db)):
+    upserted = 0
+    for data in rows:
+        result = await db.execute(select(Department).where(Department.id == data.id))
+        existing = result.scalar_one_or_none()
+        if existing:
+            for k, v in data.model_dump(exclude_unset=True).items():
+                setattr(existing, k, v)
+        else:
+            db.add(Department(**data.model_dump()))
+        upserted += 1
+    await db.commit()
+    return {"ok": True, "upserted": upserted}

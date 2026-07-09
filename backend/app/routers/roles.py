@@ -45,3 +45,19 @@ async def delete_role(role_id: str, db: AsyncSession = Depends(get_db)):
     await db.delete(role)
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/bulk")
+async def bulk_upsert_roles(rows: list[RoleCreate], db: AsyncSession = Depends(get_db)):
+    upserted = 0
+    for data in rows:
+        result = await db.execute(select(Role).where(Role.id == data.id))
+        existing = result.scalar_one_or_none()
+        if existing:
+            for k, v in data.model_dump(exclude_unset=True).items():
+                setattr(existing, k, v)
+        else:
+            db.add(Role(**data.model_dump()))
+        upserted += 1
+    await db.commit()
+    return {"ok": True, "upserted": upserted}

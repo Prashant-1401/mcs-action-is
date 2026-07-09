@@ -45,6 +45,7 @@ async def update_plant(plant_id: str, data: PlantUpdate, db: AsyncSession = Depe
     return plant
 
 
+
 @router.delete("/{plant_id}")
 async def delete_plant(plant_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Plant).where(Plant.id == plant_id))
@@ -54,3 +55,19 @@ async def delete_plant(plant_id: str, db: AsyncSession = Depends(get_db)):
     await db.delete(plant)
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/bulk")
+async def bulk_upsert_plants(rows: list[PlantCreate], db: AsyncSession = Depends(get_db)):
+    upserted = 0
+    for data in rows:
+        result = await db.execute(select(Plant).where(Plant.id == data.id))
+        existing = result.scalar_one_or_none()
+        if existing:
+            for k, v in data.model_dump(exclude_unset=True).items():
+                setattr(existing, k, v)
+        else:
+            db.add(Plant(**data.model_dump()))
+        upserted += 1
+    await db.commit()
+    return {"ok": True, "upserted": upserted}

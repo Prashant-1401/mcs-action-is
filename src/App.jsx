@@ -1,91 +1,80 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
-/* ===================== GOOGLE SHEET CONFIG ===================== */
-// 1. Deploy Code.gs as a Web App (Apps Script → Deploy → Web App → Anyone)
-// 2. Paste the deployment URL below
-const SHEET_SCRIPT_URL = import.meta.env.VITE_SHEET_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbyM33c-SCiBrAC8RUjN-6OWOopRzozcnMWTdBs64vzltCtBhIsn1N8iYLOdZGJjrbHrVg/exec";
-const _DEFAULT_SHEET_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyM33c-SCiBrAC8RUjN-6OWOopRzozcnMWTdBs64vzltCtBhIsn1N8iYLOdZGJjrbHrVg/exec";
+/* ===================== API CONFIG ===================== */
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://mcs-action.onrender.com";
 const API_KEY = import.meta.env.VITE_API_KEY || "";
+let AUTH_TOKEN = null;
+function setAuthToken(token) { AUTH_TOKEN = token; }
+function getAuthToken() { return AUTH_TOKEN; }
 
-const SHEET_ID = import.meta.env.VITE_SHEET_ID || "1jQzssEsr6ULGyepmePjbITdzHRihttTrSvOoj32FyGY";
-// SHEET_ENABLED is true when a custom deployment URL is provided via env var
-const SHEET_ENABLED = true; // URL is already hardcoded
-
-// CSV read URL (no auth needed for publicly shared sheets)
-const csvUrl = (tab) =>
-  `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
-
-/* ─── Sheet API helpers ─────────────────────────────────────────────────── */
-async function sheetGet(tab) {
-  const res = await fetch(csvUrl(tab));
-  if (!res.ok) throw new Error(`Sheet read failed: ${tab}`);
-  const text = await res.text();
-  return parseCsv(text);
-}
-
-async function sheetPost(action, tab, payload) {
-  if (!SHEET_ENABLED) return null;
-  const res = await fetch(SHEET_SCRIPT_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain" },
-    body: JSON.stringify({ action, tab, ...payload }),
-  });
-  const text = await res.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    const snippet = text.slice(0, 200).replace(/<[^>]+>/g, " ").trim();
-    throw new Error("GAS returned non-JSON: " + (snippet || res.status));
+async function apiFetch(path, options = {}) {
+  const url = `${API_BASE_URL}${path}`;
+  const headers = { "Content-Type": "application/json", ...options.headers };
+  if (API_KEY) headers["x-api-key"] = API_KEY;
+  const token = AUTH_TOKEN || localStorage.getItem("mcs_token");
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(url, { ...options, headers });
+  if (!res.ok) {
+    let detail;
+    try { const err = await res.json(); detail = err.detail || res.statusText; } catch { detail = res.statusText; }
+    throw new Error(detail || `API error ${res.status}`);
   }
+  if (res.status === 204) return null;
+  return res.json();
 }
-
-function parseCsv(text) {
-  const lines = text.trim().split("\n");
-  if (lines.length < 2) return [];
-  const allHeaders = parseCsvRow(lines[0]);
-  // Strip empty/blank header columns — these are ghost columns from Sheet formatting
-  const headers = allHeaders.map((h, i) => ({ h: h.trim(), i })).filter(x => x.h !== "");
-  return lines.slice(1).map(line => {
-    const vals = parseCsvRow(line);
-    const obj = {};
-    headers.forEach(({ h, i }) => {
-      let v = vals[i] ?? "";
-      // Auto-parse JSON arrays/objects stored in cells
-      if (typeof v === "string" && (v.startsWith("[") || v.startsWith("{"))) {
-        try { v = JSON.parse(v); } catch { /* keep as string */ }
-      }
-      // Booleans
-      if (v === "true") v = true;
-      if (v === "false") v = false;
-      // Numerics — only coerce known numeric fields; never coerce name/id/dept/plant/role/text fields
-      const NUMERIC_FIELDS = ["level", "daysOverdue", "overdueDays", "delay", "count", "index", "order", "seq"];
-      if (v !== "" && /^-?\d+(\.\d+)?$/.test(v) && typeof v === "string" && NUMERIC_FIELDS.includes(h)) v = Number(v);
-      obj[h] = v;
-    });
-    return obj;
-  }).filter(r => Object.values(r).some(v => v !== "" && v !== null));
+function apiGet(path, params) {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  return apiFetch(path + qs);
 }
+function apiPost(path, body) { return apiFetch(path, { method: "POST", body: JSON.stringify(body) }); }
+function apiPatch(path, body) { return apiFetch(path, { method: "PATCH", body: JSON.stringify(body) }); }
+function apiDelete(path) { return apiFetch(path, { method: "DELETE" }); }
 
-/** Strip blank keys from a row object before writing to Sheet */
-function cleanRow(row) {
+/* ─── Key transforms (snake_case ↔ camelCase) ─────────────── */
+const SNAKE_TO_CAMEL = {
+  plant_id: "plantId", dept_id: "deptId", machine_id: "machineId",
+  machine_name: "machineName", date_of_action: "dateOfAction",
+  allocated_by: "allocatedBy", closed_on: "closedOn", closed_by: "closedBy",
+  revision_history: "revisionHistory", responsible_user_id: "responsibleUserId",
+  reason_id: "reasonId", action_point_type: "actionPointType",
+  reason_of_action: "reasonOfAction", project_id: "projectId",
+  is_active: "isActive", action_count: "actionCount",
+  start_date: "startDate", end_date: "endDate",
+  completed_sessions: "completedSessions", pending_confirmation: "pendingConfirmation",
+  asset_no: "assetNo", notify_method: "notifyMethod",
+  overdue_days: "overdueDays", overdue_hrs: "overdueHrs",
+  from_role: "fromRole", target_role: "targetRole",
+  applicable_to: "applicableTo",
+};
+const CAMEL_TO_SNAKE = Object.fromEntries(
+  Object.entries(SNAKE_TO_CAMEL).map(([s, c]) => [c, s])
+);
+
+function denormKeys(obj) {
+  if (!obj || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj.map(denormKeys);
   const out = {};
-  Object.keys(row).forEach(k => { if (k && k.trim() !== "") out[k] = row[k]; });
+  Object.keys(obj).forEach(k => { out[SNAKE_TO_CAMEL[k] || k] = obj[k]; });
+  return out;
+}
+function normKeys(obj) {
+  if (!obj || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj.map(normKeys);
+  const out = {};
+  Object.keys(obj).forEach(k => { out[CAMEL_TO_SNAKE[k] || k] = obj[k]; });
   return out;
 }
 
-function parseCsvRow(line) {
-  const result = [];
-  let cur = "", inQ = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-    else if (ch === '"') inQ = !inQ;
-    else if (ch === ',' && !inQ) { result.push(cur); cur = ""; }
-    else cur += ch;
-  }
-  result.push(cur);
-  return result;
+function resolveForeignKeys(items, plants, depts) {
+  const pName = {}, dName = {};
+  (plants || []).forEach(p => { pName[p.id] = p.name; });
+  (depts || []).forEach(d => { dName[d.id] = d.name; });
+  return (items || []).map(item => {
+    const out = { ...item };
+    if (out.plantId && pName[out.plantId]) out.plant = pName[out.plantId];
+    if (out.deptId && dName[out.deptId]) out.dept = dName[out.deptId];
+    return out;
+  });
 }
 
 function ensureArray(val) {
@@ -103,10 +92,8 @@ function ensureArray(val) {
   return [];
 }
 
-/* ─── useSheetDB hook ───────────────────────────────────────────────────── */
-// Replaces all hardcoded seeds with live Sheet data.
-// Falls back to seeds if Sheet is unavailable.
-function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
+/* ─── usePostgresDB hook ───────────────────────────────────────────────── */
+function usePostgresDB({ defaultUsers, defaultPlants, defaultDepts,
   defaultActions, defaultMeetings, defaultProjects, defaultEscMatrix, defaultPresets, defaultMachines, defaultRoles }) {
   const [dbReady, setDbReady] = useState(false);
   const [dbError, setDbError] = useState(null);
@@ -124,73 +111,70 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   const [roles, setRolesRaw] = useState(defaultRoles || []);
 
   const fetchData = useCallback(async () => {
-    if (!SHEET_ENABLED) {
-      // Even without write access, still read Machines from the public CSV
-      try {
-        const mc = await sheetGet("Machines").catch(() => []);
-        const sanitize = (arr, prefix) => (Array.isArray(arr) ? arr : [])
-          .filter(x => x && Object.values(x).some(v => v !== "" && v !== null && v !== undefined))
-          .map((x, i) => ({ ...x, id: (x.id !== undefined && x.id !== null && String(x.id).trim()) ? x.id : `${prefix}-${i}` }));
-        if (mc.length) setMachinesRaw(sanitize(mc, "mc"));
-      } catch (e) {
-        console.warn("Machines read failed:", e.message);
-      }
-      setDbReady(true);
-      return;
-    }
     try {
-      const [u, p, d, a, m, pr, em, ps, mc, rs, au, ro] = await Promise.all([
-        sheetGet("Users"),
-        sheetGet("Plants"),
-        sheetGet("Departments"),
-        sheetGet("Actions"),
-        sheetGet("Meetings"),
-        sheetGet("Projects"),
-        sheetGet("EscalationMatrix"),
-        sheetGet("MeetingPresets"),
-        sheetGet("Machines"),
-        sheetGet("Reasons").catch(() => []),
-        sheetGet("Audit").catch(() => []),
-        sheetGet("Roles").catch(() => []),
+      const [rawP, rawD, rawU, rawA, rawM, rawPr, rawEm, rawPs, rawMc, rawRs, rawAu, rawRo] = await Promise.all([
+        apiGet("/api/plants/").catch(() => []),
+        apiGet("/api/departments/").catch(() => []),
+        apiGet("/api/users/").catch(() => []),
+        apiGet("/api/actions/").catch(() => []),
+        apiGet("/api/meetings/").catch(() => []),
+        apiGet("/api/projects/").catch(() => []),
+        apiGet("/api/escalation/matrix").catch(() => []),
+        apiGet("/api/meetings/presets").catch(() => []),
+        apiGet("/api/machines/").catch(() => []),
+        apiGet("/api/reasons/").catch(() => []),
+        apiGet("/api/audit/").catch(() => []),
+        apiGet("/api/roles/").catch(() => []),
       ]);
-      const sanitize = (arr, prefix) => (Array.isArray(arr) ? arr : [])
-        .filter(x => x && Object.values(x).some(v => v !== "" && v !== null && v !== undefined))
-        .map((x, i) => ({ ...x, id: (x.id !== undefined && x.id !== null && String(x.id).trim()) ? x.id : `${prefix}-${i}` }));
-      if (u.length) setUsersRaw(sanitize(u, "u"));
-      if (p.length) setPlantsRaw(sanitize(p, "p"));
-      if (d.length) setDeptsRaw(sanitize(d, "d"));
-      if (a.length) setActionsRaw(sanitize(a, "a"));
-      if (m.length) setMeetingsRaw(sanitize(m, "m").map(mt => ({ ...mt, attendees: ensureArray(mt.attendees) })));
-      if (pr.length) setProjectsRaw(sanitize(pr, "pr"));
-      if (em.length) setEscRaw(sanitize(em, "e"));
-      if (rs.length) setReasonsRaw(rs);
-      if (au.length) setPersistedAuditRaw(sanitize(au, "au"));
-      if (ps.length) {
-        const pMap = { attendeeMap: {}, instructions: {} };
-        ps.forEach(row => {
-          if (row.type) {
-            pMap.attendeeMap[row.type] = ensureArray(row.attendees);
-            pMap.instructions[row.type] = ensureArray(row.instructions);
-          }
-        });
-        setPresetsRaw(pMap);
-      }
-      if (mc.length) setMachinesRaw(sanitize(mc, "mc"));
-      if (ro && ro.length) setRolesRaw(sanitize(ro, "r"));
+
+      const pDenorm = denormKeys(rawP);
+      const dDenorm = denormKeys(rawD);
+      const uDenorm = denormKeys(rawU);
+      const aDenorm = denormKeys(rawA).map(a => ({ ...a, attendees: Array.isArray(a.attendees) ? a.attendees : [] }));
+      const mDenorm = denormKeys(rawM).map(mt => ({ ...mt, attendees: Array.isArray(mt.attendees) ? mt.attendees : [] }));
+      const prDenorm = denormKeys(rawPr);
+      const emDenorm = denormKeys(rawEm);
+      const mcDenorm = denormKeys(rawMc);
+      const rsDenorm = denormKeys(rawRs);
+      const auDenorm = denormKeys(rawAu);
+      const roDenorm = denormKeys(rawRo);
+
+      const resolvedU = resolveForeignKeys(uDenorm, pDenorm, dDenorm);
+      const resolvedA = resolveForeignKeys(aDenorm, pDenorm, dDenorm);
+      const resolvedM = resolveForeignKeys(mDenorm, pDenorm, dDenorm);
+      const resolvedPr = resolveForeignKeys(prDenorm, pDenorm, dDenorm);
+      const resolvedMc = resolveForeignKeys(mcDenorm, pDenorm, dDenorm);
+
+      const psDenorm = { attendeeMap: {}, instructions: {} };
+      (rawPs || []).forEach(row => {
+        if (row.type) {
+          psDenorm.attendeeMap[row.type] = Array.isArray(row.attendees) ? row.attendees : [];
+          psDenorm.instructions[row.type] = Array.isArray(row.instructions) ? row.instructions : [];
+        }
+      });
+
+      if (pDenorm.length) setPlantsRaw(pDenorm);
+      if (dDenorm.length) setDeptsRaw(dDenorm);
+      if (resolvedU.length) setUsersRaw(resolvedU);
+      if (resolvedA.length) setActionsRaw(resolvedA);
+      if (resolvedM.length) setMeetingsRaw(resolvedM);
+      if (resolvedPr.length) setProjectsRaw(resolvedPr);
+      if (emDenorm.length) setEscRaw(emDenorm);
+      if (rsDenorm.length) setReasonsRaw(rsDenorm);
+      if (auDenorm.length) setPersistedAuditRaw(auDenorm);
+      if (mcDenorm.length) setMachinesRaw(resolvedMc);
+      if (roDenorm.length) setRolesRaw(roDenorm);
+      setPresetsRaw(psDenorm);
       setDbReady(true);
     } catch (e) {
-      console.warn("Sheet load failed, using seeds:", e.message);
+      console.warn("API load failed, using defaults:", e.message);
       setDbError(e.message);
       setDbReady(true);
     }
   }, []);
 
-  // ── initial load ──
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  // ── write wrappers — accept both updater functions and plain values ──
   const setUsers = useCallback((fnOrVal) => { setUsersRaw(fnOrVal); }, []);
   const setPlants = useCallback((fnOrVal) => { setPlantsRaw(fnOrVal); }, []);
   const setDepts = useCallback((fnOrVal) => { setDeptsRaw(fnOrVal); }, []);
@@ -204,112 +188,8 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
   const setPersistedAudit = useCallback((fnOrVal) => { setPersistedAuditRaw(fnOrVal); }, []);
   const setRoles = useCallback((fnOrVal) => { setRolesRaw(fnOrVal); }, []);
 
-  // ── Sync state changes to sheet via effects (only after initial load) ──
-  // fetchDoneRef is set true only after a delay post-load, preventing the
-  // sync effects from firing during the same render cycle as fetchData().
-  // This stops seed/default data from overwriting the sheet on mount.
-  const fetchDoneRef = useRef(false);
-  // Track when each tab was last written — poll skips tabs written within 90s
-  const lastWriteRef = useRef({});
-  useEffect(() => {
-    if (dbReady) {
-      const t = setTimeout(() => { fetchDoneRef.current = true; }, 1000);
-      return () => clearTimeout(t);
-    }
-  }, [dbReady]);
-  const syncToSheet = useCallback((tab, data) => {
-    if (!SHEET_ENABLED || !fetchDoneRef.current) return;
-    if (!data || (Array.isArray(data) && data.length === 0)) return;
-    lastWriteRef.current[tab] = Date.now();
-    const cleaned = Array.isArray(data) ? data.map(cleanRow) : data;
-    sheetPost("replace_all", tab, { rows: cleaned });
-  }, []);
-  // Audit uses append_all — never replace — so history survives page reloads.
-  // Only rows with new IDs are written; existing ones are skipped by the GAS handler.
-  const syncAuditToSheet = useCallback((data) => {
-    if (!SHEET_ENABLED || !fetchDoneRef.current) return;
-    if (!Array.isArray(data) || data.length === 0) return;
-    sheetPost("append_all", "Audit", { rows: data.map(cleanRow) });
-  }, []);
-  useEffect(() => { syncToSheet("Users", users); }, [users, syncToSheet]);
-  useEffect(() => { syncToSheet("Plants", plants); }, [plants, syncToSheet]);
-  useEffect(() => { syncToSheet("Departments", depts); }, [depts, syncToSheet]);
-  useEffect(() => { syncToSheet("Actions", actions); }, [actions, syncToSheet]);
-  useEffect(() => { syncToSheet("Meetings", meetings); }, [meetings, syncToSheet]);
-  useEffect(() => { syncToSheet("Projects", projects); }, [projects, syncToSheet]);
-  useEffect(() => { syncToSheet("EscalationMatrix", escMatrix); }, [escMatrix, syncToSheet]);
-  // NOTE: Permissions, Machines, MeetingPresets are master data — only synced via
-  // the explicit "Save to Sheet" button in MasterPage, not on every toggle.
-  // Machines auto-sync removed: it raced with the manual Save button causing silent failures.
-  useEffect(() => { syncToSheet("Reasons", reasons); }, [reasons, syncToSheet]);
-  useEffect(() => { syncAuditToSheet(persistedAudit); }, [persistedAudit]);
-  useEffect(() => { syncToSheet("Roles", roles); }, [roles, syncToSheet]);
-
-  // ── Master data polling — re-fetch org/config tabs every 60s ──
-  // This ensures every logged-in user picks up Admin changes without a full reload.
-  // Tabs written to within the last 90s are skipped to prevent the stale CSV
-  // cache from reverting a save that hasn't propagated yet.
-  const POLL_WRITE_LOCK_MS = 90000; // 90s — Google Sheets CSV cache TTL
-  useEffect(() => {
-    if (!SHEET_ENABLED) return;
-    const MASTER_TABS = [
-      { key: "Users",            tab: "Users",            set: setUsersRaw,   prefix: "u",  isObj: false },
-      { key: "Plants",           tab: "Plants",           set: setPlantsRaw,  prefix: "p",  isObj: false },
-      { key: "Departments",      tab: "Departments",      set: setDeptsRaw,   prefix: "d",  isObj: false },
-      { key: "EscalationMatrix", tab: "EscalationMatrix", set: setEscRaw,     prefix: "e",  isObj: false },
-      { key: "Machines",         tab: "Machines",         set: setMachinesRaw,prefix: "mc", isObj: false },
-      { key: "MeetingPresets",   tab: "MeetingPresets",   set: setPresetsRaw, prefix: null, isObj: "presets" },
-      { key: "Roles",            tab: "Roles",            set: setRolesRaw,   prefix: "r",  isObj: false },
-    ];
-    const sanitize = (arr, prefix) => (Array.isArray(arr) ? arr : [])
-      .filter(x => x && Object.values(x).some(v => v !== "" && v !== null && v !== undefined))
-      .map((x, i) => ({ ...x, id: (x.id !== undefined && x.id !== null && String(x.id).trim()) ? x.id : `${prefix}-${i}` }));
-    const changed = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
-
-    const poll = async () => {
-      if (document.hidden) return;
-      const now = Date.now();
-      // Only fetch tabs that haven't been written to recently
-      const tabsToFetch = MASTER_TABS.filter(t => {
-        const lastWrite = lastWriteRef.current[t.tab] || 0;
-        return (now - lastWrite) > POLL_WRITE_LOCK_MS;
-      });
-      if (tabsToFetch.length === 0) return;
-
-      await Promise.all(tabsToFetch.map(async ({ tab, set, prefix, isObj }) => {
-        try {
-          const rows = await sheetGet(tab);
-          if (!rows.length) return;
-          if (isObj === "presets") {
-            const pMap = { attendeeMap: {}, instructions: {} };
-            rows.forEach(row => { if (row.type) { pMap.attendeeMap[row.type] = ensureArray(row.attendees); pMap.instructions[row.type] = ensureArray(row.instructions); } });
-            set(prev => changed(prev, pMap) ? pMap : prev);
-          } else if (isObj) {
-            const pObj = {};
-            rows.forEach(row => { if (row.id !== undefined && row.id !== null && String(row.id).trim()) pObj[String(row.id)] = row; });
-            set(prev => changed(prev, pObj) ? pObj : prev);
-          } else {
-            const newData = sanitize(rows, prefix);
-            set(prev => changed(prev, newData) && newData.length ? newData : prev);
-          }
-        } catch (e) {
-          console.warn(`Master poll failed for ${tab}:`, e.message);
-        }
-      }));
-    };
-
-    let interval;
-    const start = () => { interval = setInterval(poll, 60000); }; // poll every 60s
-    if (dbReady) { start(); }
-    else {
-      const check = setInterval(() => { if (dbReady) { clearInterval(check); start(); } }, 1000);
-      return () => clearInterval(check);
-    }
-    return () => clearInterval(interval);
-  }, [dbReady]); // eslint-disable-line react-hooks/exhaustive-deps
-
   return {
-    dbReady, dbError, fetchData, lastWriteRef,
+    dbReady, dbError, fetchData,
     users, setUsers,
     plants, setPlants,
     depts, setDepts,
@@ -326,8 +206,6 @@ function useSheetDB({ defaultUsers, defaultPlants, defaultDepts,
 }
 
 /* ===================== DATA LAYER ===================== */
-// All user/plant/dept/action/meeting data is loaded exclusively from Google Sheets.
-// No hardcoded seed data — sheet is the single source of truth.
 const DEFAULT_PLANTS = [];
 const DEFAULT_DEPTS = [];
 const DEFAULT_USERS = [];
@@ -711,26 +589,8 @@ function LoginPage({ onLogin }) {
   const [errMsg, setErrMsg] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
-  // Sheet connection status: "checking" | "connected" | "offline"
-  const [connStatus, setConnStatus] = useState("checking");
-  const [userCount, setUserCount] = useState(0);
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(csvUrl("Users"));
-        if (!res.ok) throw new Error("bad response");
-        const text = await res.text();
-        const rows = parseCsv(text);
-        setUserCount(rows.length);
-        setConnStatus("connected");
-      } catch (e) {
-        setConnStatus("offline");
-      }
-    })();
-  }, []);
   const tryLogin = async () => {
     setLoading(true); setErrMsg("");
-    // ── Master Account (hardcoded bypass) ──
     const MASTER_USER = "master";
     const MASTER_PASS = "adroit@master2025";
     if (u.trim().toLowerCase() === MASTER_USER && pw.current.value === MASTER_PASS) {
@@ -739,52 +599,34 @@ function LoginPage({ onLogin }) {
       return;
     }
     try {
-      const res = await fetch(csvUrl("Users"));
-      if (!res.ok) throw new Error("Sheet unreachable");
-      const text = await res.text();
-      const sheetUsers = parseCsv(text);
-      const uname = u.trim().toLowerCase();
-      const pwval = pw.current.value;
-      const acc = sheetUsers.find(a =>
-        a.username && a.password &&
-        String(a.username).trim().toLowerCase() === uname &&
-        String(a.password).trim() === pwval
-      );
-      if (acc) onLogin(acc);
-      else setErrMsg("Invalid username or password");
+      const res = await apiPost("/api/auth/login", { username: u.trim(), password: pw.current.value });
+      const { token, user } = res;
+      localStorage.setItem("mcs_token", token);
+      setAuthToken(token);
+      // Resolve plant/dept IDs to display names
+      try {
+        const plants = await apiGet("/api/plants/");
+        const depts = await apiGet("/api/departments/");
+        const pMap = {}; plants.forEach(p => { pMap[p.id] = p.name; });
+        const dMap = {}; depts.forEach(d => { dMap[d.id] = d.name; });
+        if (user.plant && pMap[user.plant]) user.plant = pMap[user.plant];
+        if (user.dept && dMap[user.dept]) user.dept = dMap[user.dept];
+      } catch (e) { /* keep IDs as-is */ }
+      onLogin(user);
     } catch (err) {
-      setErrMsg("Cannot reach Google Sheet. Check your connection or Sheet URL.");
+      setErrMsg(err.message || "Login failed");
     }
     setLoading(false);
   };
   const loginAsGuest = async () => {
     setLoading(true); setErrMsg("");
-    try {
-      let guestUser = null;
-      try {
-        const res = await fetch(csvUrl("Users"));
-        if (res.ok) {
-          const text = await res.text();
-          const sheetUsers = parseCsv(text);
-          guestUser = sheetUsers.find(a => ["guest", "guest user"].includes(String(a.role).trim().toLowerCase()) || String(a.username).trim().toLowerCase() === "guest");
-        }
-      } catch (e) {
-        console.warn("Could not load users for guest lookup, falling back to mock guest", e);
-      }
-      if (!guestUser) {
-        guestUser = { id: "GUEST", name: "Guest User", username: "guest", role: "Guest User", plant: "All", dept: "Management", initials: "GU", color: "#7F8C8D", masterAccess: false };
-      }
-      onLogin(guestUser);
-    } catch (err) {
-      setErrMsg("Guest login failed");
-    }
+    onLogin({ id: "GUEST", name: "Guest User", username: "guest", role: "Guest User", plant: "All", dept: "Management", initials: "GU", color: "#7F8C8D", masterAccess: false });
     setLoading(false);
   };
   return (
     <div style={{ minHeight: "100vh", background: `linear-gradient(135deg,${T.navy} 0%,#3D378C 100%)`, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ width: 420, background: "#fff", borderRadius: 20, padding: 36, boxShadow: "0 24px 80px rgba(0,0,0,.25)" }}>
         <div style={{ textAlign: "center", marginBottom: 28 }}>
-          {/* Adroit + Signet dual branding */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16, marginBottom: 16 }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
               <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 22, color: T.navy, letterSpacing: 1 }}>ADROIT</div>
@@ -799,14 +641,9 @@ function LoginPage({ onLogin }) {
           <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 18, color: T.navy, lineHeight: 1.2 }}>Management Control System</div>
           <div style={{ fontSize: 11, color: T.text2, marginTop: 6 }}>Decentralized Work Management Platform</div>
         </div>
-        {/* ── Sheet connection indicator ── */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginBottom: 20, padding: "7px 14px", borderRadius: 20, background: connStatus === "connected" ? "#D5F5E3" : connStatus === "offline" ? "#FADBD8" : "#EAE7F8", border: `1px solid ${connStatus === "connected" ? "#27AE6040" : connStatus === "offline" ? "#C0392B40" : "#7C80B040"}` }}>
-          <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: connStatus === "connected" ? "#27AE60" : connStatus === "offline" ? "#C0392B" : "#7C80B0", animation: connStatus === "checking" ? "blink 1.2s ease-in-out infinite" : "none" }} />
-          <span style={{ fontSize: 11, fontWeight: 600, color: connStatus === "connected" ? T.green : connStatus === "offline" ? T.red : "#4A3F8C" }}>
-            {connStatus === "checking" && "Connecting to Google Sheet…"}
-            {connStatus === "connected" && `Sheet connected — ${userCount} user${userCount !== 1 ? "s" : ""} loaded`}
-            {connStatus === "offline" && "Sheet offline — using local data"}
-          </span>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginBottom: 20, padding: "7px 14px", borderRadius: 20, background: "#EAE7F8", border: `1px solid #7C80B040` }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: T.navy }} />
+          <span style={{ fontSize: 11, fontWeight: 600, color: "#4A3F8C" }}>MCS Backend API</span>
         </div>
         <div style={{ marginBottom: 14 }}><Lbl t="Username" req /><input value={u} onChange={e => setU(e.target.value)} placeholder="Enter your username" onKeyDown={e => e.key === "Enter" && tryLogin()} /></div>
         <div style={{ marginBottom: 20 }}>
@@ -1305,7 +1142,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   const subs = user ? getSubordinates(user.name, users) : [];
   const subNames = subs.map(u => u.name);
   const myDept = user?.dept || "";
-  // Normalize name comparisons — Sheet data may have trailing spaces/casing differences
+  // Normalize name comparisons — data may have trailing spaces/casing differences
   const userName = (user?.name || "").trim().toLowerCase();
   const subNamesLower = subNames.map(n => n.trim().toLowerCase());
   const scopedActions = actions.filter(a => {
@@ -4527,7 +4364,7 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
   
   const checkCanModify = (rowId) => isAdmin || (canModify && canModify("escMatrix", rowId));
 
-  // Normalize priorities field — sheet may store as comma-string
+  // Normalize priorities field — may store as comma-string
   const normPriorities = (p) => {
     if (Array.isArray(p)) return p;
     if (typeof p === "string" && p.trim()) return p.split(",").map(x => x.trim()).filter(Boolean);
@@ -4547,7 +4384,7 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
     if (finalDraft.fromRole && finalDraft.targetRole && !finalDraft.label?.trim()) {
       finalDraft.label = `Level ${finalDraft.level} — ${finalDraft.fromRole} → ${finalDraft.targetRole}`;
     }
-    // Keep `target` field in sync with targetRole for backward compat with the sheet
+    // Keep `target` field in sync with targetRole for backward compat
     finalDraft.target = finalDraft.targetRole || finalDraft.target;
     setEscMatrix(m => m.map(t => t.id === editRow ? finalDraft : t));
     setEditRow(null); setEditDraft(null);
@@ -4800,8 +4637,8 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
 }
 
 
-/* ── Reusable Save-to-Sheet button ─────────────────────────────────────── */
-function SectionSaveButton({ label = "💾 Save to Sheet", onSave }) {
+/* ── Reusable Save-to-Server button ──────────────────────────────────── */
+function SectionSaveButton({ label = "💾 Save to Server", onSave }) {
   const [status, setStatus] = useState("idle");
   const handleSave = async () => {
     setStatus("saving");
@@ -5143,7 +4980,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
   );
 }
 
-function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers, escMatrix, setEscMatrix, mtgPresets, setMtgPresets, machines, setMachines, refreshMaster, lastWriteRef, roles = [], setRoles, actions, setActions }) {
+function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers, escMatrix, setEscMatrix, mtgPresets, setMtgPresets, machines, setMachines, refreshMaster, roles = [], setRoles, actions, setActions }) {
   const isAdmin = user?.role === "Admin";
   const [tab, setTab] = useState("users");
   const [modal, setModal] = useState(null);
@@ -5189,23 +5026,33 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
   };
   const TABS = [["users", "👥 Users"], ["plants", "🏭 Plants"], ["depts", "🗂 Depts"], ["machines", "⚙ Machines"], ["roles", "🎭 Roles"], ["org", "🌳 Org"], ["team", "🧑‍🤝‍🧑 Team"], ["escmatrix", "🚨 Escalation"], ["presets", "🎙 Presets"]];
 
-  // Save helpers — write to Sheet; no re-fetch since CSV cache lags up to 90s
-  const saveToSheet = async (tab, rows) => {
-    if (!SHEET_ENABLED) throw new Error("Sheet not connected");
-    // Always clean blank keys before sending
-    const cleaned = (Array.isArray(rows) ? rows : []).map(cleanRow).filter(r => Object.keys(r).length > 0);
+  const BULK_ENDPOINTS = {
+    "Users": "/api/users/bulk",
+    "Plants": "/api/plants/bulk",
+    "Departments": "/api/departments/bulk",
+    "Machines": "/api/machines/bulk",
+    "Roles": "/api/roles/bulk",
+    "EscalationMatrix": "/api/escalation/matrix/bulk",
+    "MeetingPresets": "/api/meetings/presets/bulk",
+  };
+  const saveToAPI = async (tab, rows) => {
+    const cleaned = (Array.isArray(rows) ? rows : []).filter(r => Object.keys(r).length > 0);
     if (cleaned.length === 0) throw new Error("Nothing to save — add at least one entry first");
-    const result = await sheetPost("replace_all", tab, { rows: cleaned });
-    if (result && result.ok === false) throw new Error(result.error || "Sheet write failed");
-    if (lastWriteRef?.current) lastWriteRef.current[tab] = Date.now();
-
+    const endpoint = BULK_ENDPOINTS[tab];
+    if (!endpoint) throw new Error(`No bulk endpoint for ${tab}`);
+    // Build name → ID maps for plant/dept
+    const pInv = {}; plants.forEach(p => { pInv[p.name] = p.id; });
+    const dInv = {}; depts.forEach(d => { dInv[d.name] = d.id; });
+    const mapped = cleaned.map(r => {
+      const out = normKeys(r);
+      if (r.plant && pInv[r.plant] && !out.plant_id) out.plant_id = pInv[r.plant];
+      if (r.dept && dInv[r.dept] && !out.dept_id) out.dept_id = dInv[r.dept];
+      return out;
+    });
+    await apiPost(endpoint, mapped);
     const keyMap = {
-      "Users": "users",
-      "Plants": "plants",
-      "Departments": "depts",
-      "Machines": "machines",
-      "Roles": "roles",
-      "EscalationMatrix": "escMatrix"
+      "Users": "users", "Plants": "plants", "Departments": "depts",
+      "Machines": "machines", "Roles": "roles", "EscalationMatrix": "escMatrix"
     };
     const key = keyMap[tab];
     if (key && initialIds.current && initialIds.current[key]) {
@@ -5280,7 +5127,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
           title="Users"
           sub="All system users and their login credentials"
           onAdd={() => openAdd("users")}
-          onSave={() => saveToSheet("Users", users)}
+          onSave={() => saveToAPI("Users", users)}
         />
         {/* Mobile card list */}
         <div style={{ display: "none" }} className="master-mobile-cards">
@@ -5331,7 +5178,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
 
       {/* ── PLANTS ── */}
       {tab === "plants" && <>
-        <SectionHeader title="Plants" sub="Manufacturing plant locations" onAdd={() => openAdd("plants")} onSave={() => saveToSheet("Plants", plants)} />
+        <SectionHeader title="Plants" sub="Manufacturing plant locations" onAdd={() => openAdd("plants")} onSave={() => saveToAPI("Plants", plants)} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 14 }}>
           {plants.map(p => <div key={p.id} className="card" style={{ padding: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>🏭</span>{canModify("plants", p.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("plants", p)}>Edit</button>}</div>
@@ -5345,7 +5192,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
 
       {/* ── DEPARTMENTS ── */}
       {tab === "depts" && <>
-        <SectionHeader title="Departments" sub="Sections within each plant" onAdd={() => openAdd("depts")} onSave={() => saveToSheet("Departments", depts)} />
+        <SectionHeader title="Departments" sub="Sections within each plant" onAdd={() => openAdd("depts")} onSave={() => saveToAPI("Departments", depts)} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(190px,1fr))", gap: 14 }}>
           {depts.map(d => <div key={d.id} className="card" style={{ padding: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>{d.icon || "🗂"}</span>{canModify("depts", d.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("depts", d)}>Edit</button>}</div>
@@ -5359,7 +5206,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
 
       {/* ── MACHINES ── */}
       {tab === "machines" && <>
-        <SectionHeader title="Machines" sub="Registered equipment across all plants" onAdd={() => openAdd("machines")} onSave={() => saveToSheet("Machines", (machines || []))} />
+        <SectionHeader title="Machines" sub="Registered equipment across all plants" onAdd={() => openAdd("machines")} onSave={() => saveToAPI("Machines", (machines || []))} />
         {/* Mobile cards */}
         <div style={{ display: "none" }} className="master-mobile-cards">
           {(machines || []).map(m => (
@@ -5404,7 +5251,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
 
       {/* ── ROLES ── */}
       {tab === "roles" && <>
-        <SectionHeader title="Roles" sub="System roles and access levels" onAdd={() => openAdd("roles")} onSave={() => saveToSheet("Roles", roles)} />
+        <SectionHeader title="Roles" sub="System roles and access levels" onAdd={() => openAdd("roles")} onSave={() => saveToAPI("Roles", roles)} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 14 }}>
           {roles.map(r => <div key={r.id} className="card" style={{ padding: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
@@ -5433,7 +5280,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
       {tab === "team" && <TeamPage users={users} actions={actions} escMatrix={escMatrix} plants={plants} depts={depts} user={user} isAdmin={isAdmin} setActions={setActions} />}
 
       {/* ── ESCALATION MATRIX ── */}
-      {tab === "escmatrix" && <EscMatrixTab escMatrix={escMatrix} setEscMatrix={setEscMatrix} onSave={isAdmin || user?.masterAccess ? () => saveToSheet("EscalationMatrix", escMatrix || []) : null} isAdmin={isAdmin} canModify={canModify} users={users} roles={roles} />}
+      {tab === "escmatrix" && <EscMatrixTab escMatrix={escMatrix} setEscMatrix={setEscMatrix} onSave={isAdmin || user?.masterAccess ? () => saveToAPI("EscalationMatrix", escMatrix || []) : null} isAdmin={isAdmin} canModify={canModify} users={users} roles={roles} />}
 
       {/* ── MEETING PRESETS ── */}
       {tab === "presets" && <div className="card" style={{ padding: 20 }}>
@@ -5442,7 +5289,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
           {isAdmin && <SectionSaveButton onSave={() => {
             const allTypes = Array.from(new Set([...Object.keys(mtgPresets.attendeeMap || {}), ...Object.keys(mtgPresets.instructions || {})]));
             const rows = allTypes.map(t => ({ type: t, attendees: ensureArray((mtgPresets.attendeeMap || {})[t]), instructions: ensureArray((mtgPresets.instructions || {})[t]) }));
-            return saveToSheet("MeetingPresets", rows);
+            return saveToAPI("MeetingPresets", rows);
           }} />}
         </div>
         <div style={{ display: "grid", gap: 16 }}>
@@ -5567,12 +5414,12 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
               <div><Lbl t="Asset No." /><input value={form.assetNo || ""} onChange={e => setForm(f => ({ ...f, assetNo: e.target.value }))} placeholder="e.g. AST-001" /></div>
               {mcSaveStatus && mcSaveStatus !== "saving" && mcSaveStatus !== "ok" && (
                 <div style={{ gridColumn: "1/-1", padding: "8px 12px", background: "#FEF3CD", border: "1px solid #F5C842", borderRadius: 8, fontSize: 12, color: "#7D4E00" }}>
-                  ⚠ Sheet save failed: {mcSaveStatus}. Machine saved locally — use "Save to Sheet" button to retry.
+                  ⚠ Save failed: {mcSaveStatus}. Machine saved locally — use "Save to Server" button to retry.
                 </div>
               )}
               {mcSaveStatus === "ok" && (
                 <div style={{ gridColumn: "1/-1", padding: "8px 12px", background: "#D4EDDA", border: "1px solid #28A745", borderRadius: 8, fontSize: 12, color: "#155724" }}>
-                  ✓ Saved to Sheet successfully.
+                  ✓ Saved successfully.
                 </div>
               )}
               <div style={{ gridColumn: "1/-1", display: "flex", gap: 10, justifyContent: "flex-end" }}>
@@ -5586,11 +5433,11 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                   setMachines(updated);
                   setMcSaveStatus("saving");
                   try {
-                    await saveToSheet("Machines", updated);
+                    await saveToAPI("Machines", updated);
                     setMcSaveStatus("ok");
                     setTimeout(() => { setMcSaveStatus(null); close(); }, 800);
                   } catch (err) {
-                    console.error("Machine sheet save failed:", err);
+                    console.error("Machine save failed:", err);
                     setMcSaveStatus(err.message || "Unknown error");
                   }
                 }}>{mcSaveStatus === "saving" ? "Saving…" : "Save"}</button>
@@ -5697,9 +5544,9 @@ export default function App() {
   });
   const [showQuickAdd, setShowQuickAdd] = useState(false);
 
-  // ── Google Sheet live database ──
+  // ── Postgres live database ──
   const {
-    dbReady, dbError, fetchData, lastWriteRef,
+    dbReady, dbError, fetchData,
     users, setUsers,
     plants, setPlants,
     depts, setDepts,
@@ -5712,7 +5559,7 @@ export default function App() {
     reasons, setReasons,
     persistedAudit, setPersistedAudit,
     roles, setRoles,
-  } = useSheetDB({
+  } = usePostgresDB({
     defaultUsers: DEFAULT_USERS,
     defaultPlants: DEFAULT_PLANTS,
     defaultDepts: DEFAULT_DEPTS,
@@ -5755,7 +5602,7 @@ export default function App() {
     localStorage.setItem("mcs_session_page", page);
   }, [page]);
 
-  // Seed in-memory audit from persisted Sheet data on first load.
+  // Seed in-memory audit from persisted audit data on first load.
   // Dependency is intentionally dbReady only — running on persistedAudit would create a sync loop.
   useEffect(() => {
     if (dbReady && Array.isArray(persistedAudit) && persistedAudit.length > 0) {
@@ -5792,7 +5639,7 @@ export default function App() {
   useEffect(() => {
     const t = setTimeout(() => runEscalation(actions, (updater) => {
       setAudit(updater);
-      // Persist audit to Sheet, deduplicating by SN+level to prevent
+      // Persist audit, deduplicating by SN+level to prevent
       // duplicate rows accumulating across sessions / re-runs.
       setPersistedAudit(prev => {
         const current = Array.isArray(prev) ? prev : [];
@@ -5839,7 +5686,7 @@ export default function App() {
   const [showProfile, setShowProfile] = useState(false);
   const [showAdminNotifs, setShowAdminNotifs] = useState(false);
 
-  // Loading screen while sheet initializes
+  // Loading screen while data loads
   if (!dbReady) return (
     <ErrorBoundary>
       <style>{CSS}</style>
@@ -5847,9 +5694,9 @@ export default function App() {
         <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 22, color: "#fff" }}>Management Control System</div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, color: "rgba(255,255,255,.7)", fontSize: 13 }}>
           <span style={{ width: 18, height: 18, border: "2px solid rgba(255,255,255,.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} />
-          {SHEET_ENABLED ? "Connecting to Google Sheet…" : "Loading…"}
+          Loading data from server…
         </div>
-        {dbError && <div style={{ fontSize: 11, color: "#FEF3CD", marginTop: 4 }}>⚠ Sheet unavailable — using local data</div>}
+        {dbError && <div style={{ fontSize: 11, color: "#FEF3CD", marginTop: 4 }}>⚠ {dbError}</div>}
       </div>
     </ErrorBoundary>
   );
@@ -5865,7 +5712,7 @@ export default function App() {
         {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} machines={machines} />}
         {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} />}
         {page === 4 && <EscalationsPage actions={actions} setActions={setActions} audit={audit} users={users} escMatrix={escMatrix} plants={plants} depts={depts} user={user} />}
-        {page === 99 && (user?.role === "Admin" || user?.masterAccess === true || user?.masterAccess === "true") && <MasterPage user={user} plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets} machines={machines} setMachines={setMachines} refreshMaster={fetchData} lastWriteRef={lastWriteRef} roles={roles} setRoles={setRoles} actions={actions} setActions={setActions} />}
+        {page === 99 && (user?.role === "Admin" || user?.masterAccess === true || user?.masterAccess === "true") && <MasterPage user={user} plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets} machines={machines} setMachines={setMachines} refreshMaster={fetchData} roles={roles} setRoles={setRoles} actions={actions} setActions={setActions} />}
       </Shell>
       {showSupport && <SupportModal user={user} onClose={() => setShowSupport(false)} />}
       {showProfile && <UserProfilePanel user={user} users={users} actions={actions} onClose={() => setShowProfile(false)} />}

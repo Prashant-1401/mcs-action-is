@@ -100,3 +100,18 @@ async def create_action_message(action_id: str, data: ActionMessageCreate, db: A
     await db.commit()
     await db.refresh(msg)
     return msg
+
+@router.post("/bulk")
+async def bulk_upsert_actions(rows: list[ActionCreate], db: AsyncSession = Depends(get_db)):
+    upserted = 0
+    for data in rows:
+        result = await db.execute(select(Action).where(Action.id == data.id))
+        existing = result.scalar_one_or_none()
+        if existing:
+            for k, v in data.model_dump(exclude_unset=True).items():
+                setattr(existing, k, v)
+        else:
+            db.add(Action(**data.model_dump()))
+        upserted += 1
+    await db.commit()
+    return {"ok": True, "upserted": upserted}
