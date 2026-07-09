@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-to-a-random-secret"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 480
-    allowed_origins: str = "http://localhost:5173"
+    allowed_origins: str = "*"
     api_key: str = ""
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587

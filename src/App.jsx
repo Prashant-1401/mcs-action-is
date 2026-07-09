@@ -5019,13 +5019,17 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
     if (!form.name || !form.role || !form.plant) return;
     if (!isGuestRole(form.role) && (!form.username || !form.password)) return;
     const { _showPw, ...cleanForm } = form;
+    const pMap = {}; plants.forEach(p => { pMap[p.name] = p.id; });
+    const dMap = {}; depts.forEach(d => { dMap[d.name] = d.id; });
     const u = {
       ...cleanForm,
       username: isGuestRole(form.role) ? (form.username || "guest") : form.username,
       password: isGuestRole(form.role) ? (form.password || "") : form.password,
-      id: cleanForm.id || "U" + String(users.length + 1).padStart(2, "0"),
+      id: cleanForm.id || "U" + String(Date.now()).slice(-6),
       initials: cleanForm.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
-      color: cleanForm.color || COLORS[users.length % 6]
+      color: cleanForm.color || COLORS[users.length % 6],
+      plantId: pMap[cleanForm.plant] || cleanForm.plantId || "",
+      deptId: dMap[cleanForm.dept] || cleanForm.deptId || "",
     };
     if (modal.mode === "edit") setUsers(p => p.map(x => x.id === u.id ? u : x)); else setUsers(p => [...p, u]); close();
   };
@@ -5385,9 +5389,9 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
               <div><Lbl t="Hierarchy Level" req /><input type="number" min={1} value={form.level || ""} onChange={e => setForm(f => ({ ...f, level: e.target.value === "" ? "" : parseInt(e.target.value, 10) }))} placeholder="e.g. 1 (Highest) to 8 (Lowest)" /></div>
               <div style={{ gridColumn: "1/-1", display: "flex", gap: 10, justifyContent: "flex-end" }}>
                 <button className="btn btn-ghost" onClick={close}>Cancel</button>
-                <button className="btn btn-navy" onClick={() => {
+                  <button className="btn btn-navy" onClick={() => {
                   if (!form.name || form.level === undefined || form.level === "") return;
-                  const r = { ...form, id: form.id || "R" + String(roles.length + 1) };
+                  const r = { ...form, id: form.id || "R" + String(Date.now()).slice(-6) };
                   if (modal.mode === "edit") {
                     setRoles(prev => prev.map(x => x.id === r.id ? r : x));
                   } else {
@@ -5401,7 +5405,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
               <div><Lbl t="Plant Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
               <div><Lbl t="Location" /><input value={form.location || ""} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} /></div>
               <div><Lbl t="Plant Head" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const p = { ...form, id: form.id || "P" + String(plants.length + 1) }; if (modal.mode === "edit") setPlants(pp => pp.map(x => x.id === p.id ? p : x)); else setPlants(pp => [...pp, p]); close(); }}>Save</button></div>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const p = { ...form, id: form.id || "P" + String(Date.now()).slice(-6) }; if (modal.mode === "edit") setPlants(pp => pp.map(x => x.id === p.id ? p : x)); else setPlants(pp => [...pp, p]); close(); }}>Save</button></div>
             </div>}
             {modal.type === "depts" && <div style={{ display: "grid", gap: 12 }}>
               <div><Lbl t="Dept Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
@@ -5410,7 +5414,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                 <div><Lbl t="Icon" /><input value={form.icon || ""} onChange={e => setForm(f => ({ ...f, icon: e.target.value }))} /></div>
                 <div><Lbl t="HOD" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
               </div>
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const d = { ...form, id: form.id || "D" + String(depts.length + 1), icon: form.icon || "🔹" }; if (modal.mode === "edit") setDepts(pp => pp.map(x => x.id === d.id ? d : x)); else setDepts(pp => [...pp, d]); close(); }}>Save</button></div>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const pMap = {}; plants.forEach(p => { pMap[p.name] = p.id; }); const d = { ...form, id: form.id || "D" + String(Date.now()).slice(-6), icon: form.icon || "🔹", plantId: pMap[form.plant] || form.plantId || "" }; if (modal.mode === "edit") setDepts(pp => pp.map(x => x.id === d.id ? d : x)); else setDepts(pp => [...pp, d]); close(); }}>Save</button></div>
             </div>}
             {modal.type === "machines" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Machine Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Furnace Line 1" /></div>
@@ -5432,7 +5436,11 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                 <button className="btn btn-ghost" onClick={close}>Cancel</button>
                 <button className="btn btn-navy" disabled={mcSaveStatus === "saving"} onClick={async () => {
                   if (!form.name) return;
-                  const mc = { ...form, id: form.id || "MC" + String((machines || []).length + 1).padStart(2, "0") };
+                  const mc = { ...form, id: form.id || "MC" + String(Date.now()).slice(-6) };
+                  const pMap = {}; plants.forEach(p => { pMap[p.name] = p.id; });
+                  const dMap = {}; depts.forEach(d => { dMap[d.name] = d.id; });
+                  mc.plantId = pMap[form.plant] || form.plantId || "";
+                  mc.deptId = dMap[form.dept] || form.deptId || "";
                   const updated = modal.mode === "edit"
                     ? (machines || []).map(x => x.id === mc.id ? mc : x)
                     : [...(machines || []), mc];
