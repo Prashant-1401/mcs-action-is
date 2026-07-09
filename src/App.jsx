@@ -32,6 +32,17 @@ function apiPost(path, body) { return apiFetch(path, { method: "POST", body: JSO
 function apiPatch(path, body) { return apiFetch(path, { method: "PATCH", body: JSON.stringify(body) }); }
 function apiDelete(path) { return apiFetch(path, { method: "DELETE" }); }
 
+/* ─── API Persistence Sync (fire-and-forget with error log) ── */
+async function apiCreate(resource, data) {
+  return apiPost(`/api/${resource}/`, normKeys(data)).catch(e => console.warn(`POST /api/${resource}/ failed:`, e.message));
+}
+async function apiUpdate(resource, id, data) {
+  return apiPatch(`/api/${resource}/${id}`, normKeys(data)).catch(e => console.warn(`PATCH /api/${resource}/${id} failed:`, e.message));
+}
+async function apiRemove(resource, id) {
+  return apiDelete(`/api/${resource}/${id}`).catch(e => console.warn(`DELETE /api/${resource}/${id} failed:`, e.message));
+}
+
 /* ─── Key transforms (snake_case ↔ camelCase) ─────────────── */
 const SNAKE_TO_CAMEL = {
   plant_id: "plantId", dept_id: "deptId", machine_id: "machineId",
@@ -1230,11 +1241,14 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
     .slice(0, 3);
 
   // Fix 3: unified action update + single panel state
-  const upAction = (id, patch) => setActions && setActions(p => p.map(a => {
-    if (a.id !== id) return a;
-    if (patch.due && patch.due !== a.due) { const rev = { date: todayStr(), from: a.due, to: patch.due, by: user?.name || "Unknown" }; return { ...a, ...patch, revisions: (a.revisions || 0) + 1, revisionHistory: [...(a.revisionHistory || []), rev] }; }
-    return { ...a, ...patch };
-  }));
+  const upAction = (id, patch) => {
+    setActions && setActions(p => p.map(a => {
+      if (a.id !== id) return a;
+      if (patch.due && patch.due !== a.due) { const rev = { date: todayStr(), from: a.due, to: patch.due, by: user?.name || "Unknown" }; return { ...a, ...patch, revisions: (a.revisions || 0) + 1, revisionHistory: [...(a.revisionHistory || []), rev] }; }
+      return { ...a, ...patch };
+    }));
+    apiUpdate("actions", id, patch);
+  };
 
   // State — single unified action detail panel
   const [actionPanel, setActionPanel] = useState(null);
@@ -1934,11 +1948,11 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
       </div>
       {charter && <ProjectCharterModal pr={charter} onClose={() => { setCharter(null); setCharterActionSel(null); }} actions={actions} meetings={meetings} user={user} users={users} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); onProjectUpdate(updated); }} onActionSelect={a => setCharterActionSel(a)} />}
       {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={() => { }} user={user} users={users} allUsers={users} plants={plants} />}
-      {showAddMtg && <AddMeetingModal plants={plants} users={users} projects={projects} onSave={m => { setMeetings(p => [...p, { ...m, id: "M" + Date.now(), completedSessions: [] }]); setShowAddMtg(false); }} onClose={() => setShowAddMtg(false)} />}
+      {showAddMtg && <AddMeetingModal plants={plants} users={users} projects={projects} onSave={m => { const mtg = { ...m, id: "M" + Date.now(), completedSessions: [] }; setMeetings(p => [...p, mtg]); apiCreate("meetings", mtg); setShowAddMtg(false); }} onClose={() => setShowAddMtg(false)} />}
       {/* Feature 3: Add Project Modal */}
-      {showAddProject && <AddProjectModal plants={plants} users={users} onSave={p => { setProjects(prev => [...prev, { ...p, id: "PR" + Date.now(), milestones: [], risks: "", team: [] }]); showAddProject && setShowAddProject(false); }} onClose={() => setShowAddProject(false)} />}
+      {showAddProject && <AddProjectModal plants={plants} users={users} onSave={p => { const pr = { ...p, id: "PR" + Date.now(), milestones: [], risks: "", team: [] }; setProjects(prev => [...prev, pr]); apiCreate("projects", pr); showAddProject && setShowAddProject(false); }} onClose={() => setShowAddProject(false)} />}
       {/* Feature 4: Meeting Plan Side Panel */}
-      {mtgPlan && <MeetingPlanPanel key={mtgPlan.id} mtg={mtgPlan} canEdit={canEditMeetings} projects={projects} users={users} plants={plants} onSave={updated => { setMeetings(p => p.map(m => m.id === updated.id ? updated : m)); setMtgPlan(updated); }} onClose={() => setMtgPlan(null)} mtgPresets={mtgPresets} />}
+      {mtgPlan && <MeetingPlanPanel key={mtgPlan.id} mtg={mtgPlan} canEdit={canEditMeetings} projects={projects} users={users} plants={plants} onSave={updated => { setMeetings(p => p.map(m => m.id === updated.id ? updated : m)); setMtgPlan(updated); apiUpdate("meetings", updated.id, updated); }} onClose={() => setMtgPlan(null)} mtgPresets={mtgPresets} />}
     </div>
   );
 }
@@ -2782,10 +2796,12 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
               ? { ...a, status, closedOn: status === "COMPLETED" ? todayStr() : null, pendingConfirmation: false }
               : a
             ));
+            apiUpdate("actions", id, { status, closedOn: status === "COMPLETED" ? todayStr() : null, pendingConfirmation: false });
           };
           const mtgUpAction = (id, patch) => {
             if (!setActions) return;
             setActions(prev => prev.map(a => String(a.id) === String(id) ? { ...a, ...patch } : a));
+            apiUpdate("actions", id, patch);
           };
           const canDrag = !!setActions;
           if (filteredPending.length === 0) return (
@@ -3527,14 +3543,17 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     return true;
   });
 
-  const upAction = (id, patch) => setActions(p => p.map(a => {
-    if (String(a.id) !== String(id)) return a;
-    if (patch.due && patch.due !== a.due) {
-      const rev = { date: todayStr(), from: a.due, to: patch.due, by: user?.name || "Unknown" };
-      return { ...a, ...patch, revisions: (a.revisions || 0) + 1, revisionHistory: [...(a.revisionHistory || []), rev] };
-    }
-    return { ...a, ...patch };
-  }));
+  const upAction = (id, patch) => {
+    setActions(p => p.map(a => {
+      if (String(a.id) !== String(id)) return a;
+      if (patch.due && patch.due !== a.due) {
+        const rev = { date: todayStr(), from: a.due, to: patch.due, by: user?.name || "Unknown" };
+        return { ...a, ...patch, revisions: (a.revisions || 0) + 1, revisionHistory: [...(a.revisionHistory || []), rev] };
+      }
+      return { ...a, ...patch };
+    }));
+    apiUpdate("actions", id, patch);
+  };
   const upStatus = (id, status) => {
     if (status === "COMPLETED") {
       // If the status filter is active and doesn't include COMPLETED, add it
@@ -4389,6 +4408,7 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
     // Keep `target` field in sync with targetRole for backward compat
     finalDraft.target = finalDraft.targetRole || finalDraft.target;
     setEscMatrix(m => m.map(t => t.id === editRow ? finalDraft : t));
+    apiUpdate("escalation/matrix", editRow, finalDraft);
     setEditRow(null); setEditDraft(null);
   };
   const cancelEdit = () => { setEditRow(null); setEditDraft(null); };
@@ -4413,10 +4433,16 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
       superiors: [],
     };
     setEscMatrix(m => [...m, newTier]);
+    apiCreate("escalation/matrix", newTier);
     setEditRow(newTier.id); setEditDraft({ ...newTier, priorities: [...newTier.priorities], superiors: [] });
   };
-  const deleteTier = (id) => setEscMatrix(m => m.filter(t => t.id !== id));
-  const toggleActive = (id) => setEscMatrix(m => m.map(t => t.id === id ? { ...t, active: !t.active } : t));
+  const deleteTier = (id) => { setEscMatrix(m => m.filter(t => t.id !== id)); apiRemove("escalation/matrix", id); };
+  const toggleActive = (id) => setEscMatrix(m => {
+    const t = m.find(x => x.id === id);
+    const nextActive = !t?.active;
+    apiUpdate("escalation/matrix", id, { active: nextActive });
+    return m.map(x => x.id === id ? { ...x, active: nextActive } : x);
+  });
 
   const allMatrix = (escMatrix || DEFAULT_ESC_MATRIX)
     .map(t => ({ ...t, priorities: normPriorities(t.priorities), superiors: normSuperiors(t.superiors) }));
@@ -4693,6 +4719,7 @@ function TeamPage({ users, actions, escMatrix, plants, depts, user, isAdmin, set
 
   const closeEscalatedAction = (actionId, status) => {
     setActions(p => p.map(a => a.id === actionId ? { ...a, status, closedOn: status === "COMPLETED" ? todayStr() : null, closedBy: user?.name || "", pendingConfirmation: false } : a));
+    apiUpdate("actions", actionId, { status, closedOn: status === "COMPLETED" ? todayStr() : null, closedBy: user?.name || "", pendingConfirmation: false });
   };
 
   const filteredUsers = (users || [])
@@ -4974,6 +5001,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
           onUpdate={(id, patch) => {
             setActions(p => p.map(a => a.id === id ? { ...a, ...patch } : a));
             setSelectedAction(p => p ? { ...p, ...patch } : p);
+            apiUpdate("actions", id, patch);
           }}
           user={user}
           users={users}
@@ -5031,7 +5059,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
       plantId: pMap[cleanForm.plant] || cleanForm.plantId || "",
       deptId: dMap[cleanForm.dept] || cleanForm.deptId || "",
     };
-    if (modal.mode === "edit") setUsers(p => p.map(x => x.id === u.id ? u : x)); else setUsers(p => [...p, u]); close();
+    if (modal.mode === "edit") { setUsers(p => p.map(x => x.id === u.id ? u : x)); apiUpdate("users", u.id, u); } else { setUsers(p => [...p, u]); apiCreate("users", u); } close();
   };
   const TABS = [["users", "👥 Users"], ["plants", "🏭 Plants"], ["depts", "🗂 Depts"], ["machines", "⚙ Machines"], ["roles", "🎭 Roles"], ["org", "🌳 Org"], ["team", "🧑‍🤝‍🧑 Team"], ["escmatrix", "🚨 Escalation"], ["presets", "🎙 Presets"]];
 
@@ -5158,7 +5186,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                 <div><span style={{ color: T.text2 }}>Password: </span>{u.password ? "••••••" : <span style={{ color: T.amber, fontWeight: 600 }}>Not set</span>}</div>
               </div>
               {canModify("users", u.id) && <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
-                <button className="btn btn-ghost btn-sm" style={{ color: T.red }} onClick={() => { if (window.confirm(`Remove "${u.name}"?`)) setUsers(p => p.filter(x => x.id !== u.id)); }}>✕ Remove</button>
+                <button className="btn btn-ghost btn-sm" style={{ color: T.red }} onClick={() => { if (window.confirm(`Remove "${u.name}"?`)) { setUsers(p => p.filter(x => x.id !== u.id)); apiRemove("users", u.id); } }}>✕ Remove</button>
               </div>}
             </div>
           ))}
@@ -5178,7 +5206,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                 <td style={{ fontSize: 12, color: T.text2 }}>{u.password ? "••••••••" : <span style={{ color: T.amber, fontWeight: 600 }}>Not set</span>}</td>
                 <td style={{ whiteSpace: "nowrap" }}>
                   {canModify("users", u.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("users", u)}>Edit</button>}
-                  {canModify("users", u.id) && <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove "${u.name}" from the system?`)) setUsers(p => p.filter(x => x.id !== u.id)); }}>✕</button>}
+                  {canModify("users", u.id) && <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove "${u.name}" from the system?`)) { setUsers(p => p.filter(x => x.id !== u.id)); apiRemove("users", u.id); } }}>✕</button>}
                 </td>
               </tr>)}</tbody>
             </table>
@@ -5229,7 +5257,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                 </div>
                 {canModify("machines", m.id) && <div style={{ display: "flex", gap: 6 }}>
                   <button className="btn btn-ghost btn-sm" onClick={() => openEdit("machines", m)}>Edit</button>
-                  <button className="btn btn-ghost btn-sm" style={{ color: T.red }} onClick={() => setMachines(p => p.filter(x => x.id !== m.id))}>✕</button>
+                  <button className="btn btn-ghost btn-sm" style={{ color: T.red }} onClick={() => { setMachines(p => p.filter(x => x.id !== m.id)); apiRemove("machines", m.id); }}>✕</button>
                 </div>}
               </div>
             </div>
@@ -5249,7 +5277,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                   <td style={{ fontSize: 12, color: T.text2 }}>{m.assetNo || "—"}</td>
                   {(isAdmin || user?.masterAccess) && <td>
                     {canModify("machines", m.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("machines", m)}>Edit</button>}
-                    {canModify("machines", m.id) && <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => setMachines(p => p.filter(x => x.id !== m.id))}>✕</button>}
+                    {canModify("machines", m.id) && <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { setMachines(p => p.filter(x => x.id !== m.id)); apiRemove("machines", m.id); }}>✕</button>}
                   </td>}
                 </tr>)}
                 {(!machines || machines.length === 0) && <tr><td colSpan={6} style={{ textAlign: "center", padding: 24, color: T.text2, fontSize: 12 }}>No machines added yet.</td></tr>}
@@ -5268,7 +5296,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
               <span style={{ fontSize: 26 }}>🎭</span>
               {canModify("roles", r.id) && <div>
                 <button className="btn btn-ghost btn-sm" onClick={() => openEdit("roles", r)}>Edit</button>
-                <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove role "${r.name}"?`)) setRoles(prev => prev.filter(x => x.id !== r.id)); }}>✕</button>
+                <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove role "${r.name}"?`)) { setRoles(prev => prev.filter(x => x.id !== r.id)); apiRemove("roles", r.id); } }}>✕</button>
               </div>}
             </div>
             <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 14, color: T.navy }}>{r.name}</div>
@@ -5394,8 +5422,10 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                   const r = { ...form, id: form.id || "R" + String(Date.now()).slice(-6) };
                   if (modal.mode === "edit") {
                     setRoles(prev => prev.map(x => x.id === r.id ? r : x));
+                    apiUpdate("roles", r.id, r);
                   } else {
                     setRoles(prev => [...prev, r]);
+                    apiCreate("roles", r);
                   }
                   close();
                 }}>Save</button>
@@ -5405,7 +5435,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
               <div><Lbl t="Plant Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
               <div><Lbl t="Location" /><input value={form.location || ""} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} /></div>
               <div><Lbl t="Plant Head" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const p = { ...form, id: form.id || "P" + String(Date.now()).slice(-6) }; if (modal.mode === "edit") setPlants(pp => pp.map(x => x.id === p.id ? p : x)); else setPlants(pp => [...pp, p]); close(); }}>Save</button></div>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const p = { ...form, id: form.id || "P" + String(Date.now()).slice(-6) }; if (modal.mode === "edit") { setPlants(pp => pp.map(x => x.id === p.id ? p : x)); apiUpdate("plants", p.id, p); } else { setPlants(pp => [...pp, p]); apiCreate("plants", p); } close(); }}>Save</button></div>
             </div>}
             {modal.type === "depts" && <div style={{ display: "grid", gap: 12 }}>
               <div><Lbl t="Dept Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
@@ -5414,7 +5444,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                 <div><Lbl t="Icon" /><input value={form.icon || ""} onChange={e => setForm(f => ({ ...f, icon: e.target.value }))} /></div>
                 <div><Lbl t="HOD" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
               </div>
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const pMap = {}; plants.forEach(p => { pMap[p.name] = p.id; }); const d = { ...form, id: form.id || "D" + String(Date.now()).slice(-6), icon: form.icon || "🔹", plantId: pMap[form.plant] || form.plantId || "" }; if (modal.mode === "edit") setDepts(pp => pp.map(x => x.id === d.id ? d : x)); else setDepts(pp => [...pp, d]); close(); }}>Save</button></div>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const pMap = {}; plants.forEach(p => { pMap[p.name] = p.id; }); const d = { ...form, id: form.id || "D" + String(Date.now()).slice(-6), icon: form.icon || "🔹", plantId: pMap[form.plant] || form.plantId || "" }; if (modal.mode === "edit") { setDepts(pp => pp.map(x => x.id === d.id ? d : x)); apiUpdate("departments", d.id, d); } else { setDepts(pp => [...pp, d]); apiCreate("departments", d); } close(); }}>Save</button></div>
             </div>}
             {modal.type === "machines" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Machine Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Furnace Line 1" /></div>
@@ -5485,14 +5515,14 @@ function useAPIBridge(actions, setActions, projects) {
 
   useEffect(() => {
     // Expose global API
-    window.MCS_API = {
-      version: "1.0.0",
-      getActions: () => actionsRef.current,
-      getAction: (id) => actionsRef.current.find(a => a.id === id || a.sn === id),
-      updateAction: (id, patch) => setActions(p => p.map(a => a.id === id ? { ...a, ...patch } : a)),
-      addAction: (action) => setActions(p => [...p, { ...action, id: Date.now(), sn: nextSN(p), created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false }]),
-      getProjects: () => projects,
-    };
+          window.MCS_API = {
+            version: "1.0.0",
+            getActions: () => actionsRef.current,
+            getAction: (id) => actionsRef.current.find(a => a.id === id || a.sn === id),
+            updateAction: (id, patch) => { setActions(p => p.map(a => a.id === id ? { ...a, ...patch } : a)); apiUpdate("actions", id, patch); },
+            addAction: (action) => { const n = { ...action, id: Date.now(), sn: nextSN(actionsRef.current), created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false }; setActions(p => [...p, n]); apiCreate("actions", n); },
+            getProjects: () => projects,
+          };
     // postMessage bridge
     const handler = (e) => {
       if (!e.data || typeof e.data !== "object") return;
@@ -5505,11 +5535,13 @@ function useAPIBridge(actions, setActions, projects) {
           break;
         case "MCS_UPDATE_ACTION":
           setActions(p => p.map(a => a.id === e.data.id ? { ...a, ...e.data.patch } : a));
+          apiUpdate("actions", e.data.id, e.data.patch);
           e.source?.postMessage({ type: "MCS_UPDATE_OK", id: e.data.id, ok: true }, "*");
           break;
         case "MCS_ADD_ACTION": {
           const newA = { ...e.data.action, id: Date.now(), sn: nextSN(actionsRef.current), created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false };
           setActions(p => [...p, newA]);
+          apiCreate("actions", newA);
           e.source?.postMessage({ type: "MCS_ADD_OK", action: newA, ok: true }, "*");
           break;
         }
@@ -5673,17 +5705,21 @@ export default function App() {
   const commitFinal = rows => {
     setActions(p => {
       const withSN = rows.map((r, i) => ({ ...r, sn: nextSN([...p, ...rows.slice(0, i)]), id: Date.now() + i, messages: r.messages || [], revisionHistory: r.revisionHistory || [], pendingConfirmation: false, allocatedBy: r.allocatedBy || user?.name || "" }));
+      withSN.forEach(r => apiCreate("actions", r));
       return [...p, ...withSN];
     });
   };
-  const updateAction = (id, patch) => setActions(p => p.map(a => {
-    if (a.id !== id) return a;
-    if (patch.due && patch.due !== a.due) {
-      const rev = { date: todayStr(), from: a.due, to: patch.due, by: user?.name || "Unknown" };
-      return { ...a, ...patch, revisions: (a.revisions || 0) + 1, revisionHistory: [...(a.revisionHistory || []), rev] };
-    }
-    return { ...a, ...patch };
-  }));
+  const updateAction = (id, patch) => {
+    setActions(p => p.map(a => {
+      if (a.id !== id) return a;
+      if (patch.due && patch.due !== a.due) {
+        const rev = { date: todayStr(), from: a.due, to: patch.due, by: user?.name || "Unknown" };
+        return { ...a, ...patch, revisions: (a.revisions || 0) + 1, revisionHistory: [...(a.revisionHistory || []), rev] };
+      }
+      return { ...a, ...patch };
+    }));
+    apiUpdate("actions", id, patch);
+  };
 
   // Sidebar Actions badge = open (non-completed, non-dropped) actions in user's plant scope
   const pendingForMe = actions.filter(a => {
@@ -5722,7 +5758,7 @@ export default function App() {
       <style>{CSS}</style>
       <Shell page={page} setPage={setPage} user={user} onLogout={() => { setUser(null); setPage(0); clearMeetingState(); }} onQuickAdd={() => setShowQuickAdd(true)} pendingCount={pendingForMe} auditCount={audit.length} activeMtg={globalActiveMtg} onResumeActiveMtg={() => setPage(1)} mtgRunning={mtgRunning} mtgElapsed={mtgElapsed} notifications={notifs} unreadCount={unreadNotifs} onMarkAllRead={markAllRead} users={users} actions={actions} onShowSupport={() => setShowSupport(true)} onShowProfile={() => setShowProfile(true)} onShowAdminNotifs={() => setShowAdminNotifs(true)}>
         {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} plants={plants} depts={depts} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} />}
-        {page === 1 && <WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows => { commitFinal(rows); clearMeetingState(); }} actions={actions} setActions={setActions} user={user} onProjectUpdate={updated => setProjects(p => p.map(x => x.id === updated.id ? updated : x))} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); }} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState} reasons={reasons} />}
+        {page === 1 && <WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows => { commitFinal(rows); clearMeetingState(); }} actions={actions} setActions={setActions} user={user} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); apiUpdate("projects", updated.id, updated); }} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); }} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState} reasons={reasons} />}
         {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} machines={machines} />}
         {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} />}
         {page === 4 && <EscalationsPage actions={actions} setActions={setActions} audit={audit} users={users} escMatrix={escMatrix} plants={plants} depts={depts} user={user} />}
@@ -5743,6 +5779,7 @@ export default function App() {
           onSave={a => {
             const newAction = { ...a, id: Date.now(), sn: nextSN(actions), dateOfAction: todayStr(), revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null, status: "IN PROCESS", messages: [], pendingConfirmation: false, allocatedBy: user?.name || "" };
             setActions(p => [...p, newAction]);
+            apiCreate("actions", newAction);
             setShowQuickAdd(false);
           }}
           onClose={() => setShowQuickAdd(false)}

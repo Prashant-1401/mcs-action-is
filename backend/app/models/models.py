@@ -209,7 +209,7 @@ class Action(Base):
     dept = relationship("Department", back_populates="actions")
     machine = relationship("Machine", back_populates="actions")
     messages = relationship("ActionMessage", back_populates="action", cascade="all, delete-orphan")
-    project_rel = relationship("Project", back_populates="actions")
+    project = relationship("Project", back_populates="actions")
 
 
 class ActionMessage(Base):

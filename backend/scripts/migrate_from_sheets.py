@@ -5,6 +5,7 @@ Usage: python scripts/migrate_from_sheets.py
 import asyncio
 import csv
 import os
+import re
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -42,6 +43,10 @@ MODEL_MAP = {
 }
 
 
+def camel_to_snake(name: str) -> str:
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
 async def migrate_table(name: str):
     model = MODEL_MAP.get(name)
     if not model:
@@ -65,7 +70,7 @@ async def migrate_table(name: str):
         inserted = 0
         skipped = 0
         for row in rows:
-            cleaned = {k: v for k, v in row.items() if k and v}
+            cleaned = {camel_to_snake(k): v for k, v in row.items() if k}
             if not cleaned:
                 skipped += 1
                 continue

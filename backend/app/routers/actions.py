@@ -53,13 +53,13 @@ async def create_action(data: ActionCreate, db: AsyncSession = Depends(get_db)):
 
 @router.patch("/{action_id}")
 async def update_action(action_id: str, data: ActionUpdate, db: AsyncSession = Depends(get_db)):
+    import datetime
     result = await db.execute(select(Action).where(Action.id == action_id))
     action = result.scalar_one_or_none()
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
     update_data = data.model_dump(exclude_unset=True)
     if update_data.get("status") in ("COMPLETED", "DROPPED") and action.status not in ("COMPLETED", "DROPPED"):
-        import datetime
         update_data["closed_on"] = datetime.date.today().isoformat()
 
     current_revisions = action.revisions or 0
@@ -68,6 +68,11 @@ async def update_action(action_id: str, data: ActionUpdate, db: AsyncSession = D
         update_data["revisions"] = current_revisions
 
     for k, v in update_data.items():
+        if isinstance(v, str) and k in ("due", "date_of_action", "closed_on", "created"):
+            try:
+                v = datetime.date.fromisoformat(v)
+            except (ValueError, TypeError):
+                pass
         setattr(action, k, v)
     await db.commit()
     await db.refresh(action)
