@@ -13,10 +13,12 @@ async function apiFetch(path, options = {}) {
   if (API_KEY) headers["x-api-key"] = API_KEY;
   const token = AUTH_TOKEN || localStorage.getItem("mcs_token");
   if (token) headers["Authorization"] = `Bearer ${token}`;
+  console.debug("API", options.method || "GET", url);
   const res = await fetch(url, { ...options, headers });
   if (!res.ok) {
     let detail;
     try { const err = await res.json(); detail = err.detail || res.statusText; } catch { detail = res.statusText; }
+    console.error("API error", res.status, detail, url);
     throw new Error(detail || `API error ${res.status}`);
   }
   if (res.status === 204) return null;
@@ -4640,21 +4642,24 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
 /* ── Reusable Save-to-Server button ──────────────────────────────────── */
 function SectionSaveButton({ label = "💾 Save to Server", onSave }) {
   const [status, setStatus] = useState("idle");
+  const [errMsg, setErrMsg] = useState(null);
   const handleSave = async () => {
     setStatus("saving");
+    setErrMsg(null);
     try { await onSave(); setStatus("saved"); }
-    catch { setStatus("error"); }
+    catch (e) { setStatus("error"); setErrMsg(e.message); console.error("Save failed:", e); }
     setTimeout(() => setStatus("idle"), 2500);
   };
   const col = status === "saved" ? T.green : status === "error" ? T.red : T.navy;
   const lbl = status === "saving" ? "Saving…" : status === "saved" ? "✓ Saved!" : status === "error" ? "⚠ Failed" : label;
-  return (
+  return <>
     <button onClick={handleSave} disabled={status === "saving"}
       style={{ padding: "8px 16px", borderRadius: 8, border: "none", cursor: status === "saving" ? "not-allowed" : "pointer", background: col, color: "#fff", fontWeight: 700, fontSize: 13, opacity: status === "saving" ? 0.7 : 1, display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", flexShrink: 0 }}>
       {status === "saving" && <span style={{ width: 13, height: 13, border: "2px solid rgba(255,255,255,.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} />}
       {lbl}
     </button>
-  );
+    {errMsg && <span style={{ fontSize: 11, color: T.red, maxWidth: 260 }}>{errMsg}</span>}
+  </>;
 }
 
 /* ── Team Page (Master Setup) ──────────────────────────────────────────────
@@ -5049,6 +5054,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
       if (r.dept && dInv[r.dept] && !out.dept_id) out.dept_id = dInv[r.dept];
       return out;
     });
+    console.log("saveToAPI", tab, endpoint, "rows:", rows.length, "mapped:", mapped.length);
     await apiPost(endpoint, mapped);
     const keyMap = {
       "Users": "users", "Plants": "plants", "Departments": "depts",

@@ -66,6 +66,22 @@ async def list_meeting_presets(db: AsyncSession = Depends(get_db)):
     return result.scalars().all()
 
 
+@router.post("/presets/bulk")
+async def bulk_upsert_meeting_presets(rows: list[MeetingPresetCreate], db: AsyncSession = Depends(get_db)):
+    upserted = 0
+    for data in rows:
+        result = await db.execute(select(MeetingPreset).where(MeetingPreset.type == data.type))
+        existing = result.scalar_one_or_none()
+        if existing:
+            for k, v in data.model_dump(exclude_unset=True).items():
+                setattr(existing, k, v)
+        else:
+            db.add(MeetingPreset(**data.model_dump()))
+        upserted += 1
+    await db.commit()
+    return {"ok": True, "upserted": upserted}
+
+
 @router.post("/presets")
 async def create_meeting_preset(data: MeetingPresetCreate, db: AsyncSession = Depends(get_db)):
     preset = MeetingPreset(**data.model_dump())
