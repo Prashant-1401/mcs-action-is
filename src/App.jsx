@@ -809,7 +809,7 @@ function useNotifications(actions, audit, user) {
     });
 
     // 3. My actions with revised due dates (revisions > 0, and I'm responsible)
-    actions.filter(a => a.responsible === user.name && a.revisions > 0).forEach(a => {
+    actions.filter(a => responsibleMatchesUsers(a.responsible, [user.name.toLowerCase()]) && a.revisions > 0).forEach(a => {
       const lastRev = a.revisionHistory?.[a.revisionHistory.length - 1];
       if (lastRev) {
         newNotifs.push({
@@ -821,7 +821,7 @@ function useNotifications(actions, audit, user) {
     });
 
     // 4. My overdue actions
-    actions.filter(a => a.responsible === user.name && isOverdue(a)).forEach(a => {
+    actions.filter(a => responsibleMatchesUsers(a.responsible, [user.name.toLowerCase()]) && isOverdue(a)).forEach(a => {
       newNotifs.push({
         id: "over_" + a.id, type: "overdue", icon: "⚠",
         title: "Action Overdue", body: `${a.sn} — ${a.text.slice(0, 50)} was due ${fmt(a.due)}`,
@@ -890,7 +890,7 @@ function UserProfilePanel({ user, users, actions, onClose, onRequestChange }) {
   const [reqMsg, setReqMsg] = useState("");
   const [reqSent, setReqSent] = useState(false);
 
-  const myActions = actions.filter(a => a.responsible === user?.name);
+  const myActions = actions.filter(a => responsibleMatchesUsers(a.responsible, [(user?.name || "").toLowerCase()]));
   const myTeam = users.filter(u => u.superior === user?.name);
   const myOpen = myActions.filter(a => a.status !== "COMPLETED" && a.status !== "DROPPED").length;
   const myOverdue = myActions.filter(isOverdue).length;
@@ -1231,7 +1231,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   const now = new Date();
   const isAdmin = user?.role === "Admin" || user?.role === "MD" || user?.role === "Plant Head";
   // Scope: my plant OR all
-  const myPlantActions = user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant);
+  const myPlantActions = user?.plant === "All" ? actions : actions.filter(a => !a.plant || a.plant === user?.plant);
 
   // Fix 3: Dashboard scope — actions assigned to me, or assigned to my subordinates, or in my department
   const getSubordinates = (name, allUsers, visited = new Set()) => {
@@ -1251,9 +1251,8 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   const scopedActions = isAdmin
     ? (user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant || !a.plant))
     : actions.filter(a => {
-    // First: plant must match (or action has no plant set)
-    const plantMatch = !a.plant || a.plant === user?.plant;
-    if (!plantMatch) return false;
+    // First: plant must match — "All" sees everything
+    if (user?.plant !== "All" && a.plant && a.plant !== user?.plant) return false;
     // Second: smart name matching against responsible field
     return responsibleMatchesUsers(a.responsible, [...subNamesLower, userName].filter(Boolean));
   });
@@ -2711,7 +2710,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
       if (!a.due) return 1; if (!b.due) return -1;
       return new Date(a.due) - new Date(b.due);
     });
-  const myPending = pendingRelated.filter(a => a.responsible === currentUser?.name || a.allocatedBy === currentUser?.name);
+  const myPending = pendingRelated.filter(a => responsibleMatchesUsers(a.responsible, [(currentUser?.name || "").toLowerCase()]) || a.allocatedBy === currentUser?.name);
   const displayPending = mtgShowMine ? myPending : pendingRelated;
 
   const insightCount = insights.reduce((n, ins) => n + ins.actions.length + ins.decisions.length + ins.risks.length + ins.keyPoints.length, 0);
@@ -3606,9 +3605,8 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const scoped = isAdmin
     ? (user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant || !a.plant))
     : actions.filter(a => {
-    // First: plant must match (or action has no plant set)
-    const plantMatch = !a.plant || a.plant === user?.plant;
-    if (!plantMatch) return false;
+    // First: plant must match — "All" sees everything
+    if (user?.plant !== "All" && a.plant && a.plant !== user?.plant) return false;
     // Second: smart name matching against responsible + allocatedBy
     const myNamesLower = scopedNames.map(n => n.trim().toLowerCase());
     const userNameLower = (user?.name || "").trim().toLowerCase();
@@ -4933,7 +4931,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
     const matchesPlant = !plantFilter || a.plant === plantFilter;
     const matchesDept = !deptFilter || a.dept === deptFilter;
     const matchesTier = !tierFilter || String(item.tier.level) === tierFilter;
-    const matchesMine = !showOnlyMine || a.responsible === user?.name;
+    const matchesMine = !showOnlyMine || responsibleMatchesUsers(a.responsible, [(user?.name || "").toLowerCase()]);
     return matchesSearch && matchesPlant && matchesDept && matchesTier && matchesMine;
   });
 
@@ -4943,7 +4941,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
       (log.reason || "").toLowerCase().includes(search.toLowerCase());
     const matchesTier = !tierFilter || String(log.level) === tierFilter;
     const action = actions.find(a => a.sn === log.sn);
-    const matchesMine = !showOnlyMine || (action && action.responsible === user?.name);
+    const matchesMine = !showOnlyMine || (action && responsibleMatchesUsers(action.responsible, [(user?.name || "").toLowerCase()]));
     return matchesSearch && matchesTier && matchesMine;
   });
 
@@ -5013,7 +5011,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
               color: showOnlyMine ? "#fff" : T.text2,
               transition: "all .2s"
             }}>
-            My Escalations ({activeEscalations.filter(e => e.action.responsible === user?.name).length})
+            My Escalations ({activeEscalations.filter(e => responsibleMatchesUsers(e.action.responsible, [(user?.name || "").toLowerCase()])).length})
           </button>
         </div>
       </div>
