@@ -5118,8 +5118,8 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
       id: cleanForm.id || "U" + String(Date.now()).slice(-6),
       initials: cleanForm.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
       color: cleanForm.color || COLORS[users.length % 6],
-      plantId: pMap[cleanForm.plant] || cleanForm.plantId || "",
-      deptId: dMap[cleanForm.dept] || cleanForm.deptId || "",
+      plantId: pMap[cleanForm.plant] || cleanForm.plantId || null,
+      deptId: dMap[cleanForm.dept] || cleanForm.deptId || null,
     };
     if (modal.mode === "edit") { setUsers(p => p.map(x => x.id === u.id ? u : x)); apiUpdate("users", u.id, u); } else { setUsers(p => [...p, u]); apiCreate("users", u); } close();
   };
@@ -5146,6 +5146,8 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
       const out = normKeys(r);
       if (r.plant && pInv[r.plant] && !out.plant_id) out.plant_id = pInv[r.plant];
       if (r.dept && dInv[r.dept] && !out.dept_id) out.dept_id = dInv[r.dept];
+      if (out.plant_id === "") out.plant_id = null;
+      if (out.dept_id === "") out.dept_id = null;
       return out;
     });
     console.log("saveToAPI", tab, endpoint, "rows:", rows.length, "mapped:", mapped.length);
@@ -5506,7 +5508,8 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                 <div><Lbl t="Icon" /><input value={form.icon || ""} onChange={e => setForm(f => ({ ...f, icon: e.target.value }))} /></div>
                 <div><Lbl t="HOD" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
               </div>
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const pMap = {}; plants.forEach(p => { pMap[p.name] = p.id; }); const d = { ...form, id: form.id || "D" + String(Date.now()).slice(-6), icon: form.icon || "🔹", plantId: pMap[form.plant] || form.plantId || "" }; if (modal.mode === "edit") { setDepts(pp => pp.map(x => x.id === d.id ? d : x)); apiUpdate("departments", d.id, d); } else { setDepts(pp => [...pp, d]); apiCreate("departments", d); } close(); }}>Save</button></div>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const pMap = {}; plants.forEach(p => { pMap[p.name] = p.id; });     const d = { ...form, id: form.id || "D" + String(Date.now()).slice(-6), icon: form.icon || "🔹", plantId: pMap[form.plant] || form.plantId || null };
+    if (modal.mode === "edit") { setDepts(pp => pp.map(x => x.id === d.id ? d : x)); apiUpdate("departments", d.id, d); } else { setDepts(pp => [...pp, d]); apiCreate("departments", d); } close(); }}>Save</button></div>
             </div>}
             {modal.type === "machines" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Machine Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Furnace Line 1" /></div>
@@ -5531,8 +5534,8 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                   const mc = { ...form, id: form.id || "MC" + String(Date.now()).slice(-6) };
                   const pMap = {}; plants.forEach(p => { pMap[p.name] = p.id; });
                   const dMap = {}; depts.forEach(d => { dMap[d.name] = d.id; });
-                  mc.plantId = pMap[form.plant] || form.plantId || "";
-                  mc.deptId = dMap[form.dept] || form.deptId || "";
+                  mc.plantId = pMap[form.plant] || form.plantId || null;
+                  mc.deptId = dMap[form.dept] || form.deptId || null;
                   const updated = modal.mode === "edit"
                     ? (machines || []).map(x => x.id === mc.id ? mc : x)
                     : [...(machines || []), mc];

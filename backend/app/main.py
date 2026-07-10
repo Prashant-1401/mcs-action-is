@@ -28,6 +28,18 @@ def migrate_schema(conn):
         conn.execute(text(
             "ALTER TABLE escalation_matrix ADD COLUMN from_role VARCHAR(50)"
         ))
+    if "target_role" not in columns:
+        conn.execute(text(
+            "ALTER TABLE escalation_matrix ADD COLUMN target_role VARCHAR(50)"
+        ))
+    if "priorities" not in columns:
+        conn.execute(text(
+            "ALTER TABLE escalation_matrix ADD COLUMN priorities JSONB DEFAULT '[]'::jsonb"
+        ))
+    if "superiors" not in columns:
+        conn.execute(text(
+            "ALTER TABLE escalation_matrix ADD COLUMN superiors JSONB DEFAULT '[]'::jsonb"
+        ))
 
 
 app = FastAPI(
