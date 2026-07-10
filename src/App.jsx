@@ -1251,10 +1251,9 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   const scopedActions = isAdmin
     ? (user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant || !a.plant))
     : actions.filter(a => {
-    // First: plant must match — "All" sees everything
+    // Non-admin: scope by plant (same as admin), show all plant actions
     if (user?.plant !== "All" && a.plant && a.plant !== user?.plant) return false;
-    // Second: smart name matching against responsible field
-    return responsibleMatchesUsers(a.responsible, [...subNamesLower, userName].filter(Boolean));
+    return true;
   });
 
   const total = scopedActions.length;
@@ -3605,15 +3604,9 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const scoped = isAdmin
     ? (user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant || !a.plant))
     : actions.filter(a => {
-    // First: plant must match — "All" sees everything
+    // Non-admin: scope by plant (same as admin), show all plant actions
     if (user?.plant !== "All" && a.plant && a.plant !== user?.plant) return false;
-    // Second: smart name matching against responsible + allocatedBy
-    const myNamesLower = scopedNames.map(n => n.trim().toLowerCase());
-    const userNameLower = (user?.name || "").trim().toLowerCase();
-    return (
-      responsibleMatchesUsers(a.responsible, [...myNamesLower, userNameLower].filter(Boolean)) ||
-      (a.allocatedBy || "").trim().toLowerCase() === userNameLower
-    );
+    return true;
   });
 
   const toggleFilter = (key, val) => {
