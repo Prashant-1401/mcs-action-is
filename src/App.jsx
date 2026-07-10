@@ -5081,6 +5081,8 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
   const [mcSaveStatus, setMcSaveStatus] = useState(null);
+  const [plantSaveStatus, setPlantSaveStatus] = useState(null);
+  const [deptSaveStatus, setDeptSaveStatus] = useState(null);
   const COLORS = ["#272262", "#5B56A6", "#E69903", "#7C80B0", "#1E8449", "#C0392B"];
   
   const initialIds = useRef(null);
@@ -5101,9 +5103,9 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
     return !initialIds.current[tabKey].has(rowId);
   };
 
-  const openAdd = t => { setModal({ type: t, mode: "add" }); setForm({}); setMcSaveStatus(null); };
-  const openEdit = (t, d) => { setModal({ type: t, mode: "edit" }); setForm({ ...d }); setMcSaveStatus(null); };
-  const close = () => { setModal(null); setForm({}); setMcSaveStatus(null); };
+  const openAdd = t => { setModal({ type: t, mode: "add" }); setForm({}); setMcSaveStatus(null); setPlantSaveStatus(null); setDeptSaveStatus(null); };
+  const openEdit = (t, d) => { setModal({ type: t, mode: "edit" }); setForm({ ...d }); setMcSaveStatus(null); setPlantSaveStatus(null); setDeptSaveStatus(null); };
+  const close = () => { setModal(null); setForm({}); setMcSaveStatus(null); setPlantSaveStatus(null); setDeptSaveStatus(null); };
   useEscClose(close);
   const saveUser = () => {
     if (!form.name || !form.role || !form.plant) return;
@@ -5283,7 +5285,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
         <SectionHeader title="Plants" sub="Manufacturing plant locations" onAdd={() => openAdd("plants")} onSave={() => saveToAPI("Plants", plants)} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 14 }}>
           {plants.map(p => <div key={p.id} className="card" style={{ padding: 18 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>🏭</span>{canModify("plants", p.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("plants", p)}>Edit</button>}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>🏭</span>{canModify("plants", p.id) && <div><button className="btn btn-ghost btn-sm" onClick={() => openEdit("plants", p)}>Edit</button><button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove plant "${p.name}"?`)) { setPlants(prev => prev.filter(x => x.id !== p.id)); apiRemove("plants", p.id); } }}>✕</button></div>}</div>
             <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 14, color: T.navy }}>{p.name}</div>
             <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>{p.location}</div>
             <HR /><div style={{ fontSize: 12 }}>Head: <b>{p.head}</b></div>
@@ -5297,7 +5299,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
         <SectionHeader title="Departments" sub="Sections within each plant" onAdd={() => openAdd("depts")} onSave={() => saveToAPI("Departments", depts)} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(190px,1fr))", gap: 14 }}>
           {depts.map(d => <div key={d.id} className="card" style={{ padding: 18 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>{d.icon || "🗂"}</span>{canModify("depts", d.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("depts", d)}>Edit</button>}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>{d.icon || "🗂"}</span>{canModify("depts", d.id) && <div><button className="btn btn-ghost btn-sm" onClick={() => openEdit("depts", d)}>Edit</button><button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove department "${d.name}"?`)) { setDepts(prev => prev.filter(x => x.id !== d.id)); apiRemove("departments", d.id); } }}>✕</button></div>}</div>
             <div style={{ fontWeight: 700, fontSize: 14 }}>{d.name}</div>
             <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>HOD: {d.head || "—"}</div>
             {d.plant && <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>Plant: {d.plant}</div>}
@@ -5499,7 +5501,17 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
               <div><Lbl t="Plant Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
               <div><Lbl t="Location" /><input value={form.location || ""} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} /></div>
               <div><Lbl t="Plant Head" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const p = { ...form, id: form.id || "P" + String(Date.now()).slice(-6) }; if (modal.mode === "edit") { setPlants(pp => pp.map(x => x.id === p.id ? p : x)); apiUpdate("plants", p.id, p); } else { setPlants(pp => [...pp, p]); apiCreate("plants", p); } close(); }}>Save</button></div>
+              {plantSaveStatus && plantSaveStatus !== "saving" && plantSaveStatus !== "ok" && (
+                <div style={{ padding: "8px 12px", background: "#FEF3CD", border: "1px solid #F5C842", borderRadius: 8, fontSize: 12, color: "#7D4E00" }}>
+                  ⚠ Save failed: {plantSaveStatus}. Data kept locally — use "Save to Server" to retry.
+                </div>
+              )}
+              {plantSaveStatus === "ok" && (
+                <div style={{ padding: "8px 12px", background: "#D4EDDA", border: "1px solid #28A745", borderRadius: 8, fontSize: 12, color: "#155724" }}>
+                  ✓ Saved successfully.
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" disabled={plantSaveStatus === "saving"} onClick={async () => { if (!form.name) return; setPlantSaveStatus("saving"); try { const p = { ...form, id: form.id || "P" + String(Date.now()).slice(-6) }; const updated = modal.mode === "edit" ? plants.map(x => x.id === p.id ? p : x) : [...plants, p]; setPlants(updated); await saveToAPI("Plants", updated); setPlantSaveStatus("ok"); setTimeout(() => { setPlantSaveStatus(null); close(); }, 800); } catch (err) { setPlantSaveStatus(err.message || "Unknown error"); } }}>{plantSaveStatus === "saving" ? "Saving…" : "Save"}</button></div>
             </div>}
             {modal.type === "depts" && <div style={{ display: "grid", gap: 12 }}>
               <div><Lbl t="Dept Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
@@ -5508,8 +5520,17 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                 <div><Lbl t="Icon" /><input value={form.icon || ""} onChange={e => setForm(f => ({ ...f, icon: e.target.value }))} /></div>
                 <div><Lbl t="HOD" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
               </div>
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={() => { if (!form.name) return; const pMap = {}; plants.forEach(p => { pMap[p.name] = p.id; });     const d = { ...form, id: form.id || "D" + String(Date.now()).slice(-6), icon: form.icon || "🔹", plantId: pMap[form.plant] || form.plantId || null };
-    if (modal.mode === "edit") { setDepts(pp => pp.map(x => x.id === d.id ? d : x)); apiUpdate("departments", d.id, d); } else { setDepts(pp => [...pp, d]); apiCreate("departments", d); } close(); }}>Save</button></div>
+              {deptSaveStatus && deptSaveStatus !== "saving" && deptSaveStatus !== "ok" && (
+                <div style={{ padding: "8px 12px", background: "#FEF3CD", border: "1px solid #F5C842", borderRadius: 8, fontSize: 12, color: "#7D4E00" }}>
+                  ⚠ Save failed: {deptSaveStatus}. Data kept locally — use "Save to Server" to retry.
+                </div>
+              )}
+              {deptSaveStatus === "ok" && (
+                <div style={{ padding: "8px 12px", background: "#D4EDDA", border: "1px solid #28A745", borderRadius: 8, fontSize: 12, color: "#155724" }}>
+                  ✓ Saved successfully.
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" disabled={deptSaveStatus === "saving"} onClick={async () => { if (!form.name) return; setDeptSaveStatus("saving"); try { const pMap = {}; plants.forEach(p => { pMap[p.name] = p.id; }); const d = { ...form, id: form.id || "D" + String(Date.now()).slice(-6), icon: form.icon || "🔹", plantId: pMap[form.plant] || form.plantId || null }; const updated = modal.mode === "edit" ? depts.map(x => x.id === d.id ? d : x) : [...depts, d]; setDepts(updated); await saveToAPI("Departments", updated); setDeptSaveStatus("ok"); setTimeout(() => { setDeptSaveStatus(null); close(); }, 800); } catch (err) { setDeptSaveStatus(err.message || "Unknown error"); } }}>{deptSaveStatus === "saving" ? "Saving…" : "Save"}</button></div>
             </div>}
             {modal.type === "machines" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Machine Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Furnace Line 1" /></div>
