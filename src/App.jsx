@@ -3544,10 +3544,11 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const userKey = user?.id || "guest";
   const [view, setView] = useState(userViewPref[userKey] || "table");
   // Multi-select filters: persistent across page changes
+  const isAdmin = user?.role === "Admin" || user?.role === "MD" || user?.role === "Plant Head";
   const [filters, setFilters] = useState(userFilterPref[userKey] || { 
     plant: user?.plant && user.plant !== "All" ? [user.plant] : [], 
-    section: user?.department ? [user.department] : [], 
-    responsible: user?.name ? [user.name] : [], 
+    section: isAdmin || !user?.department ? [] : [user.department], 
+    responsible: isAdmin || !user?.name ? [] : [user.name], 
     status: [], priority: [], project: [] 
   });
   const [myActionsOnly, setMyActionsOnly] = useState(false);
@@ -3569,7 +3570,6 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     return all;
   };
   const scopedNames = user ? getSubTree(user.name, users) : [];
-  const isAdmin = user?.role === "Admin" || user?.role === "MD" || user?.role === "Plant Head";
   const scoped = isAdmin
     ? (user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant || !a.plant))
     : actions.filter(a => scopedNames.includes(a.responsible) || a.responsible === user?.name || a.allocatedBy === user?.name);
