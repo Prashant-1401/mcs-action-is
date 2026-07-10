@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
 /* ===================== API CONFIG ===================== */
-const RAW_API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://mcs-action.onrender.com";
+const RAW_API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://mcs-action-is-1.onrender.com";
 const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, "");
 const API_KEY = import.meta.env.VITE_API_KEY || "";
 let AUTH_TOKEN = null;
