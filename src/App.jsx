@@ -1251,9 +1251,9 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   const scopedActions = isAdmin
     ? (user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant || !a.plant))
     : actions.filter(a => {
-    // Non-admin: scope by plant (same as admin), show all plant actions
+    // Non-admin: scope by plant first, then only show actions where user is responsible
     if (user?.plant !== "All" && a.plant && a.plant !== user?.plant) return false;
-    return true;
+    return responsibleMatchesUsers(a.responsible, [...subNamesLower, userName].filter(Boolean));
   });
 
   const total = scopedActions.length;
