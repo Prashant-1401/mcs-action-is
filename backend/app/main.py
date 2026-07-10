@@ -40,6 +40,13 @@ def migrate_schema(conn):
         conn.execute(text(
             "ALTER TABLE escalation_matrix ADD COLUMN superiors JSONB DEFAULT '[]'::jsonb"
         ))
+    # Backfill NULL from_role / target_role / priorities for existing rows
+    conn.execute(text(
+        "UPDATE escalation_matrix SET priorities = '[\"CRITICAL\",\"WARNING\",\"NORMAL\"]'::jsonb WHERE priorities IS NULL"
+    ))
+    conn.execute(text(
+        "UPDATE escalation_matrix SET superiors = '[]'::jsonb WHERE superiors IS NULL"
+    ))
 
 
 app = FastAPI(

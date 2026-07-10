@@ -162,14 +162,18 @@ CREATE TABLE escalation_matrix (
     id            TEXT PRIMARY KEY,
     level         INTEGER NOT NULL,
     label         TEXT,
+    from_role     TEXT,                -- role whose overdue actions trigger this tier
+    target_role   TEXT,                -- role that gets notified
     overdue_days  INTEGER DEFAULT 0,
     overdue_hrs   INTEGER DEFAULT 0,
-    target        TEXT,                -- 'Supervisor' | 'Shift Engineer' | 'HOD' | 'Plant Head' | 'MD'
+    target        TEXT,                -- legacy: 'Supervisor' | 'Shift Engineer' | 'HOD' | 'Plant Head' | 'MD'
     notify_method TEXT,                -- 'In-App' | 'In-App + Email'
     applicable_to TEXT DEFAULT 'All',
     color         TEXT,
     active        BOOLEAN DEFAULT TRUE,
-    description   TEXT
+    description   TEXT,
+    priorities    JSONB DEFAULT '[]'::jsonb,
+    superiors     JSONB DEFAULT '[]'::jsonb
 );
 CREATE INDEX idx_esc_level ON escalation_matrix(level);
 
@@ -308,8 +312,8 @@ INSERT INTO meeting_presets (type, attendees, instructions) VALUES ('Safety Revi
 INSERT INTO meetings (id, name, type, plant_id, date, time, status, attendees, duration, dur, action_count, notes, facilitator, recurring, recurrence, project_id, completed_sessions) VALUES ('M1780483326652', 'testing', 'testing', (SELECT id FROM plants WHERE name = 'All' LIMIT 1), NULL::date, '10:00:00'::time, NULL, $json$["\""]$json$, NULL, 60, 0, NULL, 'Prashant Singh', FALSE, 'daily', (SELECT id FROM projects WHERE name = 'Testing' LIMIT 1), $json$[]$json$);
 
 -- ── Escalation matrix ──────────────────────────────────────────
-INSERT INTO escalation_matrix (id, level, label, overdue_days, overdue_hrs, target, notify_method, applicable_to, color, active, description) VALUES ('E6a0d7784', 1, 'Level 1 — New Tier', 1, 24, 'Supervisor', 'In-App + Email', 'All', '#7F8C8D', TRUE, NULL);
-INSERT INTO escalation_matrix (id, level, label, overdue_days, overdue_hrs, target, notify_method, applicable_to, color, active, description) VALUES ('Eae621c7f', 2, 'Level 2 — New Tier', 1, 24, 'Shift Engineer', 'In-App + Email', 'All', '#7F8C8D', TRUE, NULL);
+INSERT INTO escalation_matrix (id, level, label, from_role, target_role, overdue_days, overdue_hrs, target, notify_method, applicable_to, color, active, description, priorities, superiors) VALUES ('E6a0d7784', 1, 'Level 1 — Supervisor', 'Operator', 'Supervisor', 1, 24, 'Supervisor', 'In-App + Email', 'All', '#E69903', TRUE, 'Operator overdue → Supervisor', '["CRITICAL","WARNING","NORMAL"]'::jsonb, '[]'::jsonb);
+INSERT INTO escalation_matrix (id, level, label, from_role, target_role, overdue_days, overdue_hrs, target, notify_method, applicable_to, color, active, description, priorities, superiors) VALUES ('Eae621c7f', 2, 'Level 2 — HOD', 'Supervisor', 'HOD', 3, 72, 'HOD', 'In-App + Email', 'All', '#E67E22', TRUE, 'Supervisor overdue → HOD', '["CRITICAL","WARNING"]'::jsonb, '[]'::jsonb);
 
 -- ── Escalation priorities (normalized from EscalationMatrix.priorities JSON) ──
 INSERT INTO escalation_priorities (escalation_id, priority) VALUES ('E6a0d7784', 'CRITICAL'::action_priority) ON CONFLICT DO NOTHING;
