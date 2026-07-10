@@ -233,6 +233,8 @@ class EscalationMatrixUpdate(BaseModel):
 
 
 class ActionCreate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: str
     sn: str
     text: str
