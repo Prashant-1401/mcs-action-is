@@ -122,6 +122,7 @@ async def create_action_message(action_id: str, data: ActionMessageCreate, db: A
 
 @router.post("/bulk")
 async def bulk_upsert_actions(rows: list[ActionCreate], db: AsyncSession = Depends(get_db)):
+    import datetime
     upserted = 0
     for data in rows:
         result = await db.execute(select(Action).where(Action.id == data.id))
@@ -129,6 +130,13 @@ async def bulk_upsert_actions(rows: list[ActionCreate], db: AsyncSession = Depen
         payload = data.model_dump(exclude_unset=True)
         if "project" in payload:
             payload["project_name"] = payload.pop("project")
+        for k in ("due", "date_of_action", "created", "closed_on"):
+            v = payload.get(k)
+            if isinstance(v, str):
+                try:
+                    payload[k] = datetime.date.fromisoformat(v)
+                except (ValueError, TypeError):
+                    pass
         if existing:
             for k, v in payload.items():
                 setattr(existing, k, v)
