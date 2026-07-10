@@ -55,6 +55,7 @@ const SNAKE_TO_CAMEL = {
   revision_history: "revisionHistory", responsible_user_id: "responsibleUserId",
   reason_id: "reasonId", action_point_type: "actionPointType",
   reason_of_action: "reasonOfAction", project_id: "projectId",
+  project_name: "projectName",
   is_active: "isActive", action_count: "actionCount",
   start_date: "startDate", end_date: "endDate",
   completed_sessions: "completedSessions", pending_confirmation: "pendingConfirmation",
@@ -1220,10 +1221,19 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   const scopedActions = isAdmin
     ? (user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant || !a.plant))
     : actions.filter(a => {
+    // First: plant must match (or action has no plant set)
+    const plantMatch = !a.plant || a.plant === user?.plant;
+    if (!plantMatch) return false;
+    // Second: responsible/subordinate/department matching
     const resp = (a.responsible || "").trim().toLowerCase();
+    // Check if any of my names appear inside the responsible field (handles "Mr. X and Mr. Y" format)
+    const respContainsUser = userName && resp.includes(userName);
+    const respContainsSub = subNamesLower.some(sn => resp.includes(sn));
+    const subNamesExact = subNamesLower.includes(resp);
     return (
-      (userName && resp === userName) ||
-      subNamesLower.includes(resp) ||
+      respContainsUser ||
+      respContainsSub ||
+      subNamesExact ||
       (myDept && (users.find(u => (u.name || "").trim().toLowerCase() === resp)?.dept === myDept))
     );
   });
@@ -1631,7 +1641,7 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
   const [editMode, setEditMode] = useState(false);
   const [draft, setDraft] = useState({ ...pr, milestones: [...(Array.isArray(pr.milestones) ? pr.milestones : []).map(m => ({ ...m }))], team: [...((Array.isArray(pr.team) ? pr.team : (typeof pr.team === "string" ? [pr.team] : [])) || [])], risks: pr.risks || "" });
   const canEdit = user?.role === "Admin" || (user?.name === pr.owner) || (user?.name === pr.sponsor);
-  const pActions = actions.filter(a => (a.project_name || a.project) === pr.name);
+  const pActions = actions.filter(a => (a.projectName || a.project) === pr.name);
   const projectMeetings = (meetings || []).filter(m => m.project === pr.name);
   const now = new Date();
   const start = new Date(pr.start), end = new Date(pr.end);
@@ -1851,7 +1861,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
           const matchesMeeting = activeMtg.id
             ? (a.srcId === activeMtg.id || (!a.srcId && a.src === activeMtg.type))
             : a.src === activeMtg.type;
-          const matchesProject = activeMtg.project && (a.project_name || a.project) === activeMtg.project;
+          const matchesProject = activeMtg.project && (a.projectName || a.project) === activeMtg.project;
           return matchesMeeting || matchesProject;
         })} running={mtgRunning} setRunning={setMtgRunning} elapsed={mtgElapsed} txLines={mtgTxLines} setTxLines={setMtgTxLines} fastActions={mtgFastActions} setFastActions={setMtgFastActions} insights={mtgInsights} setInsights={setMtgInsights} currentUser={user} mtgPresets={mtgPresets} setActions={setActions} reasons={reasons} />;
 
@@ -3372,7 +3382,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
           <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 15, fontWeight: 800, color: T.navy, lineHeight: 1.3, marginBottom: 10 }}>{action.text}</h2>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <SBadge s={displayStatus(action)} /><PBadge p={action.priority} />
-            {(action.project_name || action.project) && <Chip label={"🔗 " + (action.project_name || action.project)} color={T.amber} />}
+            {(action.projectName || action.project) && <Chip label={"🔗 " + (action.projectName || action.project)} color={T.amber} />}
           </div>
           {isPendingConfirm && (
             <div className="confirm-banner" style={{ marginTop: 12 }}>
@@ -3550,8 +3560,8 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const isAdmin = user?.role === "Admin" || user?.role === "MD" || user?.role === "Plant Head";
   const [filters, setFilters] = useState(userFilterPref[userKey] || { 
     plant: user?.plant && user.plant !== "All" ? [user.plant] : [], 
-    section: isAdmin || !user?.department ? [] : [user.department], 
-    responsible: isAdmin || !user?.name ? [] : [user.name], 
+    section: [], 
+    responsible: [], 
     status: [], priority: [], project: [] 
   });
   const [myActionsOnly, setMyActionsOnly] = useState(false);
@@ -3559,7 +3569,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const [sel, setSel] = useState(null);
   const [openFilter, setOpenFilter] = useState(null);
   const canEdit = user?.role === "Admin" || getPerms(user).canEditActions;
-  const allProjects = [...new Set(actions.map(a => a.project_name || a.project).filter(Boolean))];
+  const allProjects = [...new Set(actions.map(a => a.projectName || a.project).filter(Boolean))];
 
   const changeView = v => { setView(v); userViewPref[userKey] = v; };
 
@@ -3573,9 +3583,25 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     return all;
   };
   const scopedNames = user ? getSubTree(user.name, users) : [];
+  const scopedNamesLower = scopedNames.map(n => n.trim().toLowerCase());
+  const userNameLower = (user?.name || "").trim().toLowerCase();
   const scoped = isAdmin
     ? (user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant || !a.plant))
-    : actions.filter(a => scopedNames.includes(a.responsible) || a.responsible === user?.name || a.allocatedBy === user?.name);
+    : actions.filter(a => {
+    // First: plant must match (or action has no plant set)
+    const plantMatch = !a.plant || a.plant === user?.plant;
+    if (!plantMatch) return false;
+    // Second: responsible/subordinate matching with fuzzy contains
+    const resp = (a.responsible || "").trim().toLowerCase();
+    const allocBy = (a.allocatedBy || "").trim().toLowerCase();
+    return (
+      scopedNamesLower.some(n => resp.includes(n)) ||
+      scopedNamesLower.includes(resp) ||
+      (userNameLower && resp.includes(userNameLower)) ||
+      resp === userNameLower ||
+      allocBy === userNameLower
+    );
+  });
 
   const toggleFilter = (key, val) => {
     setFiltersPersist(f => {
@@ -3602,7 +3628,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     const aStatus = displayStatus(a);
     if (filters.status.length && !filters.status.includes(aStatus)) return false;
     if (filters.priority.length && !filters.priority.includes(a.priority)) return false;
-    const aProj = a.project_name || a.project || "None";
+    const aProj = a.projectName || a.project || "None";
     if (filters.project.length && !filters.project.includes(aProj)) return false;
     if (q && ![a.text, a.responsible, a.sn, a.src, a.section].join(" ").toLowerCase().includes(q.toLowerCase())) return false;
     return true;
