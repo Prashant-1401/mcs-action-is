@@ -83,6 +83,36 @@ function normKeys(obj) {
   return out;
 }
 
+/* ─── Smart name matching for responsible fields ────────────────
+   Action responsible values can be compound like "Mr. Umesh Kothare and Mr. A B Banerjee"
+   or "Mrs. Aarti Harode/ Mrs. Khushbu Jaiswal". User names may have trailing spaces,
+   "Mr." prefixes, or differ slightly. This function extracts individual name tokens
+   from the responsible field and checks if any match any known user name.
+*/
+function responsibleMatchesUsers(responsible, userNamesLower) {
+  if (!responsible || !userNamesLower.length) return false;
+  const resp = responsible.toLowerCase();
+  // Quick: direct contains check (fast path for common case)
+  if (userNamesLower.some(n => resp.includes(n))) return true;
+  // Split compound responsible into individual name parts
+  const parts = resp.split(/\/|,|\band\b|&/).map(s => s.trim());
+  for (const part of parts) {
+    // Strip titles, parenthetical notes, department labels
+    const cleaned = part
+      .replace(/\b(mr|mrs|ms|dr)\.?\s*/gi, "")
+      .replace(/\(.*?\)/g, "")
+      .replace(/\bproduction department\b/gi, "")
+      .trim();
+    if (!cleaned) continue;
+    // Check if cleaned name matches any user name
+    if (userNamesLower.some(n => cleaned === n || n.includes(cleaned) || cleaned.includes(n))) return true;
+    // Check individual words (handles "V R Kulkarni" vs "V. R. Kulkarni")
+    const words = cleaned.split(/\s+/).filter(w => w.length > 2);
+    if (words.some(w => userNamesLower.some(n => n.includes(w) || w.includes(n)))) return true;
+  }
+  return false;
+}
+
 function resolveForeignKeys(items, plants, depts) {
   const pName = {}, dName = {};
   (plants || []).forEach(p => { pName[p.id] = p.name; });
@@ -934,7 +964,7 @@ function UserProfilePanel({ user, users, actions, onClose, onRequestChange }) {
             <div style={{ fontWeight: 600, fontSize: 13, color: T.navy, marginBottom: 12 }}>Direct Reports ({myTeam.length})</div>
             {myTeam.length === 0 ? <Empty icon="👤" title="No direct reports" sub="No one reports to you in the current org structure." /> :
               myTeam.map(u => {
-                const uActions = actions.filter(a => a.responsible === u.name);
+                const uActions = actions.filter(a => responsibleMatchesUsers(a.responsible, [u.name.trim().toLowerCase()]));
                 const uOpen = uActions.filter(a => a.status !== "COMPLETED" && a.status !== "DROPPED").length;
                 const uOver = uActions.filter(isOverdue).length;
                 return (
@@ -1224,18 +1254,8 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
     // First: plant must match (or action has no plant set)
     const plantMatch = !a.plant || a.plant === user?.plant;
     if (!plantMatch) return false;
-    // Second: responsible/subordinate/department matching
-    const resp = (a.responsible || "").trim().toLowerCase();
-    // Check if any of my names appear inside the responsible field (handles "Mr. X and Mr. Y" format)
-    const respContainsUser = userName && resp.includes(userName);
-    const respContainsSub = subNamesLower.some(sn => resp.includes(sn));
-    const subNamesExact = subNamesLower.includes(resp);
-    return (
-      respContainsUser ||
-      respContainsSub ||
-      subNamesExact ||
-      (myDept && (users.find(u => (u.name || "").trim().toLowerCase() === resp)?.dept === myDept))
-    );
+    // Second: smart name matching against responsible field
+    return responsibleMatchesUsers(a.responsible, [...subNamesLower, userName].filter(Boolean));
   });
 
   const total = scopedActions.length;
@@ -1246,7 +1266,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   const crit = scopedActions.filter(a => a.priority === "CRITICAL" && a.status !== "COMPLETED" && a.status !== "DROPPED").length;
 
   // Fix 2 & 4: My open actions as Responsible — clickable, opens side panel
-  const myOwn = actions.filter(a => (a.responsible || "").trim().toLowerCase() === userName && userName && a.status !== "COMPLETED" && a.status !== "DROPPED")
+  const myOwn = actions.filter(a => responsibleMatchesUsers(a.responsible, [userName].filter(Boolean)) && userName && a.status !== "COMPLETED" && a.status !== "DROPPED")
     .sort((a, b) => {
       if (!a.due && !b.due) return 0;
       if (!a.due) return 1;
@@ -1332,7 +1352,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
 
   // Fix 6: per-bucket counts for subordinates
   const subData = subs.map(u => {
-    const mine = actions.filter(a => a.responsible === u.name && a.status !== "COMPLETED" && a.status !== "DROPPED");
+    const mine = actions.filter(a => responsibleMatchesUsers(a.responsible, [u.name.trim().toLowerCase()]) && a.status !== "COMPLETED" && a.status !== "DROPPED");
     const delayed = mine.filter(isOverdue);
     const today = mine.filter(a => !isOverdue(a) && a.due && Math.floor((new Date(a.due) - now) / 86400000) === 0);
     const soon = mine.filter(a => !isOverdue(a) && a.due && Math.floor((new Date(a.due) - now) / 86400000) > 0 && Math.floor((new Date(a.due) - now) / 86400000) <= 3);
@@ -3583,23 +3603,18 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     return all;
   };
   const scopedNames = user ? getSubTree(user.name, users) : [];
-  const scopedNamesLower = scopedNames.map(n => n.trim().toLowerCase());
-  const userNameLower = (user?.name || "").trim().toLowerCase();
   const scoped = isAdmin
     ? (user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant || !a.plant))
     : actions.filter(a => {
     // First: plant must match (or action has no plant set)
     const plantMatch = !a.plant || a.plant === user?.plant;
     if (!plantMatch) return false;
-    // Second: responsible/subordinate matching with fuzzy contains
-    const resp = (a.responsible || "").trim().toLowerCase();
-    const allocBy = (a.allocatedBy || "").trim().toLowerCase();
+    // Second: smart name matching against responsible + allocatedBy
+    const myNamesLower = scopedNames.map(n => n.trim().toLowerCase());
+    const userNameLower = (user?.name || "").trim().toLowerCase();
     return (
-      scopedNamesLower.some(n => resp.includes(n)) ||
-      scopedNamesLower.includes(resp) ||
-      (userNameLower && resp.includes(userNameLower)) ||
-      resp === userNameLower ||
-      allocBy === userNameLower
+      responsibleMatchesUsers(a.responsible, [...myNamesLower, userNameLower].filter(Boolean)) ||
+      (a.allocatedBy || "").trim().toLowerCase() === userNameLower
     );
   });
 
@@ -3618,7 +3633,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
 
   // My Actions / All Actions scoping
   const displayScope = myActionsOnly
-    ? scoped.filter(a => a.responsible === user?.name || a.allocatedBy === user?.name)
+    ? scoped.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower].filter(Boolean)) || a.allocatedBy === user?.name)
     : scoped;
 
   const fa = displayScope.filter(a => {
