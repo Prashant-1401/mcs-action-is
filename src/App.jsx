@@ -486,7 +486,7 @@ function runEscalation(actions, setAudit, matrix, users) {
 
   // Trigger backend — it queries actions, matrix, and users from DB itself
   if (API_BASE_URL) {
-    fetch(`${API_BASE_URL}/api/email/escalate`, {
+    fetch(`${API_BASE_URL}/api/escalation/email/escalate`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": API_KEY, "Authorization": `Bearer ${getAuthToken() || localStorage.getItem("mcs_token") || ""}` },
       body: JSON.stringify({})
