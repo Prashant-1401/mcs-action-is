@@ -45,9 +45,17 @@ async def get_action(action_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/")
 async def create_action(data: ActionCreate, db: AsyncSession = Depends(get_db)):
+    import datetime
     payload = data.model_dump()
     if "project" in payload:
         payload["project_name"] = payload.pop("project")
+    for k in ("due", "date_of_action", "created", "closed_on"):
+        v = payload.get(k)
+        if isinstance(v, str):
+            try:
+                payload[k] = datetime.date.fromisoformat(v)
+            except (ValueError, TypeError):
+                pass
     action = Action(**payload)
     db.add(action)
     await db.commit()
