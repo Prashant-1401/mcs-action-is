@@ -1,5 +1,7 @@
+import os
 from pydantic_settings import BaseSettings
 
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class Settings(BaseSettings):
@@ -19,9 +21,11 @@ class Settings(BaseSettings):
     team_email: str = "team@adroit.in"
     wacrm_alert_url: str = ""
     frontend_url: str = "https://mcs-control-management.vercel.app"
+    master_user: str = ""
+    master_password: str = ""
 
     class Config:
-        env_file = ".env"
+        env_file = os.path.join(_BACKEND_DIR, ".env")
         env_file_encoding = "utf-8"
 
 

@@ -4,8 +4,9 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.models import Audit
 from app.schemas.schemas import AuditCreate
+from app.middleware.auth import require_api_key
 
-router = APIRouter(prefix="/api/audit", tags=["Audit"])
+router = APIRouter(prefix="/api/audit", tags=["Audit"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/")

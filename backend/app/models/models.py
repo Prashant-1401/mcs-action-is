@@ -200,7 +200,7 @@ class Action(Base):
     closed_by = Column(String(100))
     allocated_by = Column(String(100))
     project_id = Column(String, ForeignKey("projects.id", onupdate="CASCADE", ondelete="SET NULL"))
-    project = Column(String(100))
+    project_name = Column(String(100))
     src = Column(String(50))
     revisions = Column(Integer, default=0)
     revision_history = Column(JSONB, default=list)

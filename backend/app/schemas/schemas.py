@@ -340,8 +340,5 @@ class InsightsShareReq(BaseModel):
 
 
 class EmailEscalateReq(BaseModel):
-    actions: List[Dict[str, Any]]
-    level: int
-    target: str
-    phone: str = ""
-    users: List[Dict[str, Any]] = []
+    """Deprecated — escalation now queries DB directly. Kept for backward compat."""
+    actions: List[Dict[str, Any]] = []

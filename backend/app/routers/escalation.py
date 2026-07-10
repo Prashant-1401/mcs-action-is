@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.database import get_db
-from app.models.models import EscalationMatrix
+from app.models.models import EscalationMatrix, User, Action
 from app.schemas.schemas import EscalationMatrixCreate, EscalationMatrixUpdate
-from app.services.email_service import dispatch_escalation_email
+from app.services.email_service import dispatch_escalation_emails
+from app.middleware.auth import require_api_key
 
-router = APIRouter(prefix="/api/escalation", tags=["Escalation"])
+router = APIRouter(prefix="/api/escalation", tags=["Escalation"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/matrix")
@@ -64,13 +66,127 @@ async def bulk_upsert_escalation_matrix(rows: list[EscalationMatrixCreate], db: 
     return {"ok": True, "upserted": upserted}
 
 
-@router.post("/email/escalate")
-async def email_escalate(
-    actions: list,
-    level: int,
-    target: str,
-    users: list = [],
-    db: AsyncSession = Depends(get_db),
-):
-    success = dispatch_escalation_email(actions, level, target, users)
-    return {"status": "ok" if success else "failed", "level": level, "target": target}
+def _norm_priorities(p):
+    if isinstance(p, list):
+        return p
+    if isinstance(p, str) and p.strip():
+        return [x.strip() for x in p.split(",") if x.strip()]
+    return ["CRITICAL", "WARNING", "NORMAL"]
+
+
+async def _resolve_escalation_emails(db: AsyncSession):
+    """Core logic: query everything from DB, resolve against matrix, return email groups."""
+    now = datetime.now(timezone.utc)
+
+    # 1. Load active matrix tiers
+    matrix_result = await db.execute(
+        select(EscalationMatrix).where(EscalationMatrix.active == True)
+    )
+    tiers = matrix_result.scalars().all()
+
+    # 2. Load all users
+    users_result = await db.execute(select(User))
+    all_users = users_result.scalars().all()
+
+    role_by_name = {u.name: u.role for u in all_users if u.name}
+    user_emails_by_role = {}
+    for u in all_users:
+        if u.email and u.role:
+            user_emails_by_role.setdefault(u.role, []).append(u.email)
+
+    # 3. Load all open actions (not COMPLETED/DROPPED, must have due date and responsible)
+    actions_result = await db.execute(
+        select(Action).where(
+            Action.status.notin_(["COMPLETED", "DROPPED"]),
+            Action.due.isnot(None),
+            Action.responsible.isnot(None),
+            Action.responsible != "",
+        )
+    )
+    open_actions = actions_result.scalars().all()
+
+    # 4. For each action, match against matrix tiers
+    email_groups = {}
+
+    for action in open_actions:
+        due = action.due
+        if not due:
+            continue
+
+        # Calculate hours overdue
+        try:
+            due_dt = datetime.combine(due, datetime.max.time()).replace(tzinfo=timezone.utc)
+            hrs_overdue = (now - due_dt).total_seconds() / 3600
+        except (ValueError, TypeError):
+            continue
+
+        if hrs_overdue < 0:
+            continue
+
+        # Split comma-separated responsible names and resolve each role
+        resp_names = [n.strip() for n in (action.responsible or "").split(",") if n.strip()]
+        if not resp_names:
+            continue
+
+        for resp_name in resp_names:
+            resp_role = role_by_name.get(resp_name, "")
+
+            # Find matching tiers
+            for tier in tiers:
+                if (tier.from_role or "") != resp_role:
+                    continue
+                if hrs_overdue < (tier.overdue_hrs or 0):
+                    continue
+
+                tier_priorities = _norm_priorities(tier.priorities)
+                if (action.priority or "NORMAL") not in tier_priorities:
+                    continue
+
+                # Check notify_method includes Email
+                notify = (tier.notify_method or "").lower()
+                if "email" not in notify:
+                    continue
+
+                target_role = tier.target_role or tier.target or ""
+                group_key = f"{target_role}::{tier.level}"
+
+                if group_key not in email_groups:
+                    email_groups[group_key] = {
+                        "target_role": target_role,
+                        "level": tier.level,
+                        "label": tier.label or "",
+                        "actions": [],
+                    }
+                email_groups[group_key]["actions"].append({
+                    "sn": action.sn,
+                    "text": action.text,
+                    "due": str(action.due),
+                    "responsible": action.responsible or "",
+                    "priority": action.priority or "NORMAL",
+                })
+
+    # 5. Build final email dispatch list with recipients
+    emails_to_send = []
+    for key, group in email_groups.items():
+        recipients = user_emails_by_role.get(group["target_role"], [])
+        if not recipients:
+            continue
+        emails_to_send.append({
+            "recipients": recipients,
+            "level": group["level"],
+            "target_role": group["target_role"],
+            "actions": group["actions"],
+        })
+
+    return emails_to_send
+
+
+@router.post("/email/escalate", dependencies=[Depends(require_api_key)])
+async def email_escalate(bg: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    emails_to_send = await _resolve_escalation_emails(db)
+
+    if not emails_to_send:
+        return {"status": "ok", "queued": 0, "reason": "No matching actions or no recipients"}
+
+    bg.add_task(dispatch_escalation_emails, emails_to_send)
+    return {"status": "ok", "queued": len(emails_to_send)}

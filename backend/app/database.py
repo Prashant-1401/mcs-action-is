@@ -7,6 +7,8 @@ engine = create_async_engine(
     pool_size=10,
     max_overflow=20,
     echo=False,
+    pool_pre_ping=True,
+    connect_args={"timeout": 15},
 )
 
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

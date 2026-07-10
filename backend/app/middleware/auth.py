@@ -39,8 +39,16 @@ async def optional_auth(credentials: Optional[HTTPAuthorizationCredentials] = De
         return None
 
 
-async def require_api_key(x_api_key: Optional[str] = Header(None)):
-    if not settings.api_key:
-        return
-    if x_api_key != settings.api_key:
+async def require_api_key(
+    x_api_key: Optional[str] = Header(None),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+):
+    # If API key is configured, validate it
+    if settings.api_key:
+        if x_api_key == settings.api_key:
+            return
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    # No API key configured — fall back to JWT auth so endpoints are never open
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    decode_token(credentials.credentials)

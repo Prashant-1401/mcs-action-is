@@ -1,11 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import datetime
 from app.database import get_db
 from app.models.models import Meeting, MeetingPreset
 from app.schemas.schemas import MeetingCreate, MeetingUpdate, MeetingPresetCreate, MeetingPresetUpdate
+from app.middleware.auth import require_api_key
 
-router = APIRouter(prefix="/api/meetings", tags=["Meetings"])
+router = APIRouter(prefix="/api/meetings", tags=["Meetings"], dependencies=[Depends(require_api_key)])
+
+DATE_FIELDS = {"date"}
 
 
 @router.get("/")
@@ -29,7 +33,14 @@ async def get_meeting(meeting_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/")
 async def create_meeting(data: MeetingCreate, db: AsyncSession = Depends(get_db)):
-    meeting = Meeting(**data.model_dump())
+    payload = data.model_dump()
+    for k in DATE_FIELDS:
+        if k in payload and isinstance(payload[k], str):
+            try:
+                payload[k] = datetime.date.fromisoformat(payload[k])
+            except (ValueError, TypeError):
+                payload[k] = None
+    meeting = Meeting(**payload)
     db.add(meeting)
     await db.commit()
     await db.refresh(meeting)
@@ -43,6 +54,11 @@ async def update_meeting(meeting_id: str, data: MeetingUpdate, db: AsyncSession 
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
     for k, v in data.model_dump(exclude_unset=True).items():
+        if k in DATE_FIELDS and isinstance(v, str):
+            try:
+                v = datetime.date.fromisoformat(v)
+            except (ValueError, TypeError):
+                v = None
         setattr(meeting, k, v)
     await db.commit()
     await db.refresh(meeting)

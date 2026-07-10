@@ -5,8 +5,11 @@ const RAW_API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://mcs-actio
 const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, "");
 const API_KEY = import.meta.env.VITE_API_KEY || "";
 let AUTH_TOKEN = null;
+let CURRENT_ROLES = [];
 function setAuthToken(token) { AUTH_TOKEN = token; }
 function getAuthToken() { return AUTH_TOKEN; }
+function setCurrentRoles(roles) { CURRENT_ROLES = roles || []; }
+function getCurrentRoles() { return CURRENT_ROLES; }
 
 async function apiFetch(path, options = {}) {
   const url = `${API_BASE_URL}${path}`;
@@ -177,7 +180,7 @@ function usePostgresDB({ defaultUsers, defaultPlants, defaultDepts,
       if (rsDenorm.length) setReasonsRaw(rsDenorm);
       if (auDenorm.length) setPersistedAuditRaw(auDenorm);
       if (mcDenorm.length) setMachinesRaw(resolvedMc);
-      if (roDenorm.length) setRolesRaw(roDenorm);
+      if (roDenorm.length) { setRolesRaw(roDenorm); setCurrentRoles(roDenorm); }
       setPresetsRaw(psDenorm);
       setDbReady(true);
     } catch (e) {
@@ -201,6 +204,9 @@ function usePostgresDB({ defaultUsers, defaultPlants, defaultDepts,
   const setReasons = useCallback((fnOrVal) => { setReasonsRaw(fnOrVal); }, []);
   const setPersistedAudit = useCallback((fnOrVal) => { setPersistedAuditRaw(fnOrVal); }, []);
   const setRoles = useCallback((fnOrVal) => { setRolesRaw(fnOrVal); }, []);
+
+  // Sync roles to module-level for getPerms()
+  useEffect(() => { setCurrentRoles(roles); }, [roles]);
 
   return {
     dbReady, dbError, fetchData,
@@ -256,17 +262,11 @@ const isGuestRole = (role) => role === "Guest" || role === "Guest User";
 const getPerms = (user) => {
   if (!user) return { canEditMeetings: false, canCreateProjects: false, canEditActions: false, canViewDashboard: false, canManageEscalations: false };
   
-  // Resolve level from roles in localStorage or fallback
+  // Resolve level from roles (fresh from API via module-level state) or fallback
   let level = 1;
   if (user.role === "Admin") level = 8;
   else {
-    let roles = [];
-    try {
-      const saved = localStorage.getItem("mcs_roles");
-      if (saved) roles = JSON.parse(saved);
-    } catch (e) {}
-    
-    const rObj = roles.find(r => r.name === user.role);
+    const rObj = CURRENT_ROLES.find(r => r.name === user.role);
     if (rObj && rObj.level !== undefined) level = Number(rObj.level);
     else {
       const fallbacks = { "Guest": 1, "Guest User": 1, "Operator": 2, "Supervisor": 3, "Shift Engineer": 4, "HOD": 5, "Plant Head": 6, "MD": 7, "Admin": 8 };
@@ -390,23 +390,33 @@ function resolveEscalationState(action, matrix, users) {
     .filter(t => t.active)
     .map(t => ({ ...t, priorities: normP(t.priorities), superiors: normS(t.superiors) }));
 
-  const respUser = (users || []).find(u => u.name === action.responsible);
-  const respRole = respUser?.role || action.responsibleRole || "";
+  // Check each responsible person's role and find the highest escalation
+  const respNames = (action.responsible || "").split(",").map(n => n.trim()).filter(Boolean);
+  let bestResult = null;
 
-  const matched = activeTiers
-    .filter(t => (t.fromRole || "") === respRole && hrsOverdue >= t.overdueHrs && t.priorities.includes(action.priority || "NORMAL"))
-    .sort((a, b) => a.level - b.level);
-  if (matched.length === 0) return null;
+  for (const name of respNames) {
+    const respUser = (users || []).find(u => u.name === name);
+    const respRole = respUser?.role || action.responsibleRole || "";
 
-  const matchedTier = matched[matched.length - 1];
+    const matched = activeTiers
+      .filter(t => (t.fromRole || "") === respRole && hrsOverdue >= t.overdueHrs && t.priorities.includes(action.priority || "NORMAL"))
+      .sort((a, b) => a.level - b.level);
 
-  return {
-    tier: matchedTier,
-    allMatchedTiers: matched,
-    hrsOverdue,
-    daysOverdue: Math.floor(hrsOverdue / 24),
-    fromRole: respRole,
-  };
+    if (matched.length > 0) {
+      const highestLevel = matched[matched.length - 1].level;
+      if (!bestResult || highestLevel > bestResult.tier.level) {
+        bestResult = {
+          tier: matched[matched.length - 1],
+          allMatchedTiers: matched,
+          hrsOverdue,
+          daysOverdue: Math.floor(hrsOverdue / 24),
+          fromRole: respRole,
+        };
+      }
+    }
+  }
+
+  return bestResult;
 }
 
 function runEscalation(actions, setAudit, matrix, users) {
@@ -423,7 +433,6 @@ function runEscalation(actions, setAudit, matrix, users) {
   });
 
   const now = new Date(), alerts = [];
-  const emailPayloads = {};
 
   // Build a quick name → role lookup from the users list
   const roleByName = {};
@@ -434,38 +443,32 @@ function runEscalation(actions, setAudit, matrix, users) {
     const hrs = (now - new Date(a.due + "T23:59:59")) / 3600000;
     if (hrs < 0) return;
 
-    // Resolve responsible user's role — this drives which escalation chain applies
-    const respRole = roleByName[a.responsible] || a.responsibleRole || "";
-    const applicableTiers = byRole[respRole] || [];
+    // Split comma-separated responsible names and check each role
+    const respNames = (a.responsible || "").split(",").map(n => n.trim()).filter(Boolean);
+    respNames.forEach(name => {
+      const respRole = roleByName[name] || "";
+      const applicableTiers = byRole[respRole] || [];
 
-    // Walk up the chain: every tier whose overdueHrs threshold has been met
-    // AND whose priority filter matches the action's priority fires an alert.
-    // Higher levels (with larger overdueHrs) build on lower levels — the alert
-    // keeps climbing the hierarchy until it reaches MD or the action is closed.
-    applicableTiers
-      .filter(t => hrs >= t.overdueHrs && t.priorities.includes(a.priority || "NORMAL"))
-      .sort((x, y) => x.level - y.level)
-      .forEach(tier => {
-        alerts.push({
-          id: Date.now() + Math.random(),
-          ts: now.toISOString(),
-          sn: a.sn,
-          text: a.text,
-          level: tier.level,
-          target: tier.targetRole || tier.target,
-          fromRole: tier.fromRole,
-          targetRole: tier.targetRole,
-          reason: `${Math.floor(hrs)}h overdue — ${tier.fromRole} → ${tier.targetRole} (Level ${tier.level})`,
+      applicableTiers
+        .filter(t => hrs >= t.overdueHrs && t.priorities.includes(a.priority || "NORMAL"))
+        .sort((x, y) => x.level - y.level)
+        .forEach(tier => {
+          alerts.push({
+            id: Date.now() + Math.random(),
+            ts: now.toISOString(),
+            sn: a.sn,
+            text: a.text,
+            level: tier.level,
+            target: tier.targetRole || tier.target,
+            fromRole: tier.fromRole,
+            targetRole: tier.targetRole,
+            reason: `${Math.floor(hrs)}h overdue — ${tier.fromRole} → ${tier.targetRole} (Level ${tier.level})`,
+          });
         });
-        if (tier.notifyMethod && tier.notifyMethod.includes("Email")) {
-          const key = `${tier.fromRole}_${tier.level}`;
-          if (!emailPayloads[key]) emailPayloads[key] = { actions: [], target: tier.targetRole, level: tier.level, tierLabel: tier.label, fromRole: tier.fromRole, targetRole: tier.targetRole };
-          emailPayloads[key].actions.push(a);
-        }
-      });
+    });
   });
 
-  // Dedupe by sn+level — same action can fire the same level only once
+  // Dedupe by sn+level
   const seen = new Set();
   const deduped = alerts.filter(a => {
     const key = `${a.sn}_${a.level}`;
@@ -481,23 +484,14 @@ function runEscalation(actions, setAudit, matrix, users) {
     return [...fresh, ...existing].slice(0, 100);
   });
 
-  // Strip sensitive fields before sending users to the backend
-  const usersForEmail = (users || []).map(u => ({
-    name:     u.name     || "",
-    email:    u.email    || "",
-    role:     u.role     || "",
-    superior: u.superior || "",
-  }));
-
-  Object.values(emailPayloads).forEach(payload => {
-    if (payload.actions.length > 0 && API_BASE_URL) {
-      fetch(`${API_BASE_URL}/api/email/escalate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({ ...payload, users: usersForEmail })
-      }).catch(e => console.warn("Escalation email failed", e));
-    }
-  });
+  // Trigger backend — it queries actions, matrix, and users from DB itself
+  if (API_BASE_URL) {
+    fetch(`${API_BASE_URL}/api/email/escalate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY, "Authorization": `Bearer ${getAuthToken() || localStorage.getItem("mcs_token") || ""}` },
+      body: JSON.stringify({})
+    }).catch(e => console.warn("Escalation email failed", e));
+  }
 }
 
 /* ===================== DESIGN TOKENS & CSS ===================== */
@@ -562,6 +556,53 @@ function Lbl({ t, req }) { return <label style={{ fontSize: 11, color: T.text2, 
 function HR() { return <div style={{ height: 1, background: T.border, margin: "16px 0" }} />; }
 function Spin() { return <span style={{ width: 14, height: 14, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} />; }
 function Empty({ icon, title, sub }) { return <div style={{ textAlign: "center", padding: "48px 24px", color: T.text2 }}><div style={{ fontSize: 36, marginBottom: 12 }}>{icon}</div><div style={{ fontWeight: 600, fontSize: 14, color: T.text, marginBottom: 4 }}>{title}</div><div style={{ fontSize: 12 }}>{sub}</div></div>; }
+function MultiUserSelect({ value, users, onChange, placeholder = "Select persons…" }) {
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const ref = React.useRef(null);
+  const selected = (value || "").split(",").map(s => s.trim()).filter(Boolean);
+  React.useEffect(() => { const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }; document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h); }, []);
+  const toggle = (name) => { const next = selected.includes(name) ? selected.filter(n => n !== name) : [...selected, name]; onChange(next.join(", ")); };
+  const remove = (name) => onChange(selected.filter(n => n !== name).join(", "));
+  const filtered = (users || []).filter(u => !search || (u.name || "").toLowerCase().includes(search.toLowerCase()) || (u.role || "").toLowerCase().includes(search.toLowerCase()));
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <div onClick={() => setOpen(!open)} style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "5px 8px", minHeight: 34, borderRadius: 8, border: `1.5px solid ${open ? T.navy : T.border}`, background: "#fff", cursor: "pointer", alignItems: "center" }}>
+        {selected.length === 0 && <span style={{ fontSize: 12, color: T.text2 }}>{placeholder}</span>}
+        {selected.map(name => (
+          <span key={name} style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 7px", borderRadius: 14, background: T.navy + "12", color: T.navy, fontSize: 11, fontWeight: 600 }}>
+            <Avatar name={name} size={16} users={users} />
+            {name}
+            <span onClick={(e) => { e.stopPropagation(); remove(name); }} style={{ cursor: "pointer", marginLeft: 2, fontSize: 13, lineHeight: 1, opacity: .6 }}>&times;</span>
+          </span>
+        ))}
+      </div>
+      {open && (
+        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, background: "#fff", border: `1.5px solid ${T.border}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,.12)", zIndex: 50, maxHeight: 220, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          <div style={{ padding: "6px 8px", borderBottom: `1px solid ${T.border}` }}>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name or role…" style={{ width: "100%", fontSize: 12, padding: "5px 8px", border: `1px solid ${T.border}`, borderRadius: 6, outline: "none" }} autoFocus />
+          </div>
+          <div style={{ overflowY: "auto", flex: 1 }}>
+            {filtered.map(u => {
+              const sel = selected.includes(u.name);
+              return (
+                <div key={u.id || u.name} onClick={() => toggle(u.name)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", cursor: "pointer", background: sel ? T.navy + "08" : "transparent", fontWeight: sel ? 600 : 400 }}>
+                  <span style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${sel ? T.navy : T.border}`, background: sel ? T.navy : "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#fff", flexShrink: 0 }}>{sel && "✓"}</span>
+                  <Avatar name={u.name} size={20} users={users} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
+                    <div style={{ fontSize: 10, color: T.text2 }}>{u.role || ""}</div>
+                  </div>
+                </div>
+              );
+            })}
+            {filtered.length === 0 && <div style={{ padding: "12px", fontSize: 12, color: T.text2, textAlign: "center" }}>No users found</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 function Chip({ label, color = "#272262" }) { return <span style={{ padding: "2px 9px", borderRadius: 20, background: color + "15", color, fontSize: 11, fontWeight: 600 }}>{label}</span>; }
 function KPICard({ icon, value, label, sub, color, onClick, alert: al }) {
   return <div className="card card-hover" onClick={onClick} style={{ padding: "14px 16px", position: "relative" }}>
@@ -616,13 +657,6 @@ function LoginPage({ onLogin }) {
   }, []);
   const tryLogin = async () => {
     setLoading(true); setErrMsg("");
-    const MASTER_USER = "master";
-    const MASTER_PASS = "adroit@master2025";
-    if (u.trim().toLowerCase() === MASTER_USER && pw.current.value === MASTER_PASS) {
-      onLogin({ id: "MASTER", name: "Master Admin", username: "master", role: "Admin", plant: "All", dept: "Management", initials: "MA", color: "#272262", isMaster: true });
-      setLoading(false);
-      return;
-    }
     try {
       const res = await apiPost("/api/auth/login", { username: u.trim(), password: pw.current.value });
       const { token, user } = res;
@@ -639,7 +673,16 @@ function LoginPage({ onLogin }) {
       } catch (e) { /* keep IDs as-is */ }
       onLogin(user);
     } catch (err) {
-      setErrMsg(err.message || "Login failed");
+      // Try master login as fallback
+      try {
+        const res = await apiPost("/api/auth/master-login", { username: u.trim(), password: pw.current.value });
+        const { token, user } = res;
+        localStorage.setItem("mcs_token", token);
+        setAuthToken(token);
+        onLogin(user);
+      } catch (masterErr) {
+        setErrMsg(err.message || "Login failed");
+      }
     }
     setLoading(false);
   };
@@ -1121,7 +1164,10 @@ function ActionSidePanel({ action, onClose, onUpdate, users, plants, depts, curr
           </div>
         </div>
         <div style={{ padding: "16px 22px", overflowY: "auto", flex: 1, maxHeight: "calc(100vh - 200px)" }}>
-          <InlineField label="Responsible" k="responsible" value={action.responsible} opts={users?.map(u => u.name)} />
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: T.text2, textTransform: "uppercase", letterSpacing: .4, marginBottom: 3 }}>Responsible</div>
+            <MultiUserSelect value={action.responsible} users={users} onChange={v => onUpdate && onUpdate(action.id, { responsible: v })} />
+          </div>
           <InlineField label="Due Date" k="due" value={action.due} type="date" />
           <InlineField label="Status" k="status" value={action.status} opts={["NOT STARTED", "IN PROCESS", "COMPLETED", "DROPPED"]} />
           <InlineField label="Priority" k="priority" value={action.priority} opts={["NORMAL", "WARNING", "CRITICAL"]} />
@@ -1582,7 +1628,7 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
   const [editMode, setEditMode] = useState(false);
   const [draft, setDraft] = useState({ ...pr, milestones: [...(Array.isArray(pr.milestones) ? pr.milestones : []).map(m => ({ ...m }))], team: [...((Array.isArray(pr.team) ? pr.team : (typeof pr.team === "string" ? [pr.team] : [])) || [])], risks: pr.risks || "" });
   const canEdit = user?.role === "Admin" || (user?.name === pr.owner) || (user?.name === pr.sponsor);
-  const pActions = actions.filter(a => a.project === pr.name);
+  const pActions = actions.filter(a => (a.project_name || a.project) === pr.name);
   const projectMeetings = (meetings || []).filter(m => m.project === pr.name);
   const now = new Date();
   const start = new Date(pr.start), end = new Date(pr.end);
@@ -1802,7 +1848,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
           const matchesMeeting = activeMtg.id
             ? (a.srcId === activeMtg.id || (!a.srcId && a.src === activeMtg.type))
             : a.src === activeMtg.type;
-          const matchesProject = activeMtg.project && a.project === activeMtg.project;
+          const matchesProject = activeMtg.project && (a.project_name || a.project) === activeMtg.project;
           return matchesMeeting || matchesProject;
         })} running={mtgRunning} setRunning={setMtgRunning} elapsed={mtgElapsed} txLines={mtgTxLines} setTxLines={setMtgTxLines} fastActions={mtgFastActions} setFastActions={setMtgFastActions} insights={mtgInsights} setInsights={setMtgInsights} currentUser={user} mtgPresets={mtgPresets} setActions={setActions} reasons={reasons} />;
 
@@ -2269,7 +2315,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
       setTranslating(true);
       const res = await fetch(`${API_BASE_URL}/api/translate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY, "Authorization": `Bearer ${getAuthToken() || localStorage.getItem("mcs_token") || ""}` },
         body: JSON.stringify({ text: rawTxt.trim(), source: "hi", target: "en" })
       });
       const data = await res.json();
@@ -2296,7 +2342,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
 
       const res = await fetch(`${API_BASE_URL}/api/meetings/analyze-paragraph`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY, "Authorization": `Bearer ${getAuthToken() || localStorage.getItem("mcs_token") || ""}` },
         body: JSON.stringify({
           paragraph: para.trim(),
           meeting_type: mtg.type,
@@ -2529,7 +2575,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
       ins.actions.map((a, i) => ({
         id: Date.now() + Math.random(),
         text: a.text,
-        responsible: a.responsible || "",
+        responsible: a.responsible || null,
         priority: a.priority || "NORMAL",
         section: a.section || "General",
         src: mtg.type,
@@ -3036,7 +3082,7 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projec
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div><Lbl t="Action Point Type" req /><select value={f.actionPointType} onChange={e => up("actionPointType", e.target.value)}><option value="">Select type…</option>{["Corrective Action","Preventive Action","Improvement","Safety","Maintenance","Quality","Compliance","Other"].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
           <div><Lbl t="Action Point" req /><textarea value={f.text} onChange={e => up("text", e.target.value)} style={{ height: 72, resize: "none" }} placeholder="Describe the action…" /></div>
-          <div><Lbl t="Responsible Person" req /><select value={f.responsible} onChange={e => up("responsible", e.target.value)}><option value="">Select…</option>{users.map(u => <option key={u.id} value={u.name}>{u.name} ({u.role})</option>)}</select></div>
+          <div><Lbl t="Responsible Person(s)" req /><MultiUserSelect value={f.responsible} users={users} onChange={v => up("responsible", v)} /></div>
           <div><Lbl t="Due Date" req /><input type="date" value={f.due} onChange={e => up("due", e.target.value)} /></div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div><Lbl t="Department" /><select value={f.section} onChange={e => up("section", e.target.value)}><option value="General">General</option>{depts.filter(d => !f.plant || f.plant === "All" || !d.plant || d.plant === "All Plants" || d.plant === f.plant).map(d => <option key={d.id} value={d.name}>{d.name}</option>)}{SECTIONS.filter(s => s !== "General" && !depts.filter(d => !f.plant || f.plant === "All" || !d.plant || d.plant === "All Plants" || d.plant === f.plant).find(d => d.name === s)).map(s => <option key={s}>{s}</option>)}</select></div>
@@ -3076,9 +3122,10 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
       const isComplete = !!(r.responsible && r.due);
       return {
         ...r, sn: nextSN(Array(i)), id: Date.now() + i, dateOfAction: todayStr(), revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null, pendingConfirmation: false,
-        responsible: r.responsible || "UNASSIGNED",
+        responsible: r.responsible || null,
+        due: r.due || null,
         status: isComplete ? "IN PROCESS" : "IN PROCESS",
-        allocatedBy: r.allocatedBy || ""
+        allocatedBy: r.allocatedBy || null
       };
     });
     onCommit(all);
@@ -3103,7 +3150,7 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
     try {
       const res = await fetch(`${API_BASE_URL}/api/meetings/extract-insights`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY, "Authorization": `Bearer ${getAuthToken() || localStorage.getItem("mcs_token") || ""}` },
         body: JSON.stringify({
           transcript: txLines.join("\n"),
           meeting_type: mtg.type,
@@ -3197,7 +3244,7 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
                 </div>
                 <div style={{ marginBottom: 10 }}><Lbl t="Action Point" req /><textarea value={r.text || ""} onChange={e => up(r.id, "text", e.target.value)} style={{ resize: "none", height: 52, fontSize: 12 }} /></div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-                  <div><Lbl t="Responsible" /><select value={r.responsible || ""} onChange={e => up(r.id, "responsible", e.target.value)} style={{ borderColor: !r.responsible ? T.amber : T.border }}><option value="">Leave Unassigned</option>{users.map(u => <option key={u.id} value={u.name}>{u.name}</option>)}</select></div>
+                  <div><Lbl t="Responsible" /><MultiUserSelect value={r.responsible || ""} users={users} onChange={v => up(r.id, "responsible", v)} placeholder="Leave Unassigned" /></div>
                   <div><Lbl t="Due Date" /><input type="date" value={r.due || ""} onChange={e => up(r.id, "due", e.target.value)} style={{ borderColor: !r.due ? T.amber : T.border }} /></div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
@@ -3322,7 +3369,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
           <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 15, fontWeight: 800, color: T.navy, lineHeight: 1.3, marginBottom: 10 }}>{action.text}</h2>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <SBadge s={displayStatus(action)} /><PBadge p={action.priority} />
-            {action.project && <Chip label={"🔗 " + action.project} color={T.amber} />}
+            {(action.project_name || action.project) && <Chip label={"🔗 " + (action.project_name || action.project)} color={T.amber} />}
           </div>
           {isPendingConfirm && (
             <div className="confirm-banner" style={{ marginTop: 12 }}>
@@ -3361,7 +3408,10 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
               <InlineField label="Department" field="section" value={action.section} type="select" opts={[...(panelPlants ? [] : SECTIONS), ...((panelPlants ? (allUsers || []) : []).length > 0 ? [...new Set(["General", ...(allUsers || []).map(u => u.dept).filter(Boolean)])] : SECTIONS)]} />
 
               <InlineField label="Plant" field="plant" value={action.plant} type="select" opts={(panelPlants || DEFAULT_PLANTS).map(p => p.name)} />
-              <InlineField label="Responsible" field="responsible" value={action.responsible} type="select" opts={allUsers.map(u => u.name)} />
+              <div>
+                <div style={{ fontSize: 10, color: T.text2, fontWeight: 700, textTransform: "uppercase", letterSpacing: .4, marginBottom: 3 }}>Responsible</div>
+                <MultiUserSelect value={action.responsible} users={allUsers} onChange={v => onUpdate(action.id, { responsible: v })} />
+              </div>
               <InlineField label="Due Date" field="due" value={action.due} type="date" />
               <div><div style={{ fontSize: 10, color: T.text2, fontWeight: 700, textTransform: "uppercase", letterSpacing: .4, marginBottom: 3 }}>Closed On</div><div style={{ fontSize: 12, padding: "3px 6px" }}>{fmt(action.closedOn)}</div></div>
             </div>
@@ -3505,7 +3555,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const [sel, setSel] = useState(null);
   const [openFilter, setOpenFilter] = useState(null);
   const canEdit = user?.role === "Admin" || getPerms(user).canEditActions;
-  const allProjects = [...new Set(actions.map(a => a.project).filter(Boolean))];
+  const allProjects = [...new Set(actions.map(a => a.project_name || a.project).filter(Boolean))];
 
   const changeView = v => { setView(v); userViewPref[userKey] = v; };
 
@@ -3549,7 +3599,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     const aStatus = displayStatus(a);
     if (filters.status.length && !filters.status.includes(aStatus)) return false;
     if (filters.priority.length && !filters.priority.includes(a.priority)) return false;
-    const aProj = a.project || "None";
+    const aProj = a.project_name || a.project || "None";
     if (filters.project.length && !filters.project.includes(aProj)) return false;
     if (q && ![a.text, a.responsible, a.sn, a.src, a.section].join(" ").toLowerCase().includes(q.toLowerCase())) return false;
     return true;

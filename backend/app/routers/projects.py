@@ -1,11 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import datetime
 from app.database import get_db
 from app.models.models import Project
 from app.schemas.schemas import ProjectCreate, ProjectUpdate
+from app.middleware.auth import require_api_key
 
-router = APIRouter(prefix="/api/projects", tags=["Projects"])
+router = APIRouter(prefix="/api/projects", tags=["Projects"], dependencies=[Depends(require_api_key)])
+
+DATE_FIELDS = {"start_date", "end_date"}
 
 
 @router.get("/")
@@ -30,7 +34,14 @@ async def get_project(project_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/")
 async def create_project(data: ProjectCreate, db: AsyncSession = Depends(get_db)):
-    project = Project(**data.model_dump())
+    payload = data.model_dump()
+    for k in DATE_FIELDS:
+        if k in payload and isinstance(payload[k], str):
+            try:
+                payload[k] = datetime.date.fromisoformat(payload[k])
+            except (ValueError, TypeError):
+                payload[k] = None
+    project = Project(**payload)
     db.add(project)
     await db.commit()
     await db.refresh(project)
@@ -44,6 +55,11 @@ async def update_project(project_id: str, data: ProjectUpdate, db: AsyncSession 
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     for k, v in data.model_dump(exclude_unset=True).items():
+        if k in DATE_FIELDS and isinstance(v, str):
+            try:
+                v = datetime.date.fromisoformat(v)
+            except (ValueError, TypeError):
+                v = None
         setattr(project, k, v)
     await db.commit()
     await db.refresh(project)

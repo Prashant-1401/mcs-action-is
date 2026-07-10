@@ -1,7 +1,29 @@
 import smtplib
+import time
 from email.message import EmailMessage
+from html import escape as html_escape
 from typing import List, Dict, Any
 from app.config import settings
+
+# In-memory dedup cache: keys are "sn::level" strings, values are last-sent timestamps.
+# Prevents the same action+level from being emailed more than once per DEDUP_WINDOW_SECS.
+_escalation_sent: Dict[str, float] = {}
+DEDUP_WINDOW_SECS = 4 * 60 * 60  # 4 hours
+
+
+def _is_duplicate(sn: str, level: int) -> bool:
+    key = f"{sn}::{level}"
+    now = time.time()
+    last = _escalation_sent.get(key)
+    if last and (now - last) < DEDUP_WINDOW_SECS:
+        return True
+    _escalation_sent[key] = now
+    # Evict stale entries periodically
+    if len(_escalation_sent) > 500:
+        stale = [k for k, v in _escalation_sent.items() if (now - v) >= DEDUP_WINDOW_SECS]
+        for k in stale:
+            del _escalation_sent[k]
+    return False
 
 
 def send_email(to_emails: List[str], subject: str, html_content: str) -> bool:
@@ -25,51 +47,67 @@ def send_email(to_emails: List[str], subject: str, html_content: str) -> bool:
         return False
 
 
-def dispatch_escalation_email(actions: List[Dict[str, Any]], level: int, target: str, users: List[Dict[str, Any]]) -> bool:
-    target_emails = [u.get("email") for u in users if u.get("role") == target and u.get("email")]
-    if not target_emails:
-        print(f"No email recipients found for role: {target}")
-        return False
+def dispatch_escalation_emails(email_groups: List[Dict[str, Any]]) -> bool:
+    """Send escalation emails for all matched matrix tiers.
 
-    subject = f"MCS Escalation Level {level} — Action Items Requiring Attention"
-    body = f"<h2>Escalation Level {level} — {target}</h2><p>The following actions are overdue:</p><ul>"
-    for a in actions:
-        body += f"<li><b>{a.get('sn', '')}:</b> {a.get('text', '')} (Due: {a.get('due', '')}, Responsible: {a.get('responsible', '')})</li>"
-    body += "</ul>"
-
-    return send_email(target_emails, subject, body)
-
-
-def send_welcome_email(user_name: str, username: str, email: str, password: str = None) -> bool:
-    subject = "Welcome to MCS — Your Account Has Been Created"
-    login_url = f"{settings.frontend_url}"
-    body = f"""
-    <h2>Welcome to MCS (Management Control System)</h2>
-    <p>Hello <b>{user_name}</b>,</p>
-    <p>Your account has been created successfully. You can now log in to the MCS platform to track action items, manage meetings, and collaborate with your team.</p>
-    <table style="border-collapse:collapse; margin:16px 0;">
-      <tr><td style="padding:6px 12px; font-weight:bold;">Username:</td><td style="padding:6px 12px;">{username}</td></tr>
-      {f'<tr><td style="padding:6px 12px; font-weight:bold;">Password:</td><td style="padding:6px 12px;">{password}</td></tr>' if password else ''}
-    </table>
-    <p><a href="{login_url}" style="display:inline-block; padding:10px 24px; background:#1a73e8; color:#fff; text-decoration:none; border-radius:6px;">Log in to MCS</a></p>
-    <p>If you have any issues, please contact your system administrator.</p>
-    <hr><p style="color:#888; font-size:12px;">MCS — Adroit Industries x Signet Industries</p>
+    Each entry in email_groups has:
+      - recipients: list of email addresses
+      - level: escalation level
+      - target_role: the role being notified
+      - actions: list of action dicts (sn, text, due, responsible, priority)
     """
+    any_sent = False
+    for group in email_groups:
+        recipients = group.get("recipients", [])
+        level = group.get("level", 1)
+        target_role = group.get("target_role", "")
+        actions = group.get("actions", [])
+
+        if not recipients or not actions:
+            continue
+
+        # Filter out already-sent action+level combos
+        fresh = [a for a in actions if not _is_duplicate(a.get("sn", ""), level)]
+        if not fresh:
+            print(f"All {len(actions)} escalation action(s) already sent for level {level} — skipping")
+            continue
+
+        safe_target = html_escape(str(target_role))
+        subject = f"MCS Escalation Level {level} — Action Items Requiring Attention"
+        body = f"<h2>Escalation Level {level} — {safe_target}</h2><p>The following actions are overdue:</p><ul>"
+        for a in fresh:
+            sn = html_escape(str(a.get("sn", "")))
+            text = html_escape(str(a.get("text", "")))
+            due = html_escape(str(a.get("due", "")))
+            responsible = a.get("responsible") or "Unassigned"
+            responsible = html_escape(str(responsible))
+            body += f"<li><b>{sn}:</b> {text} (Due: {due}, Responsible: {responsible})</li>"
+        body += "</ul>"
+
+        if send_email(recipients, subject, body):
+            any_sent = True
+
+    return any_sent
+
+
+def send_welcome_email(name: str, username: str, email: str) -> bool:
+    safe_name = html_escape(str(name))
+    safe_user = html_escape(str(username))
+    subject = f"Welcome to MCS — Your Account is Ready"
+    body = (
+        f"<h2>Welcome, {safe_name}!</h2>"
+        f"<p>Your MCS account has been created.</p>"
+        f"<p><b>Username:</b> {safe_user}</p>"
+        f"<p><a href='{settings.frontend_url}'>Login to MCS</a></p>"
+    )
     return send_email([email], subject, body)
 
 
-def share_insights_email(insights: List[Dict[str, Any]], meeting_type: str, plant: str, recipients: List[str]) -> bool:
-    if not recipients:
-        recipients = [settings.team_email]
-    subject = f"Real-time Insights — {meeting_type} @ {plant}"
-    body = "<h2>Meeting Insights</h2>"
-    for ins in insights:
-        body += f"<h3>[{ins.get('ts', '')}]</h3><ul>"
-        for act in ins.get("actions", []):
-            body += f"<li><b>Action:</b> {act.get('text')} (Resp: {act.get('responsible')})</li>"
-        for dec in ins.get("decisions", []):
-            body += f"<li><b>Decision:</b> {dec}</li>"
-        for rsk in ins.get("risks", []):
-            body += f"<li><b>Risk:</b> {rsk}</li>"
-        body += "</ul>"
-    return send_email(recipients, subject, body)
+def share_insights_email(to_emails: List[str], subject: str, content: str, plant: str = "") -> bool:
+    safe_content = html_escape(str(content))
+    safe_plant = html_escape(str(plant))
+    html_body = f"<h2>MCS Insights Share</h2>"
+    if safe_plant:
+        html_body += f"<p><b>Plant:</b> {safe_plant}</p>"
+    html_body += f"<pre style='white-space:pre-wrap;font-family:sans-serif'>{safe_content}</pre>"
+    return send_email(to_emails, subject, html_body)

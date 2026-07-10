@@ -4,8 +4,9 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.models import Department
 from app.schemas.schemas import DepartmentCreate, DepartmentUpdate
+from app.middleware.auth import require_api_key
 
-router = APIRouter(prefix="/api/departments", tags=["Departments"])
+router = APIRouter(prefix="/api/departments", tags=["Departments"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/")

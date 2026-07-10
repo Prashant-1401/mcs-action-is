@@ -4,8 +4,9 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.models import Role
 from app.schemas.schemas import RoleCreate, RoleUpdate
+from app.middleware.auth import require_api_key
 
-router = APIRouter(prefix="/api/roles", tags=["Roles"])
+router = APIRouter(prefix="/api/roles", tags=["Roles"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/")

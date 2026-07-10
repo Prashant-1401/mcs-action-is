@@ -4,8 +4,9 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.models import Reason
 from app.schemas.schemas import ReasonCreate, ReasonUpdate
+from app.middleware.auth import require_api_key
 
-router = APIRouter(prefix="/api/reasons", tags=["Reasons"])
+router = APIRouter(prefix="/api/reasons", tags=["Reasons"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/")

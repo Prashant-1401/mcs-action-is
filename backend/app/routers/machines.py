@@ -4,8 +4,9 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.models import Machine
 from app.schemas.schemas import MachineCreate, MachineUpdate
+from app.middleware.auth import require_api_key
 
-router = APIRouter(prefix="/api/machines", tags=["Machines"])
+router = APIRouter(prefix="/api/machines", tags=["Machines"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/")

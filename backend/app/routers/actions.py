@@ -4,8 +4,9 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.models import Action, ActionMessage
 from app.schemas.schemas import ActionCreate, ActionUpdate, ActionMessageCreate
+from app.middleware.auth import require_api_key
 
-router = APIRouter(prefix="/api/actions", tags=["Actions"])
+router = APIRouter(prefix="/api/actions", tags=["Actions"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/")
@@ -44,7 +45,10 @@ async def get_action(action_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/")
 async def create_action(data: ActionCreate, db: AsyncSession = Depends(get_db)):
-    action = Action(**data.model_dump())
+    payload = data.model_dump()
+    if "project" in payload:
+        payload["project_name"] = payload.pop("project")
+    action = Action(**payload)
     db.add(action)
     await db.commit()
     await db.refresh(action)
@@ -59,6 +63,8 @@ async def update_action(action_id: str, data: ActionUpdate, db: AsyncSession = D
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
     update_data = data.model_dump(exclude_unset=True)
+    if "project" in update_data:
+        update_data["project_name"] = update_data.pop("project")
     if update_data.get("status") in ("COMPLETED", "DROPPED") and action.status not in ("COMPLETED", "DROPPED"):
         update_data["closed_on"] = datetime.date.today().isoformat()
 
@@ -112,11 +118,14 @@ async def bulk_upsert_actions(rows: list[ActionCreate], db: AsyncSession = Depen
     for data in rows:
         result = await db.execute(select(Action).where(Action.id == data.id))
         existing = result.scalar_one_or_none()
+        payload = data.model_dump(exclude_unset=True)
+        if "project" in payload:
+            payload["project_name"] = payload.pop("project")
         if existing:
-            for k, v in data.model_dump(exclude_unset=True).items():
+            for k, v in payload.items():
                 setattr(existing, k, v)
         else:
-            db.add(Action(**data.model_dump()))
+            db.add(Action(**payload))
         upserted += 1
     await db.commit()
     return {"ok": True, "upserted": upserted}

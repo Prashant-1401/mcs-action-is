@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, BackgroundTasks
 from app.schemas.schemas import InsightsShareReq
 from app.services.email_service import share_insights_email
 from app.services.whatsapp_service import share_insights_whatsapp
@@ -7,8 +7,15 @@ from app.middleware.auth import require_api_key
 router = APIRouter(prefix="/api/email", tags=["Email"])
 
 
+def _bg_share_insights(insights, meeting_type, plant, recipients, phones):
+    share_insights_email(insights, meeting_type, plant, recipients)
+    share_insights_whatsapp(insights, meeting_type, plant, phones)
+
+
 @router.post("/share-insights", dependencies=[Depends(require_api_key)])
-async def api_share_insights(req: InsightsShareReq):
-    share_insights_email(req.insights, req.meeting_type, req.plant, req.recipients)
-    wa_failed = share_insights_whatsapp(req.insights, req.meeting_type, req.plant, req.phones)
-    return {"status": "ok", "whatsapp_failed": wa_failed}
+async def api_share_insights(req: InsightsShareReq, bg: BackgroundTasks):
+    bg.add_task(
+        _bg_share_insights,
+        req.insights, req.meeting_type, req.plant, req.recipients, req.phones,
+    )
+    return {"status": "ok", "queued": True}
