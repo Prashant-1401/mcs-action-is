@@ -1198,6 +1198,7 @@ function ActionSidePanel({ action, onClose, onUpdate, users, plants, depts, curr
 
 function HomePage({ actions, setActions, user, setPage, users, meetings, plants, depts, setGlobalActiveMtg }) {
   const now = new Date();
+  const isAdmin = user?.role === "Admin" || user?.role === "MD" || user?.role === "Plant Head";
   // Scope: my plant OR all
   const myPlantActions = user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant);
 
@@ -1216,7 +1217,9 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   // Normalize name comparisons — data may have trailing spaces/casing differences
   const userName = (user?.name || "").trim().toLowerCase();
   const subNamesLower = subNames.map(n => n.trim().toLowerCase());
-  const scopedActions = actions.filter(a => {
+  const scopedActions = isAdmin
+    ? (user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant || !a.plant))
+    : actions.filter(a => {
     const resp = (a.responsible || "").trim().toLowerCase();
     return (
       (userName && resp === userName) ||
