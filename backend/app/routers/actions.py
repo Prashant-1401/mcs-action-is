@@ -48,11 +48,10 @@ async def _check_and_dispatch_escalations_with_db(db):
     users_q = await db.execute(select(User))
     all_users = users_q.scalars().all()
 
-    role_by_name = {u.name: u.role for u in all_users if u.name}
-    user_emails_by_role = {}
+    email_by_name = {}
     for u in all_users:
-        if u.email and u.role:
-            user_emails_by_role.setdefault(u.role, []).append(u.email)
+        if u.name and u.email:
+            email_by_name[u.name] = u.email
 
     actions_q = await db.execute(
         select(Action).where(
@@ -78,9 +77,8 @@ async def _check_and_dispatch_escalations_with_db(db):
 
         resp_names = [n.strip() for n in (action.responsible or "").split(",") if n.strip()]
         for resp_name in resp_names:
-            resp_role = role_by_name.get(resp_name, "")
             for tier in tiers:
-                if (tier.from_role or "") != resp_role:
+                if (tier.from_user or "").strip() != resp_name:
                     continue
                 if hrs_overdue < (tier.overdue_hrs or 0):
                     continue
@@ -95,11 +93,13 @@ async def _check_and_dispatch_escalations_with_db(db):
                 notify = (tier.notify_method or "").lower()
                 if "email" not in notify:
                     continue
-                target_role = tier.target_role or tier.target or ""
-                group_key = f"{target_role}::{tier.level}"
+                target_user = (tier.target_user or "").strip()
+                if not target_user:
+                    continue
+                group_key = f"{target_user}::{tier.level}"
                 if group_key not in email_groups:
                     email_groups[group_key] = {
-                        "target_role": target_role,
+                        "target_user": target_user,
                         "level": tier.level,
                         "actions": [],
                     }
@@ -113,13 +113,14 @@ async def _check_and_dispatch_escalations_with_db(db):
 
     to_send = []
     for group in email_groups.values():
-        recipients = user_emails_by_role.get(group["target_role"], [])
-        if not recipients or not group["actions"]:
+        target_user = group["target_user"]
+        recipient_email = email_by_name.get(target_user)
+        if not recipient_email or not group["actions"]:
             continue
         to_send.append({
-            "recipients": recipients,
+            "recipients": [recipient_email],
             "level": group["level"],
-            "target_role": group["target_role"],
+            "target_user": target_user,
             "actions": group["actions"],
         })
 

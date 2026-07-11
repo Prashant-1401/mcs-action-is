@@ -56,14 +56,14 @@ def dispatch_escalation_emails(email_groups: List[Dict[str, Any]]) -> bool:
     Each entry in email_groups has:
       - recipients: list of email addresses
       - level: escalation level
-      - target_role: the role being notified
+      - target_user: the specific user being notified
       - actions: list of action dicts (sn, text, due, responsible, priority)
     """
     any_sent = False
     for group in email_groups:
         recipients = group.get("recipients", [])
         level = group.get("level", 1)
-        target_role = group.get("target_role", "")
+        target_user = group.get("target_user", "")
         actions = group.get("actions", [])
 
         if not recipients or not actions:
@@ -75,9 +75,9 @@ def dispatch_escalation_emails(email_groups: List[Dict[str, Any]]) -> bool:
             print(f"All {len(actions)} escalation action(s) already sent for level {level} — skipping")
             continue
 
-        safe_target = html_escape(str(target_role))
-        subject = f"MCS Escalation Level {level} — Action Items Requiring Attention"
-        body = f"<h2>Escalation Level {level} — {safe_target}</h2><p>The following actions are overdue:</p><ul>"
+        safe_target = html_escape(str(target_user))
+        subject = f"MCS Escalation Level {level} — Action Items Requiring Your Attention"
+        body = f"<h2>Escalation Level {level} — Assigned to {safe_target}</h2><p>The following actions are overdue and escalated to you:</p><ul>"
         for a in fresh:
             sn = html_escape(str(a.get("sn", "")))
             text = html_escape(str(a.get("text", "")))

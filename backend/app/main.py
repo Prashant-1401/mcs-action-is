@@ -34,6 +34,14 @@ def migrate_schema(conn):
     if "escalation_matrix" in existing_tables:
         try:
             columns = {c["name"] for c in inspector.get_columns("escalation_matrix")}
+            if "from_user" not in columns:
+                conn.execute(text(
+                    "ALTER TABLE escalation_matrix ADD COLUMN from_user VARCHAR(100)"
+                ))
+            if "target_user" not in columns:
+                conn.execute(text(
+                    "ALTER TABLE escalation_matrix ADD COLUMN target_user VARCHAR(100)"
+                ))
             if "from_role" not in columns:
                 conn.execute(text(
                     "ALTER TABLE escalation_matrix ADD COLUMN from_role VARCHAR(50)"
@@ -46,19 +54,110 @@ def migrate_schema(conn):
                 conn.execute(text(
                     "ALTER TABLE escalation_matrix ADD COLUMN priorities JSONB DEFAULT '[]'::jsonb"
                 ))
-            if "superiors" not in columns:
-                conn.execute(text(
-                    "ALTER TABLE escalation_matrix ADD COLUMN superiors JSONB DEFAULT '[]'::jsonb"
-                ))
-            # Backfill NULL from_role / target_role / priorities for existing rows
+            # Backfill NULL priorities for existing rows
             conn.execute(text(
                 "UPDATE escalation_matrix SET priorities = '[\"CRITICAL\",\"WARNING\",\"NORMAL\"]'::jsonb WHERE priorities IS NULL"
             ))
-            conn.execute(text(
-                "UPDATE escalation_matrix SET superiors = '[]'::jsonb WHERE superiors IS NULL"
-            ))
+            # Seed default escalation matrix if empty
+            count_row = conn.execute(text("SELECT COUNT(*) FROM escalation_matrix")).scalar()
+            if count_row == 0:
+                # Build default tiers from actual users in the database
+                user_rows = conn.execute(text("SELECT name, role FROM users WHERE is_active = true")).fetchall()
+                user_by_role = {}
+                for row in user_rows:
+                    user_by_role.setdefault(row[1], []).append(row[0])
+
+                defaults = []
+                tier_id = 1
+
+                # Level 1 (24h): each user escalates to their direct superior
+                escalation_chains = [
+                    ("Operator", "Supervisor"),
+                    ("Supervisor", "HOD"),
+                    ("Shift Engineer", "HOD"),
+                    ("HOD", "Plant Head"),
+                    ("Plant Head", "MD"),
+                ]
+                for from_role, to_role in escalation_chains:
+                    for from_name in user_by_role.get(from_role, []):
+                        for to_name in user_by_role.get(to_role, []):
+                            defaults.append({
+                                "id": f"E1-{tier_id}",
+                                "level": 1,
+                                "label": f"L1: {from_name} → {to_name}",
+                                "from_user": from_name,
+                                "target_user": to_name,
+                                "from_role": from_role,
+                                "target_role": to_role,
+                                "overdue_hrs": 24,
+                                "notify_method": "In-App + Email",
+                                "priorities": '["CRITICAL","WARNING","NORMAL"]',
+                                "color": "#E69903",
+                                "active": True,
+                                "description": f"{from_name} overdue 24h → escalate to {to_name}",
+                            })
+                            tier_id += 1
+
+                # Level 2 (72h): skip one level up
+                escalation_chains_l2 = [
+                    ("Operator", "HOD"),
+                    ("Supervisor", "Plant Head"),
+                    ("Shift Engineer", "Plant Head"),
+                    ("HOD", "MD"),
+                ]
+                for from_role, to_role in escalation_chains_l2:
+                    for from_name in user_by_role.get(from_role, []):
+                        for to_name in user_by_role.get(to_role, []):
+                            defaults.append({
+                                "id": f"E2-{tier_id}",
+                                "level": 2,
+                                "label": f"L2: {from_name} → {to_name}",
+                                "from_user": from_name,
+                                "target_user": to_name,
+                                "from_role": from_role,
+                                "target_role": to_role,
+                                "overdue_hrs": 72,
+                                "notify_method": "In-App + Email",
+                                "priorities": '["CRITICAL","WARNING"]',
+                                "color": "#E67E22",
+                                "active": True,
+                                "description": f"{from_name} overdue 72h → escalate to {to_name}",
+                            })
+                            tier_id += 1
+
+                # Level 3 (168h): two levels up
+                escalation_chains_l3 = [
+                    ("Operator", "Plant Head"),
+                    ("Supervisor", "MD"),
+                    ("Shift Engineer", "MD"),
+                ]
+                for from_role, to_role in escalation_chains_l3:
+                    for from_name in user_by_role.get(from_role, []):
+                        for to_name in user_by_role.get(to_role, []):
+                            defaults.append({
+                                "id": f"E3-{tier_id}",
+                                "level": 3,
+                                "label": f"L3: {from_name} → {to_name}",
+                                "from_user": from_name,
+                                "target_user": to_name,
+                                "from_role": from_role,
+                                "target_role": to_role,
+                                "overdue_hrs": 168,
+                                "notify_method": "In-App + Email",
+                                "priorities": '["CRITICAL"]',
+                                "color": "#C0392B",
+                                "active": True,
+                                "description": f"{from_name} overdue 7d → escalate to {to_name}",
+                            })
+                            tier_id += 1
+
+                for d in defaults:
+                    conn.execute(text(
+                        "INSERT INTO escalation_matrix (id, level, label, from_user, target_user, from_role, target_role, overdue_hrs, notify_method, priorities, color, active, description) "
+                        "VALUES (:id, :level, :label, :from_user, :target_user, :from_role, :target_role, :overdue_hrs, :notify_method, :priorities::jsonb, :color, :active, :description)"
+                    ), d)
         except Exception as e:
-            print(f"[migrate] escalation_matrix column migration skipped: {e}")
+            print(f"[migrate] escalation_matrix migration skipped: {e}")
 
     # Users table columns
     if "users" in existing_tables:
@@ -70,33 +169,6 @@ def migrate_schema(conn):
                 ))
         except Exception as e:
             print(f"[migrate] users column migration skipped: {e}")
-
-    # Seed default escalation matrix if empty
-    if "escalation_matrix" in existing_tables:
-        try:
-            count_row = conn.execute(text("SELECT COUNT(*) FROM escalation_matrix")).scalar()
-            if count_row == 0:
-                defaults = [
-                    {"id": "E1-OP", "level": 1, "label": "Level 1 — Operator → Supervisor", "from_role": "Operator", "target_role": "Supervisor", "overdue_hrs": 24, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING","NORMAL"]', "color": "#E69903", "active": True, "description": "Operator overdue → Supervisor"},
-                    {"id": "E1-SV", "level": 1, "label": "Level 1 — Supervisor → HOD", "from_role": "Supervisor", "target_role": "HOD", "overdue_hrs": 24, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING","NORMAL"]', "color": "#E69903", "active": True, "description": "Supervisor overdue → HOD"},
-                    {"id": "E1-SE", "level": 1, "label": "Level 1 — Shift Engineer → HOD", "from_role": "Shift Engineer", "target_role": "HOD", "overdue_hrs": 24, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING","NORMAL"]', "color": "#E69903", "active": True, "description": "Shift Engineer overdue → HOD"},
-                    {"id": "E1-HD", "level": 1, "label": "Level 1 — HOD → Plant Head", "from_role": "HOD", "target_role": "Plant Head", "overdue_hrs": 24, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING","NORMAL"]', "color": "#E69903", "active": True, "description": "HOD overdue → Plant Head"},
-                    {"id": "E1-PH", "level": 1, "label": "Level 1 — Plant Head → MD", "from_role": "Plant Head", "target_role": "MD", "overdue_hrs": 24, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING","NORMAL"]', "color": "#E69903", "active": True, "description": "Plant Head overdue → MD"},
-                    {"id": "E2-OP", "level": 2, "label": "Level 2 — Operator → HOD", "from_role": "Operator", "target_role": "HOD", "overdue_hrs": 72, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING"]', "color": "#E67E22", "active": True, "description": "Operator still in process → HOD"},
-                    {"id": "E2-SV", "level": 2, "label": "Level 2 — Supervisor → Plant Head", "from_role": "Supervisor", "target_role": "Plant Head", "overdue_hrs": 72, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING"]', "color": "#E67E22", "active": True, "description": "Supervisor still in process → Plant Head"},
-                    {"id": "E2-SE", "level": 2, "label": "Level 2 — Shift Engineer → Plant Head", "from_role": "Shift Engineer", "target_role": "Plant Head", "overdue_hrs": 72, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING"]', "color": "#E67E22", "active": True, "description": "Shift Engineer still in process → Plant Head"},
-                    {"id": "E2-HD", "level": 2, "label": "Level 2 — HOD → MD", "from_role": "HOD", "target_role": "MD", "overdue_hrs": 72, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING"]', "color": "#E67E22", "active": True, "description": "HOD still in process → MD"},
-                    {"id": "E3-OP", "level": 3, "label": "Level 3 — Operator → Plant Head", "from_role": "Operator", "target_role": "Plant Head", "overdue_hrs": 168, "notify_method": "In-App + Email", "priorities": '["CRITICAL"]', "color": "#C0392B", "active": True, "description": "Operator unresolved 7 days → Plant Head"},
-                    {"id": "E3-SV", "level": 3, "label": "Level 3 — Supervisor → MD", "from_role": "Supervisor", "target_role": "MD", "overdue_hrs": 168, "notify_method": "In-App + Email", "priorities": '["CRITICAL"]', "color": "#C0392B", "active": True, "description": "Supervisor unresolved 7 days → MD"},
-                    {"id": "E3-SE", "level": 3, "label": "Level 3 — Shift Engineer → MD", "from_role": "Shift Engineer", "target_role": "MD", "overdue_hrs": 168, "notify_method": "In-App + Email", "priorities": '["CRITICAL"]', "color": "#C0392B", "active": True, "description": "Shift Engineer unresolved 7 days → MD"},
-                ]
-                for d in defaults:
-                    conn.execute(text(
-                        "INSERT INTO escalation_matrix (id, level, label, from_role, target_role, overdue_hrs, notify_method, priorities, color, active, description) "
-                        "VALUES (:id, :level, :label, :from_role, :target_role, :overdue_hrs, :notify_method, :priorities::jsonb, :color, :active, :description)"
-                    ), d)
-        except Exception as e:
-            print(f"[migrate] escalation_matrix seeding skipped: {e}")
 
 
 app = FastAPI(

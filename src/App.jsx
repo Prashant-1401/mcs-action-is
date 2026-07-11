@@ -62,6 +62,7 @@ const SNAKE_TO_CAMEL = {
   asset_no: "assetNo", notify_method: "notifyMethod",
   overdue_days: "overdueDays", overdue_hrs: "overdueHrs",
   from_role: "fromRole", target_role: "targetRole",
+  from_user: "fromUser", target_user: "targetUser",
   applicable_to: "applicableTo",
   master_access: "masterAccess",
 };
@@ -382,46 +383,8 @@ const getSuperiors = (userName, allUsers) => {
 //   HOD             → Plant Head → MD
 //   Plant Head      → MD
 //
-// MD & Admin sit at the top of the hierarchy and are not escalated further.
-// Each level triggers at a higher overdue threshold (24h → 72h → 168h).
-const ROLE_HIERARCHY = ["Operator", "Supervisor", "Shift Engineer", "HOD", "Plant Head", "MD", "Admin"];
 
-const DEFAULT_ESC_MATRIX = [
-  // ── Level 1 — first escalation (24h overdue) → direct superior ──
-  { id: "E1-OP",  level: 1, fromRole: "Operator",       targetRole: "Supervisor", label: "Level 1 — Operator → Supervisor", overdueDays: 1, overdueHrs: 24,  target: "Supervisor", notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING", "NORMAL"], applicableTo: "All", color: "#E69903", active: true, description: "Operator's overdue action → direct superior (Supervisor)" },
-  { id: "E1-SV",  level: 1, fromRole: "Supervisor",     targetRole: "HOD",        label: "Level 1 — Supervisor → HOD",      overdueDays: 1, overdueHrs: 24,  target: "HOD",        notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING", "NORMAL"], applicableTo: "All", color: "#E69903", active: true, description: "Supervisor's overdue action → HOD" },
-  { id: "E1-SE",  level: 1, fromRole: "Shift Engineer", targetRole: "HOD",        label: "Level 1 — Shift Engineer → HOD",  overdueDays: 1, overdueHrs: 24,  target: "HOD",        notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING", "NORMAL"], applicableTo: "All", color: "#E69903", active: true, description: "Shift-in-charge's overdue action → HOD" },
-  { id: "E1-HD",  level: 1, fromRole: "HOD",            targetRole: "Plant Head", label: "Level 1 — HOD → Plant Head",      overdueDays: 1, overdueHrs: 24,  target: "Plant Head", notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING", "NORMAL"], applicableTo: "All", color: "#E69903", active: true, description: "HOD's overdue action → Plant Head" },
-  { id: "E1-PH",  level: 1, fromRole: "Plant Head",     targetRole: "MD",         label: "Level 1 — Plant Head → MD",       overdueDays: 1, overdueHrs: 24,  target: "MD",         notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING", "NORMAL"], applicableTo: "All", color: "#E69903", active: true, description: "Plant Head's overdue action → MD" },
-
-  // ── Level 2 — second escalation (72h overdue) → one more level up ──
-  { id: "E2-OP",  level: 2, fromRole: "Operator",       targetRole: "HOD",        label: "Level 2 — Operator → HOD",        overdueDays: 3, overdueHrs: 72,  target: "HOD",        notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING"],           applicableTo: "All", color: "#E67E22", active: true, description: "Operator's action still in process → HOD" },
-  { id: "E2-SV",  level: 2, fromRole: "Supervisor",     targetRole: "Plant Head", label: "Level 2 — Supervisor → Plant Head", overdueDays: 3, overdueHrs: 72,  target: "Plant Head", notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING"],           applicableTo: "All", color: "#E67E22", active: true, description: "Supervisor's action still in process → Plant Head" },
-  { id: "E2-SE",  level: 2, fromRole: "Shift Engineer", targetRole: "Plant Head", label: "Level 2 — Shift Engineer → Plant Head", overdueDays: 3, overdueHrs: 72, target: "Plant Head", notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING"],           applicableTo: "All", color: "#E67E22", active: true, description: "Shift-in-charge's action still in process → Plant Head" },
-  { id: "E2-HD",  level: 2, fromRole: "HOD",            targetRole: "MD",         label: "Level 2 — HOD → MD",              overdueDays: 3, overdueHrs: 72,  target: "MD",         notifyMethod: "In-App + Email", priorities: ["CRITICAL", "WARNING"],           applicableTo: "All", color: "#E67E22", active: true, description: "HOD's action still in process → MD" },
-
-  // ── Level 3 — final escalation (168h overdue) → MD ──
-  { id: "E3-OP",  level: 3, fromRole: "Operator",       targetRole: "Plant Head", label: "Level 3 — Operator → Plant Head", overdueDays: 7, overdueHrs: 168, target: "Plant Head", notifyMethod: "In-App + Email", priorities: ["CRITICAL"],                       applicableTo: "All", color: "#C0392B", active: true, description: "Operator's action unresolved 7 days → Plant Head" },
-  { id: "E3-SV",  level: 3, fromRole: "Supervisor",     targetRole: "MD",         label: "Level 3 — Supervisor → MD",       overdueDays: 7, overdueHrs: 168, target: "MD",         notifyMethod: "In-App + Email", priorities: ["CRITICAL"],                       applicableTo: "All", color: "#C0392B", active: true, description: "Supervisor's action unresolved 7 days → MD" },
-  { id: "E3-SE",  level: 3, fromRole: "Shift Engineer", targetRole: "MD",         label: "Level 3 — Shift Engineer → MD",   overdueDays: 7, overdueHrs: 168, target: "MD",         notifyMethod: "In-App + Email", priorities: ["CRITICAL"],                       applicableTo: "All", color: "#C0392B", active: true, description: "Shift-in-charge's action unresolved 7 days → MD" },
-];
-
-// Helper: resolve the role hierarchy walk-up for a given role.
-// Returns the ordered list of roles strictly above the given role
-// (e.g. "Supervisor" → ["Shift Engineer", "HOD", "Plant Head", "MD", "Admin"]).
-// Note: we skip Shift Engineer when walking up from Supervisor because both
-// "Supervisor" and "Shift Engineer" are shift-level in-charge roles — the
-// first *management* level above either is "HOD". Override via matrix config.
-const ROLES_ABOVE = (role) => {
-  const idx = ROLE_HIERARCHY.indexOf(role);
-  if (idx < 0) return ["MD"]; // unknown role → escalate straight to MD
-  // Skip Shift Engineer when walking up from Operator/Supervisor
-  const above = ROLE_HIERARCHY.slice(idx + 1);
-  if ((role === "Operator" || role === "Supervisor") && above[0] === "Shift Engineer") {
-    return above.slice(1);
-  }
-  return above;
-};
+const DEFAULT_ESC_MATRIX = [];
 
 const getEscBadgeStyle = (lvl) => {
   const num = Number(lvl);
@@ -443,21 +406,16 @@ function resolveEscalationState(action, matrix, users) {
   if (hrsOverdue < 0) return null;
 
   const normP = (p) => Array.isArray(p) ? p : (typeof p === "string" && p.trim() ? p.split(",").map(x => x.trim()).filter(Boolean) : ["CRITICAL", "WARNING", "NORMAL"]);
-  const normS = (s) => Array.isArray(s) ? s : (typeof s === "string" && s.trim() ? s.split(",").map(x => x.trim()).filter(Boolean) : []);
   const activeTiers = (matrix || DEFAULT_ESC_MATRIX)
     .filter(t => t.active)
-    .map(t => ({ ...t, priorities: normP(t.priorities), superiors: normS(t.superiors) }));
+    .map(t => ({ ...t, priorities: normP(t.priorities) }));
 
-  // Check each responsible person's role and find the highest escalation
   const respNames = (action.responsible || "").split(",").map(n => n.trim()).filter(Boolean);
   let bestResult = null;
 
   for (const name of respNames) {
-    const respUser = (users || []).find(u => u.name === name);
-    const respRole = respUser?.role || action.responsibleRole || "";
-
     const matched = activeTiers
-      .filter(t => (t.fromRole || "") === respRole && hrsOverdue >= t.overdueHrs && t.priorities.includes(action.priority || "NORMAL"))
+      .filter(t => (t.fromUser || "").trim() === name && hrsOverdue >= t.overdueHrs && t.priorities.includes(action.priority || "NORMAL"))
       .sort((a, b) => a.level - b.level);
 
     if (matched.length > 0) {
@@ -468,7 +426,7 @@ function resolveEscalationState(action, matrix, users) {
           allMatchedTiers: matched,
           hrsOverdue,
           daysOverdue: Math.floor(hrsOverdue / 24),
-          fromRole: respRole,
+          fromUser: name,
         };
       }
     }
@@ -479,33 +437,27 @@ function resolveEscalationState(action, matrix, users) {
 
 function runEscalation(actions, setAudit, matrix, users) {
   const normP = (p) => Array.isArray(p) ? p : (typeof p === "string" && p.trim() ? p.split(",").map(x => x.trim()).filter(Boolean) : ["CRITICAL", "WARNING", "NORMAL"]);
-  // Group active tiers by fromRole so we can look up the chain for each action's responsible user
   const allTiers = (matrix || DEFAULT_ESC_MATRIX)
     .filter(t => t.active)
     .map(t => ({ ...t, priorities: normP(t.priorities) }));
-  const byRole = {};
+  const byUser = {};
   allTiers.forEach(t => {
-    const key = t.fromRole || "*";
-    if (!byRole[key]) byRole[key] = [];
-    byRole[key].push(t);
+    const key = (t.fromUser || "").trim();
+    if (!key) return;
+    if (!byUser[key]) byUser[key] = [];
+    byUser[key].push(t);
   });
 
   const now = new Date(), alerts = [];
-
-  // Build a quick name → role lookup from the users list
-  const roleByName = {};
-  (users || []).forEach(u => { if (u && u.name) roleByName[u.name] = u.role; });
 
   actions.forEach(a => {
     if (a.status === "COMPLETED" || a.status === "DROPPED" || !a.due) return;
     const hrs = (now - new Date(a.due + "T23:59:59")) / 3600000;
     if (hrs < 0) return;
 
-    // Split comma-separated responsible names and check each role
     const respNames = (a.responsible || "").split(",").map(n => n.trim()).filter(Boolean);
     respNames.forEach(name => {
-      const respRole = roleByName[name] || "";
-      const applicableTiers = byRole[respRole] || [];
+      const applicableTiers = byUser[name] || [];
 
       applicableTiers
         .filter(t => hrs >= t.overdueHrs && t.priorities.includes(a.priority || "NORMAL"))
@@ -517,16 +469,15 @@ function runEscalation(actions, setAudit, matrix, users) {
             sn: a.sn,
             text: a.text,
             level: tier.level,
-            target: tier.targetRole || tier.target,
-            fromRole: tier.fromRole,
-            targetRole: tier.targetRole,
-            reason: `${Math.floor(hrs)}h overdue — ${tier.fromRole} → ${tier.targetRole} (Level ${tier.level})`,
+            target: tier.targetUser || "",
+            fromUser: tier.fromUser,
+            targetUser: tier.targetUser,
+            reason: `${Math.floor(hrs)}h overdue — ${tier.fromUser} → ${tier.targetUser} (Level ${tier.level})`,
           });
         });
     });
   });
 
-  // Dedupe by sn+level
   const seen = new Set();
   const deduped = alerts.filter(a => {
     const key = `${a.sn}_${a.level}`;
@@ -542,7 +493,6 @@ function runEscalation(actions, setAudit, matrix, users) {
     return [...fresh, ...existing].slice(0, 100);
   });
 
-  // Trigger backend — it queries actions, matrix, and users from DB itself
   if (API_BASE_URL) {
     fetch(`${API_BASE_URL}/api/escalation/email/escalate`, {
       method: "POST",
@@ -4553,39 +4503,27 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
 /* ===================== ESCALATION MATRIX TAB ===================== */
 function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, users = [], roles = [] }) {
   const PRIORITIES = ["CRITICAL", "WARNING", "NORMAL"];
-  const ROLES = roles.map(r => r.name).filter(Boolean);
-  const TARGETS = [...ROLES, "All"];
+  const USER_NAMES = (users || []).map(u => u.name).filter(Boolean);
   const METHODS = ["In-App", "In-App + Email", "Email Only", "SMS + Email"];
   const [editRow, setEditRow] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
-  const [roleFilter, setRoleFilter] = useState("");
+  const [userFilter, setUserFilter] = useState("");
   const [levelFilter, setLevelFilter] = useState("");
   const upDraft = (k, v) => setEditDraft(d => ({ ...d, [k]: v }));
-  
+
   const checkCanModify = (rowId) => isAdmin || (canModify && canModify("escMatrix", rowId));
 
-  // Normalize priorities field — may store as comma-string
   const normPriorities = (p) => {
     if (Array.isArray(p)) return p;
     if (typeof p === "string" && p.trim()) return p.split(",").map(x => x.trim()).filter(Boolean);
     return ["CRITICAL", "WARNING", "NORMAL"];
   };
-  // Superiors — specific named users (in addition to the generic target role) who
-  // should also be notified / can act on escalations at this tier.
-  const normSuperiors = (s) => {
-    if (Array.isArray(s)) return s;
-    if (typeof s === "string" && s.trim()) return s.split(",").map(x => x.trim()).filter(Boolean);
-    return [];
-  };
-  const startEdit = (tier) => { setEditRow(tier.id); setEditDraft({ ...tier, priorities: normPriorities(tier.priorities), superiors: normSuperiors(tier.superiors) }); };
+  const startEdit = (tier) => { setEditRow(tier.id); setEditDraft({ ...tier, priorities: normPriorities(tier.priorities) }); };
   const saveEdit = () => {
-    // Auto-build label from fromRole → targetRole if user didn't customise it
     const finalDraft = { ...editDraft };
-    if (finalDraft.fromRole && finalDraft.targetRole && !finalDraft.label?.trim()) {
-      finalDraft.label = `Level ${finalDraft.level} — ${finalDraft.fromRole} → ${finalDraft.targetRole}`;
+    if (finalDraft.fromUser && finalDraft.targetUser && !finalDraft.label?.trim()) {
+      finalDraft.label = `Level ${finalDraft.level} — ${finalDraft.fromUser} → ${finalDraft.targetUser}`;
     }
-    // Keep `target` field in sync with targetRole for backward compat
-    finalDraft.target = finalDraft.targetRole || finalDraft.target;
     setEscMatrix(m => m.map(t => t.id === editRow ? finalDraft : t));
     apiUpdate("escalation/matrix", editRow, finalDraft);
     setEditRow(null); setEditDraft(null);
@@ -4597,23 +4535,21 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
     const newTier = {
       id: "E" + crypto.randomUUID().slice(0, 8),
       level: maxLvl + 1,
-      fromRole: "Supervisor",
-      targetRole: "HOD",
-      label: `Level ${maxLvl + 1} — Supervisor → HOD`,
+      fromUser: "",
+      targetUser: "",
+      label: "",
       overdueDays: maxLvl * 3 + 3,
       overdueHrs: (maxLvl * 3 + 3) * 24,
-      target: "HOD",
       notifyMethod: "In-App + Email",
       priorities: ["CRITICAL"],
       applicableTo: "All",
       color: T.slate,
       active: true,
       description: "",
-      superiors: [],
     };
     setEscMatrix(m => [...m, newTier]);
     apiCreate("escalation/matrix", newTier);
-    setEditRow(newTier.id); setEditDraft({ ...newTier, priorities: [...newTier.priorities], superiors: [] });
+    setEditRow(newTier.id); setEditDraft({ ...newTier, priorities: [...newTier.priorities] });
   };
   const deleteTier = (id) => { setEscMatrix(m => m.filter(t => t.id !== id)); apiRemove("escalation/matrix", id); };
   const toggleActive = (id) => setEscMatrix(m => {
@@ -4624,31 +4560,28 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
   });
 
   const allMatrix = (escMatrix || DEFAULT_ESC_MATRIX)
-    .map(t => ({ ...t, priorities: normPriorities(t.priorities), superiors: normSuperiors(t.superiors) }));
+    .map(t => ({ ...t, priorities: normPriorities(t.priorities) }));
 
-  // Apply role + level filters
   const matrix = allMatrix
-    .filter(t => !roleFilter || (t.fromRole || "") === roleFilter)
+    .filter(t => !userFilter || (t.fromUser || "") === userFilter)
     .filter(t => !levelFilter || t.level === Number(levelFilter))
-    .sort((a, b) => a.level - b.level || (a.fromRole || "").localeCompare(b.fromRole || ""));
+    .sort((a, b) => a.level - b.level || (a.fromUser || "").localeCompare(b.fromUser || ""));
 
-  // Build per-role escalation chains for the flow diagram (one chain per fromRole)
-  const rolesInUse = [...new Set(allMatrix.filter(t => t.active).map(t => t.fromRole).filter(Boolean))].sort();
-  const chainByRole = {};
-  rolesInUse.forEach(r => {
-    chainByRole[r] = allMatrix
-      .filter(t => t.active && t.fromRole === r)
+  const usersInUse = [...new Set(allMatrix.filter(t => t.active).map(t => t.fromUser).filter(Boolean))].sort();
+  const chainByUser = {};
+  usersInUse.forEach(u => {
+    chainByUser[u] = allMatrix
+      .filter(t => t.active && t.fromUser === u)
       .sort((a, b) => a.level - b.level);
   });
 
   return (
     <div>
-      {/* Header */}
       <div className="card" style={{ padding: "18px 22px", marginBottom: 14, background: `linear-gradient(135deg,${T.navy},#3D378C)`, color: "#fff" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
-            <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 16, marginBottom: 4 }}>🚨 Role-Wise Escalation Matrix</div>
-            <div style={{ fontSize: 12, opacity: .8 }}>When an action goes overdue, alerts climb the responsible user's role hierarchy: Supervisor → HOD → Plant Head → MD.</div>
+            <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 16, marginBottom: 4 }}>🚨 User-Wise Escalation Matrix</div>
+            <div style={{ fontSize: 12, opacity: .8 }}>When an action goes overdue, alerts are sent to the specific user configured in each tier.</div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {onSave && <SectionSaveButton onSave={onSave} />}
@@ -4657,21 +4590,20 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
         </div>
       </div>
 
-      {/* Role-wise flow diagram — one chain per fromRole */}
       <div className="card" style={{ padding: "16px 22px", marginBottom: 14, overflow: "hidden" }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: T.text2, marginBottom: 12, textTransform: "uppercase", letterSpacing: .5 }}>Escalation Chains by Responsible Role</div>
-        {rolesInUse.length === 0 && <div style={{ fontSize: 12, color: T.text2, fontStyle: "italic" }}>No active tiers defined.</div>}
-        {rolesInUse.map(role => {
-          const chain = chainByRole[role];
+        <div style={{ fontSize: 11, fontWeight: 700, color: T.text2, marginBottom: 12, textTransform: "uppercase", letterSpacing: .5 }}>Escalation Chains by Responsible Person</div>
+        {usersInUse.length === 0 && <div style={{ fontSize: 12, color: T.text2, fontStyle: "italic" }}>No active tiers defined.</div>}
+        {usersInUse.map(userName => {
+          const chain = chainByUser[userName];
           return (
-            <div key={role} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 4 }}>
-              <div style={{ flexShrink: 0, fontSize: 11, fontWeight: 700, color: T.navy, background: T.bg, padding: "5px 10px", borderRadius: 6, minWidth: 110 }}>{role}</div>
+            <div key={userName} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 4 }}>
+              <div style={{ flexShrink: 0, fontSize: 11, fontWeight: 700, color: T.navy, background: T.bg, padding: "5px 10px", borderRadius: 6, minWidth: 110 }}>{userName}</div>
               <div style={{ fontSize: 14, color: T.text2, flexShrink: 0 }}>→</div>
               {chain.map((t, i, arr) => (
                 <div key={t.id} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
                   <div style={{ textAlign: "center", minWidth: 90 }}>
                     <div style={{ width: 32, height: 32, borderRadius: "50%", background: t.color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 11, margin: "0 auto 4px", boxShadow: `0 0 0 2px ${t.color}30` }}>L{t.level}</div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: T.text }}>{t.targetRole || t.target}</div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: T.text }}>{t.targetUser || "—"}</div>
                     <div style={{ fontSize: 9, color: T.text2, marginTop: 1 }}>+{t.overdueDays}d</div>
                   </div>
                   {i < arr.length - 1 && <div style={{ fontSize: 12, color: T.text2, margin: "0 4px", flexShrink: 0 }}>→</div>}
@@ -4682,12 +4614,11 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
         })}
       </div>
 
-      {/* Filters */}
       <div className="card" style={{ padding: 12, marginBottom: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: T.text2, textTransform: "uppercase", letterSpacing: .4 }}>Filter:</span>
-        <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={{ width: 160, padding: "6px 10px" }}>
-          <option value="">All Roles</option>
-          {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+        <select value={userFilter} onChange={e => setUserFilter(e.target.value)} style={{ width: 180, padding: "6px 10px" }}>
+          <option value="">All Responsible Users</option>
+          {USER_NAMES.map(n => <option key={n} value={n}>{n}</option>)}
         </select>
         <select value={levelFilter} onChange={e => setLevelFilter(e.target.value)} style={{ width: 130, padding: "6px 10px" }}>
           <option value="">All Levels</option>
@@ -4697,13 +4628,12 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
           <option value="4">Level 4</option>
           <option value="5">Level 5+</option>
         </select>
-        {(roleFilter || levelFilter) && (
-          <button className="btn btn-ghost btn-sm" onClick={() => { setRoleFilter(""); setLevelFilter(""); }} style={{ padding: "6px 10px" }}>Clear</button>
+        {(userFilter || levelFilter) && (
+          <button className="btn btn-ghost btn-sm" onClick={() => { setUserFilter(""); setLevelFilter(""); }} style={{ padding: "6px 10px" }}>Clear</button>
         )}
         <span style={{ fontSize: 11, color: T.text2, marginLeft: "auto" }}>Showing {matrix.length} of {allMatrix.length} tiers</span>
       </div>
 
-      {/* Tier cards */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {matrix.map(tier => {
           const isEditing = editRow === tier.id;
@@ -4713,7 +4643,7 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
               <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", borderBottom: isEditing ? `1px solid ${T.border}` : "none", background: isEditing ? T.bg : "transparent" }}>
                 <div style={{ width: 36, height: 36, borderRadius: "50%", background: tier.color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14, flexShrink: 0 }}>L{tier.level}</div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: T.text }}>{tier.label}</div>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: T.text }}>{tier.label || `Level ${tier.level}`}</div>
                   <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{tier.description || "No description"}</div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -4731,45 +4661,32 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
               </div>
               {!isEditing && (
                 <div style={{ display: "flex", gap: 10, padding: "10px 18px", flexWrap: "wrap", alignItems: "center" }}>
-                  <span style={{ fontSize: 11, background: T.bg, borderRadius: 6, padding: "4px 10px", color: T.text }}><b>From Role:</b> {tier.fromRole || "—"}</span>
+                  <span style={{ fontSize: 11, background: T.bg, borderRadius: 6, padding: "4px 10px", color: T.text }}><b>Responsible:</b> {tier.fromUser || "—"}</span>
                   <span style={{ fontSize: 14, color: T.text2 }}>→</span>
-                  <span style={{ fontSize: 11, background: T.bg, borderRadius: 6, padding: "4px 10px", color: T.text }}><b>Escalate To:</b> {tier.targetRole || tier.target}</span>
+                  <span style={{ fontSize: 11, background: T.bg, borderRadius: 6, padding: "4px 10px", color: T.text }}><b>Notify:</b> {tier.targetUser || "—"}</span>
                   <span style={{ fontSize: 11, background: T.bg, borderRadius: 6, padding: "4px 10px", color: T.text }}><b>Trigger:</b> {tier.overdueDays === 0 ? "On due date" : `${tier.overdueDays} day${tier.overdueDays !== 1 ? "s" : ""} overdue`}</span>
                   <span style={{ fontSize: 11, background: T.bg, borderRadius: 6, padding: "4px 10px", color: T.text }}><b>Notify via:</b> {tier.notifyMethod}</span>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {tier.priorities.map(p => <span key={p} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 10, fontWeight: 700, background: p === "CRITICAL" ? T.redL : p === "WARNING" ? T.amberL : "#E8F4F8", color: p === "CRITICAL" ? T.red : p === "WARNING" ? T.amber : "#1A6B8A" }}>{p}</span>)}
                   </div>
-                  {tier.superiors.length > 0 && (
-                    <span style={{ fontSize: 11, background: T.navy + "10", borderRadius: 6, padding: "4px 10px", color: T.navy }}><b>+ Superiors:</b> {tier.superiors.join(", ")}</span>
-                  )}
                 </div>
               )}
               {isEditing && editDraft && (
                 <div style={{ padding: "16px 18px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                  <div style={{ gridColumn: "1/-1" }}><Lbl t="Tier Label (auto-built if left blank)" /><input value={editDraft.label || ""} onChange={e => upDraft("label", e.target.value)} placeholder={`Level ${editDraft.level} — ${editDraft.fromRole} → ${editDraft.targetRole}`} /></div>
+                  <div style={{ gridColumn: "1/-1" }}><Lbl t="Tier Label (auto-built if left blank)" /><input value={editDraft.label || ""} onChange={e => upDraft("label", e.target.value)} placeholder={`Level ${editDraft.level} — ${editDraft.fromUser || "From"} → ${editDraft.targetUser || "To"}`} /></div>
                   <div style={{ gridColumn: "1/-1" }}><Lbl t="Description" /><input value={editDraft.description || ""} onChange={e => upDraft("description", e.target.value)} placeholder="Brief explanation of this escalation level" /></div>
                   <div>
-                    <Lbl t="From Role (responsible)" req />
-                    <select value={editDraft.fromRole || ""} onChange={e => {
-                      const fr = e.target.value;
-                      // Auto-suggest targetRole = next role up the hierarchy
-                      const above = ROLES_ABOVE(fr);
-                      const suggestedTarget = above[0] || "MD";
-                      upDraft("fromRole", fr);
-                      if (!editDraft.targetRole || editDraft.targetRole === "HOD") {
-                        upDraft("targetRole", suggestedTarget);
-                        upDraft("target", suggestedTarget);
-                      }
-                    }}>
+                    <Lbl t="Responsible Person (from)" req />
+                    <select value={editDraft.fromUser || ""} onChange={e => upDraft("fromUser", e.target.value)}>
                       <option value="">— select —</option>
-                      {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                      {USER_NAMES.map(n => <option key={n} value={n}>{n}</option>)}
                     </select>
                   </div>
                   <div>
-                    <Lbl t="Escalate To Role" req />
-                    <select value={editDraft.targetRole || ""} onChange={e => { upDraft("targetRole", e.target.value); upDraft("target", e.target.value); }}>
+                    <Lbl t="Escalate To (notify)" req />
+                    <select value={editDraft.targetUser || ""} onChange={e => upDraft("targetUser", e.target.value)}>
                       <option value="">— select —</option>
-                      {TARGETS.map(t => <option key={t} value={t}>{t}</option>)}
+                      {USER_NAMES.map(n => <option key={n} value={n}>{n}</option>)}
                     </select>
                   </div>
                   <div>
@@ -4805,28 +4722,6 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
                         </label>
                       ))}
                     </div>
-                  </div>
-                  <div style={{ gridColumn: "1/-1" }}>
-                    <Lbl t="Superiors (specific people to also notify/action at this level)" />
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, border: `1px solid ${T.border}`, borderRadius: 8, padding: 10, maxHeight: 140, overflowY: "auto" }}>
-                      {users.length === 0 && <span style={{ fontSize: 11, color: T.text2, fontStyle: "italic" }}>No users available.</span>}
-                      {users.map(u => {
-                        const checked = (editDraft.superiors || []).includes(u.name);
-                        return (
-                          <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 12, background: checked ? T.navy + "12" : T.bg, border: `1px solid ${checked ? T.navy : T.border}`, borderRadius: 20, padding: "3px 10px 3px 6px" }}>
-                            <input type="checkbox" checked={checked} onChange={e => {
-                              const arr = e.target.checked
-                                ? [...(editDraft.superiors || []), u.name]
-                                : (editDraft.superiors || []).filter(x => x !== u.name);
-                              upDraft("superiors", arr);
-                            }} style={{ width: 13, cursor: "pointer" }} />
-                            <span style={{ color: checked ? T.navy : T.text, fontWeight: checked ? 700 : 500 }}>{u.name}</span>
-                            <span style={{ color: T.text2, fontSize: 10 }}>({u.role})</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                    <div style={{ fontSize: 10, color: T.text2, marginTop: 3 }}>These people are notified alongside the "Escalate To Role" and can also close the escalated action.</div>
                   </div>
                   <div style={{ gridColumn: "1/-1", display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: T.amberL, borderRadius: 8 }}>
                     <span style={{ fontSize: 13 }}>⚠</span>
@@ -4891,8 +4786,7 @@ function TeamPage({ users, actions, escMatrix, plants, depts, user, isAdmin, set
     if (!user) return false;
     if (isAdmin) return true;
     if (member?.superior && member.superior === user.name) return true;
-    if ((escState?.tier?.superiors || []).includes(user.name)) return true;
-    if (escState?.tier?.targetRole && escState.tier.targetRole === user.role) return true;
+    if (escState?.tier?.targetUser && escState.tier.targetUser === user.name) return true;
     return false;
   };
 
@@ -4953,11 +4847,10 @@ function TeamPage({ users, actions, escMatrix, plants, depts, user, isAdmin, set
                         <div style={{ flex: 1, minWidth: 220 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                             <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 11, background: "#fff", padding: "2px 6px", borderRadius: 4 }}>{a.sn}</span>
-                            <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, fontWeight: 700, background: item.tier.color + "20", color: item.tier.color }}>Level {item.tier.level} → {item.tier.targetRole || item.tier.target}</span>
+                            <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, fontWeight: 700, background: item.tier.color + "20", color: item.tier.color }}>Level {item.tier.level} → {item.tier.targetUser || "—"}</span>
                             <span style={{ fontSize: 11, color: T.red, fontWeight: 600 }}>⚠️ {item.daysOverdue}d overdue</span>
                           </div>
                           <div style={{ fontSize: 12, color: T.text }}>{a.text}</div>
-                          {item.tier.superiors?.length > 0 && <div style={{ fontSize: 10, color: T.text2, marginTop: 2 }}>Named superiors: {item.tier.superiors.join(", ")}</div>}
                         </div>
                         {canClose ? (
                           <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
@@ -4965,7 +4858,7 @@ function TeamPage({ users, actions, escMatrix, plants, depts, user, isAdmin, set
                             <button className="btn btn-ghost btn-sm" style={{ color: T.red }} onClick={() => closeEscalatedAction(a.id, "DROPPED")}>Drop</button>
                           </div>
                         ) : (
-                          <span style={{ fontSize: 11, color: T.text2, fontStyle: "italic", flexShrink: 0 }}>Only {item.tier.targetRole || item.tier.target}, {m.superior || "their superior"}, or a named superior can close this</span>
+                          <span style={{ fontSize: 11, color: T.text2, fontStyle: "italic", flexShrink: 0 }}>Only {item.tier.targetUser || "the target user"}, {m.superior || "their superior"}, or Admin can close this</span>
                         )}
                       </div>
                     );
@@ -5131,7 +5024,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
                   </div>
                   <div style={{ borderLeft: `1px solid ${T.border}`, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 4 }}>
                     <div style={{ fontSize: 11, color: T.text2 }}>Escalation Path</div>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: T.navy }}>👥 {item.tier.target}</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: T.navy }}>👤 {item.tier.targetUser || "—"}</div>
                     <div style={{ fontSize: 10, background: T.bg, padding: "2px 6px", borderRadius: 4, color: T.text2 }}>📢 {item.tier.notifyMethod}</div>
                   </div>
                 </div>
