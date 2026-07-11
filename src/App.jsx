@@ -1657,7 +1657,7 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
               <div style={{ fontSize: 11, opacity: .6, marginBottom: 4, letterSpacing: 1, textTransform: "uppercase" }}>Project Charter</div>
               <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 22, fontWeight: 800, marginBottom: 6 }}>{pr.name}</h2>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ padding: "3px 10px", borderRadius: 20, background: "rgba(255,255,255,.15)", fontSize: 11, fontWeight: 600 }}>{pr.plantId || pr.plant}</span>
+                <span style={{ padding: "3px 10px", borderRadius: 20, background: "rgba(255,255,255,.15)", fontSize: 11, fontWeight: 600 }}>{pr.plant}</span>
                 <span style={{ padding: "3px 10px", borderRadius: 20, background: pr.priority === "CRITICAL" ? T.red + "80" : pr.priority === "WARNING" ? T.amber + "80" : "rgba(255,255,255,.15)", fontSize: 11, fontWeight: 600 }}>{pr.priority}</span>
                 <span style={{ padding: "3px 10px", borderRadius: 20, background: "rgba(255,255,255,.15)", fontSize: 11, fontWeight: 600 }}>{pr.status}</span>
               </div>
@@ -1819,8 +1819,8 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
   // Feature 4: can edit meetings if admin or has permission
   const canEditMeetings = isAdmin || userPerms.canEditMeetings;
 
-  const visibleMeetings = (meetings || []).filter(m => user?.plant === "All" ? true : m.plant === user?.plant || m.plant === "All");
-  const visibleProjects = (projects || []).filter(p => user?.plant === "All" ? true : (p.plantId || p.plant) === user?.plant || (p.plantId || p.plant) === "All");
+  const visibleMeetings = (meetings || []).filter(m => user?.plant === "All" ? true : m.plant === user?.plant || m.plant === "All" || !m.plant);
+  const visibleProjects = (projects || []).filter(p => user?.plant === "All" ? true : p.plant === user?.plant || p.plant === "All" || !p.plant);
 
   // Fix 8: detect time conflicts for current user's meetings
   const timeToMins = (t) => {
@@ -1971,7 +1971,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 14, color: T.text }}>{pr.name}</div>
-                      <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{pr.plantId || pr.plant} · <b style={{ color: T.text }}>{pr.owner}</b></div>
+                      <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{pr.plant} · <b style={{ color: T.text }}>{pr.owner}</b></div>
                     </div>
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}><PBadge p={pr.priority} /></div>
                   </div>
