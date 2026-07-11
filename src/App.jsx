@@ -3631,6 +3631,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     return all;
   };
   const scopedNames = user ? getSubTree(user.name, users) : [];
+  const userNameLower = (user?.name || "").trim().toLowerCase();
   const scoped = isAdmin
     ? (user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant || !a.plant))
     : actions.filter(a => {
