@@ -37,13 +37,16 @@ def send_email(to_emails: List[str], subject: str, html_content: str) -> bool:
         msg["To"] = ", ".join(to_emails)
         msg.set_content("Please enable HTML viewing.")
         msg.add_alternative(html_content, subtype="html")
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as server:
             server.starttls()
             server.login(settings.smtp_user, settings.smtp_password)
             server.send_message(msg)
         return True
+    except smtplib.SMTPException as e:
+        print(f"Email SMTP error: {e}")
+        return False
     except Exception as e:
-        print(f"Email send failed: {e}")
+        print(f"Email send failed: {type(e).__name__}: {e}")
         return False
 
 

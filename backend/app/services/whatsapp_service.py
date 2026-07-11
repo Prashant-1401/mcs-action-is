@@ -13,15 +13,21 @@ def send_whatsapp_alert(phone: str, message: str) -> bool:
     try:
         payload = {"phone": phone, "message": message}
         headers = {"Content-Type": "application/json"}
-        response = requests.post(settings.wacrm_alert_url, json=payload, headers=headers, timeout=10)
+        response = requests.post(settings.wacrm_alert_url, json=payload, headers=headers, timeout=15)
         if response.status_code == 200:
             print(f"WhatsApp alert sent to: {phone}")
             return True
         else:
-            print(f"wacrm gateway rejected ({response.status_code}): {response.text}")
+            print(f"wacrm gateway rejected ({response.status_code}): {response.text[:200]}")
             return False
+    except requests.Timeout:
+        print(f"wacrm gateway timeout for phone: {phone}")
+        return False
+    except requests.ConnectionError as e:
+        print(f"wacrm gateway connection error: {e}")
+        return False
     except Exception as e:
-        print(f"wacrm gateway error: {e}")
+        print(f"wacrm gateway error: {type(e).__name__}: {e}")
         return False
 
 

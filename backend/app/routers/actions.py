@@ -13,106 +13,118 @@ router = APIRouter(prefix="/api/actions", tags=["Actions"], dependencies=[Depend
 
 
 def _bg_check_escalations():
-    """Run escalation resolution in a fresh DB session (background thread)."""
-    loop = asyncio.new_event_loop()
+    """Run escalation resolution in a fresh event loop with its own DB session."""
+    import asyncio
+
+    async def _run():
+        async with async_session() as db:
+            await _check_and_dispatch_escalations_with_db(db)
+
     try:
-        loop.run_until_complete(_check_and_dispatch_escalations())
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_run())
+        finally:
+            loop.close()
     except Exception as e:
         print(f"[escalation-trigger] background check failed: {e}")
-    finally:
-        loop.close()
 
 
 async def _check_and_dispatch_escalations():
-    """Query all open actions against the escalation matrix and dispatch emails."""
+    """Query all open actions against the escalation matrix and dispatch emails (creates own session)."""
     async with async_session() as db:
-        tiers_q = await db.execute(
-            select(EscalationMatrix).where(EscalationMatrix.active == True)
+        await _check_and_dispatch_escalations_with_db(db)
+
+
+async def _check_and_dispatch_escalations_with_db(db):
+    """Core escalation logic — accepts an existing DB session."""
+    tiers_q = await db.execute(
+        select(EscalationMatrix).where(EscalationMatrix.active == True)
+    )
+    tiers = tiers_q.scalars().all()
+    if not tiers:
+        return
+
+    users_q = await db.execute(select(User))
+    all_users = users_q.scalars().all()
+
+    role_by_name = {u.name: u.role for u in all_users if u.name}
+    user_emails_by_role = {}
+    for u in all_users:
+        if u.email and u.role:
+            user_emails_by_role.setdefault(u.role, []).append(u.email)
+
+    actions_q = await db.execute(
+        select(Action).where(
+            Action.status.notin_(["COMPLETED", "DROPPED"]),
+            Action.due.isnot(None),
+            Action.responsible.isnot(None),
+            Action.responsible != "",
         )
-        tiers = tiers_q.scalars().all()
-        if not tiers:
-            return
+    )
+    open_actions = actions_q.scalars().all()
 
-        users_q = await db.execute(select(User))
-        all_users = users_q.scalars().all()
+    now = datetime.now(timezone.utc)
+    email_groups = {}
 
-        role_by_name = {u.name: u.role for u in all_users if u.name}
-        user_emails_by_role = {}
-        for u in all_users:
-            if u.email and u.role:
-                user_emails_by_role.setdefault(u.role, []).append(u.email)
+    for action in open_actions:
+        try:
+            due_dt = datetime.combine(action.due, datetime.max.time()).replace(tzinfo=timezone.utc)
+            hrs_overdue = (now - due_dt).total_seconds() / 3600
+        except (ValueError, TypeError):
+            continue
+        if hrs_overdue < 0:
+            continue
 
-        actions_q = await db.execute(
-            select(Action).where(
-                Action.status.notin_(["COMPLETED", "DROPPED"]),
-                Action.due.isnot(None),
-                Action.responsible.isnot(None),
-                Action.responsible != "",
-            )
-        )
-        open_actions = actions_q.scalars().all()
+        resp_names = [n.strip() for n in (action.responsible or "").split(",") if n.strip()]
+        for resp_name in resp_names:
+            resp_role = role_by_name.get(resp_name, "")
+            for tier in tiers:
+                if (tier.from_role or "") != resp_role:
+                    continue
+                if hrs_overdue < (tier.overdue_hrs or 0):
+                    continue
+                tier_priorities = (
+                    tier.priorities if isinstance(tier.priorities, list)
+                    else [x.strip() for x in tier.priorities.split(",") if x.strip()]
+                    if isinstance(tier.priorities, str) and tier.priorities.strip()
+                    else ["CRITICAL", "WARNING", "NORMAL"]
+                )
+                if (action.priority or "NORMAL") not in tier_priorities:
+                    continue
+                notify = (tier.notify_method or "").lower()
+                if "email" not in notify:
+                    continue
+                target_role = tier.target_role or tier.target or ""
+                group_key = f"{target_role}::{tier.level}"
+                if group_key not in email_groups:
+                    email_groups[group_key] = {
+                        "target_role": target_role,
+                        "level": tier.level,
+                        "actions": [],
+                    }
+                email_groups[group_key]["actions"].append({
+                    "sn": action.sn,
+                    "text": action.text,
+                    "due": str(action.due),
+                    "responsible": action.responsible or "",
+                    "priority": action.priority or "NORMAL",
+                })
 
-        now = datetime.now(timezone.utc)
-        email_groups = {}
+    to_send = []
+    for group in email_groups.values():
+        recipients = user_emails_by_role.get(group["target_role"], [])
+        if not recipients or not group["actions"]:
+            continue
+        to_send.append({
+            "recipients": recipients,
+            "level": group["level"],
+            "target_role": group["target_role"],
+            "actions": group["actions"],
+        })
 
-        for action in open_actions:
-            try:
-                due_dt = datetime.combine(action.due, datetime.max.time()).replace(tzinfo=timezone.utc)
-                hrs_overdue = (now - due_dt).total_seconds() / 3600
-            except (ValueError, TypeError):
-                continue
-            if hrs_overdue < 0:
-                continue
-
-            resp_names = [n.strip() for n in (action.responsible or "").split(",") if n.strip()]
-            for resp_name in resp_names:
-                resp_role = role_by_name.get(resp_name, "")
-                for tier in tiers:
-                    if (tier.from_role or "") != resp_role:
-                        continue
-                    if hrs_overdue < (tier.overdue_hrs or 0):
-                        continue
-                    tier_priorities = (
-                        tier.priorities if isinstance(tier.priorities, list)
-                        else [x.strip() for x in tier.priorities.split(",") if x.strip()]
-                        if isinstance(tier.priorities, str) and tier.priorities.strip()
-                        else ["CRITICAL", "WARNING", "NORMAL"]
-                    )
-                    if (action.priority or "NORMAL") not in tier_priorities:
-                        continue
-                    notify = (tier.notify_method or "").lower()
-                    if "email" not in notify:
-                        continue
-                    target_role = tier.target_role or tier.target or ""
-                    group_key = f"{target_role}::{tier.level}"
-                    if group_key not in email_groups:
-                        email_groups[group_key] = {
-                            "target_role": target_role,
-                            "level": tier.level,
-                            "actions": [],
-                        }
-                    email_groups[group_key]["actions"].append({
-                        "sn": action.sn,
-                        "text": action.text,
-                        "due": str(action.due),
-                        "responsible": action.responsible or "",
-                        "priority": action.priority or "NORMAL",
-                    })
-
-        to_send = []
-        for group in email_groups.values():
-            recipients = user_emails_by_role.get(group["target_role"], [])
-            if not recipients or not group["actions"]:
-                continue
-            to_send.append({
-                "recipients": recipients,
-                "level": group["level"],
-                "target_role": group["target_role"],
-                "actions": group["actions"],
-            })
-
-        if to_send:
-            dispatch_escalation_emails(to_send)
+    if to_send:
+        dispatch_escalation_emails(to_send)
 
 
 @router.get("/")

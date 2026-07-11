@@ -10,7 +10,7 @@ security = HTTPBearer(auto_error=False)
 def create_token(payload: dict) -> str:
     import datetime
     to_encode = payload.copy()
-    expire = datetime.datetime.utcnow() + datetime.timedelta(minutes=settings.jwt_expire_minutes)
+    expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=settings.jwt_expire_minutes)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, settings.secret_key, algorithm=settings.jwt_algorithm)
 
