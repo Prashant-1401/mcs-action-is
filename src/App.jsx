@@ -4758,10 +4758,9 @@ function SectionSaveButton({ label = "💾 Save to Server", onSave }) {
 
 /* ── Team Page (Master Setup) ──────────────────────────────────────────────
    Shows every team member with their plant/dept/role/superior and how many
-   of their actions are currently escalated. A person who qualifies as a
-   "superior" for a given escalated action (Admin, the team member's direct
-   superior, someone named in the tier's Superiors list, or someone whose
-   role matches the tier's "Escalate To" role) can close it right here. */
+   of their actions are currently escalated. Admin, the team member's direct
+   superior, or the target user named in the escalation tier can close it
+   right here. */
 function TeamPage({ users, actions, escMatrix, plants, depts, user, isAdmin, setActions }) {
   const [search, setSearch] = useState("");
   const [plantFilter, setPlantFilter] = useState("");
@@ -4771,9 +4770,17 @@ function TeamPage({ users, actions, escMatrix, plants, depts, user, isAdmin, set
   (actions || []).forEach(a => {
     const state = resolveEscalationState(a, escMatrix, users);
     if (!state) return;
-    const key = a.responsible || "—Unassigned";
-    if (!escByUser[key]) escByUser[key] = [];
-    escByUser[key].push({ action: a, ...state });
+    const names = (a.responsible || "").split(",").map(n => n.trim()).filter(Boolean);
+    if (!names.length) {
+      const key = "—Unassigned";
+      if (!escByUser[key]) escByUser[key] = [];
+      escByUser[key].push({ action: a, ...state });
+      return;
+    }
+    names.forEach(name => {
+      if (!escByUser[name]) escByUser[name] = [];
+      escByUser[name].push({ action: a, ...state, fromUser: name });
+    });
   });
 
   const canCloseEscalation = (member, escState) => {
