@@ -372,16 +372,10 @@ const getSuperiors = (userName, allUsers) => {
   }
   return chain;
 };
-// ── ROLE-WISE ESCALATION MATRIX ────────────────────────────────────────────
-// When an action becomes overdue, the alert walks UP the responsible user's
-// role hierarchy. Level 1 fires the first alert to the responsible's direct
-// superior role; Level 2 fires the next level up; Level 3 reaches the top (MD).
-//
-//   Operator        → Supervisor → HOD        → Plant Head → MD
-//   Supervisor      → HOD        → Plant Head → MD
-//   Shift Engineer  → HOD        → Plant Head → MD
-//   HOD             → Plant Head → MD
-//   Plant Head      → MD
+// ── USER-BASED ESCALATION MATRIX ──────────────────────────────────────────
+// When an action becomes overdue, alerts are sent to the specific user
+// configured in each tier of the escalation matrix. Each tier maps a
+// responsible person to a target user who gets notified.
 //
 
 const DEFAULT_ESC_MATRIX = [];
@@ -3289,7 +3283,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
   const allocator = action.allocatedBy;
   const allocatorUser = allUsers.find(u => u.name === allocator);
   const allocatorSuperior = allocatorUser?.superior ? allUsers.find(u => u.name === allocatorUser.superior) : null;
-  const isAssignee = user?.name === assignee;
+  const isAssignee = responsibleMatchesUsers(assignee, [(user?.name || "").toLowerCase()]);
   const isAllocator = user?.name === allocator;
   const isAllocatorSuperior = user?.name === allocatorSuperior?.name;
   const isAdmin = user?.role === "Admin";
