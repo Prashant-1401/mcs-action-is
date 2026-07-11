@@ -1636,17 +1636,18 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
   const projectMeetings = (meetings || []).filter(m => m.project === pr.name);
   const now = new Date();
   const start = new Date(pr.startDate || pr.start), end = new Date(pr.endDate || pr.end);
-  const done = (editMode ? draft : pr).milestones.filter(m => m.done).length;
-  const total = (editMode ? draft : pr).milestones.length;
+  const safeMilestones = Array.isArray((editMode ? draft : pr).milestones) ? (editMode ? draft : pr).milestones : [];
+  const done = safeMilestones.filter(m => m.done).length;
+  const total = safeMilestones.length;
   const milestonePct = total > 0 ? Math.round(done / total * 100) : 0;
   const isOverdueProject = now > end && pr.status !== "COMPLETED";
   const barColor = pr.status === "COMPLETED" ? T.green : isOverdueProject ? T.red : milestonePct >= 66 ? T.green : milestonePct >= 33 ? T.amber : T.red;
-  const current = editMode ? draft : pr;
+  const current = { ...(editMode ? draft : pr), milestones: safeMilestones };
 
   const toggleMilestone = (i) => {
     if (!editMode && !canEdit) return;
     setDraft(d => ({ ...d, milestones: d.milestones.map((m, idx) => idx === i ? { ...m, done: !m.done } : m) }));
-    if (!editMode) onProjectUpdate({ ...pr, milestones: pr.milestones.map((m, idx) => idx === i ? { ...m, done: !m.done } : m) });
+    if (!editMode) onProjectUpdate({ ...pr, milestones: (Array.isArray(pr.milestones) ? pr.milestones : []).map((m, idx) => idx === i ? { ...m, done: !m.done } : m) });
   };
   const save = () => { onProjectUpdate(draft); setEditMode(false); };
 
@@ -1712,14 +1713,20 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
               </select>}
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {(editMode ? draft : pr).team.map(name => (
-                <div key={name} style={{ display: "flex", alignItems: "center", gap: 8, background: T.bg, borderRadius: 8, padding: "6px 12px", position: "relative" }}>
-                  <Avatar name={name} size={28} users={allUsers || []} />
-                  <div><div style={{ fontSize: 12, fontWeight: 600 }}>{name}</div><div style={{ fontSize: 10, color: T.text2 }}>{(allUsers || []).find(u => u.name === name)?.role || "Member"}</div></div>
-                  {editMode && <button onClick={() => setDraft(d => ({ ...d, team: d.team.filter(n => n !== name) }))} style={{ marginLeft: 4, background: "transparent", border: "none", cursor: "pointer", color: T.red, fontSize: 14, lineHeight: 1, padding: "0 2px" }} title="Remove">×</button>}
-                </div>
-              ))}
-              {(editMode ? draft : pr).team.length === 0 && <div style={{ fontSize: 12, color: T.text2, fontStyle: "italic" }}>No team members added</div>}
+              {(() => {
+                const rawTeam = (editMode ? draft : pr).team;
+                const safeTeam = Array.isArray(rawTeam) ? rawTeam : (typeof rawTeam === "string" && rawTeam ? [rawTeam] : []);
+                return <>
+                  {safeTeam.map(name => (
+                    <div key={name} style={{ display: "flex", alignItems: "center", gap: 8, background: T.bg, borderRadius: 8, padding: "6px 12px", position: "relative" }}>
+                      <Avatar name={name} size={28} users={allUsers || []} />
+                      <div><div style={{ fontSize: 12, fontWeight: 600 }}>{name}</div><div style={{ fontSize: 10, color: T.text2 }}>{(allUsers || []).find(u => u.name === name)?.role || "Member"}</div></div>
+                      {editMode && <button onClick={() => setDraft(d => ({ ...d, team: d.team.filter(n => n !== name) }))} style={{ marginLeft: 4, background: "transparent", border: "none", cursor: "pointer", color: T.red, fontSize: 14, lineHeight: 1, padding: "0 2px" }} title="Remove">×</button>}
+                    </div>
+                  ))}
+                  {safeTeam.length === 0 && <div style={{ fontSize: 12, color: T.text2, fontStyle: "italic" }}>No team members added</div>}
+                </>;
+              })()}
             </div>
           </div>
           <div className="card" style={{ padding: 16, marginBottom: 14 }}>
