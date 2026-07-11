@@ -170,6 +170,17 @@ def migrate_schema(conn):
         except Exception as e:
             print(f"[migrate] users column migration skipped: {e}")
 
+    # Meetings table columns
+    if "meetings" in existing_tables:
+        try:
+            mtg_cols = {c["name"] for c in inspector.get_columns("meetings")}
+            if "guidelines" not in mtg_cols:
+                conn.execute(text(
+                    "ALTER TABLE meetings ADD COLUMN guidelines JSONB DEFAULT '[]'::jsonb"
+                ))
+        except Exception as e:
+            print(f"[migrate] meetings column migration skipped: {e}")
+
 
 app = FastAPI(
     title="MCS Backend API",

@@ -197,6 +197,7 @@ class MeetingCreate(BaseModel):
     recurrence: Optional[str] = None
     project_id: Optional[str] = None
     completed_sessions: Optional[List[Any]] = None
+    guidelines: Optional[List[Any]] = None
 
 
 class MeetingUpdate(BaseModel):
@@ -218,6 +219,7 @@ class MeetingUpdate(BaseModel):
     recurrence: Optional[str] = None
     project_id: Optional[str] = None
     completed_sessions: Optional[List[Any]] = None
+    guidelines: Optional[List[Any]] = None
 
 
 class MeetingPresetCreate(BaseModel):

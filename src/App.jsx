@@ -90,22 +90,22 @@ function resolveRecordIds(record, plants, depts, machines, projects) {
   const r = { ...record };
   // Action: plant name → plant_id
   if (r.plant && !r.plant_id) {
-    const match = plants.find(p => p.name === r.plant || p.id === r.plant);
+    const match = (plants || []).find(p => p.name === r.plant || p.id === r.plant);
     if (match) { r.plant_id = match.id; delete r.plant; }
   }
   // Action: section (dept name) → dept_id
   if (r.section && !r.dept_id) {
-    const match = depts.find(d => d.name === r.section || d.id === r.section);
+    const match = (depts || []).find(d => d.name === r.section || d.id === r.section);
     if (match) { r.dept_id = match.id; }
   }
   // Action: machineName → machine_id
   if (r.machineName && !r.machine_id) {
-    const match = machines.find(m => m.name === r.machineName || m.id === r.machineName);
+    const match = (machines || []).find(m => m.name === r.machineName || m.id === r.machineName);
     if (match) { r.machine_id = match.id; delete r.machineName; }
   }
   // Action/Meeting: project name → project_id
   if (r.project && !r.project_id) {
-    const match = projects.find(p => p.name === r.project || p.id === r.project);
+    const match = (projects || []).find(p => p.name === r.project || p.id === r.project);
     if (match) { r.project_id = match.id; }
   }
   return r;
@@ -141,14 +141,16 @@ function responsibleMatchesUsers(responsible, userNamesLower) {
   return false;
 }
 
-function resolveForeignKeys(items, plants, depts) {
-  const pName = {}, dName = {};
+function resolveForeignKeys(items, plants, depts, projects) {
+  const pName = {}, dName = {}, prName = {};
   (plants || []).forEach(p => { pName[p.id] = p.name; });
   (depts || []).forEach(d => { dName[d.id] = d.name; });
+  (projects || []).forEach(p => { prName[p.id] = p.name; });
   return (items || []).map(item => {
     const out = { ...item };
     if (out.plantId && pName[out.plantId]) out.plant = pName[out.plantId];
     if (out.deptId && dName[out.deptId]) out.dept = dName[out.deptId];
+    if (out.projectId && prName[out.projectId]) out.project = prName[out.projectId];
     return out;
   });
 }
@@ -217,7 +219,7 @@ function usePostgresDB({ defaultUsers, defaultPlants, defaultDepts,
 
       const resolvedU = resolveForeignKeys(uDenorm, pDenorm, dDenorm);
       const resolvedA = resolveForeignKeys(aDenorm, pDenorm, dDenorm);
-      const resolvedM = resolveForeignKeys(mDenorm, pDenorm, dDenorm);
+      const resolvedM = resolveForeignKeys(mDenorm, pDenorm, dDenorm, prDenorm);
       const resolvedPr = resolveForeignKeys(prDenorm, pDenorm, dDenorm);
       const resolvedMc = resolveForeignKeys(mcDenorm, pDenorm, dDenorm);
 
@@ -1198,7 +1200,7 @@ function ActionSidePanel({ action, onClose, onUpdate, users, plants, depts, curr
   );
 }
 
-function HomePage({ actions, setActions, user, setPage, users, meetings, plants, depts, setGlobalActiveMtg }) {
+function HomePage({ actions, setActions, user, setPage, users, meetings, plants, depts, setGlobalActiveMtg, machines, projects }) {
   const now = new Date();
   const isAdmin = user?.role === "Admin" || user?.role === "MD" || user?.role === "Plant Head";
   // Scope: my plant OR all
@@ -2253,6 +2255,21 @@ function AddMeetingModal({ plants, users, projects, onSave, onClose }) {
 
 /* ===================== MEETING ROOM ===================== */
 function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBack, prevActions, relatedActions, running, setRunning, elapsed, txLines, setTxLines, fastActions, setFastActions, insights, setInsights, currentUser, mtgPresets, setActions, machines, reasons }) {
+  // ── Defensive: default all array props to [] to prevent "Cannot read properties of undefined (reading 'filter')" ──
+  const _rel = Array.isArray(relatedActions) ? relatedActions : [];
+  const _tx = Array.isArray(txLines) ? txLines : [];
+  const _fast = Array.isArray(fastActions) ? fastActions : [];
+  const _ins = Array.isArray(insights) ? insights : [];
+  const _usr = Array.isArray(users) ? users : [];
+  const _plt = Array.isArray(plants) ? plants : [];
+  const _dep = Array.isArray(depts) ? depts : [];
+  const _rsn = Array.isArray(reasons) ? reasons : [];
+  const _mch = Array.isArray(machines) ? machines : [];
+  // Use safe aliases throughout; if the prop was undefined, log once for debugging
+  relatedActions = _rel; txLines = _tx; fastActions = _fast; insights = _ins;
+  users = _usr; plants = _plt; depts = _dep; reasons = _rsn; machines = _mch;
+  if (!mtg) { console.error("[MeetingRoom] mtg prop is null/undefined — aborting render"); return null; }
+
   const [phase, setPhase] = useState("live");
   const [showSidePanel, setShowSidePanel] = useState(false);
   const [selAction, setSelAction] = useState(null);
@@ -2369,7 +2386,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
         keyPoints: parsed.keyPoints || []
       };
       setInsights(p => {
-        const existingActionTexts = p.flatMap(ins => ins.actions.map(a => a.text.toLowerCase()));
+        const existingActionTexts = p.flatMap(ins => ensureArray(ins.actions).map(a => a.text.toLowerCase()));
         const newActions = insight.actions.filter(a => {
           const txt = a.text.toLowerCase();
           return !existingActionTexts.some(ext => txt.includes(ext) || ext.includes(txt));
@@ -2980,11 +2997,11 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
                     <div style={{ fontSize: 10, color: T.text2, fontWeight: 600 }}>🕐 {ins.ts}</div>
                     <span style={{ fontSize: 9, background: T.navy + "15", color: T.navy, padding: "1px 7px", borderRadius: 10, fontWeight: 700 }}>2-min batch</span>
                   </div>
-                  <div style={{ fontSize: 11, color: "#555", fontStyle: "italic", marginBottom: 8, lineHeight: 1.5, borderLeft: `2px solid ${T.amber}`, paddingLeft: 8 }}>"{ins.para.slice(0, 200)}{ins.para.length > 200 ? "…" : ""}"</div>
-                  {ins.actions.length > 0 && (
+                   <div style={{ fontSize: 11, color: "#555", fontStyle: "italic", marginBottom: 8, lineHeight: 1.5, borderLeft: `2px solid ${T.amber}`, paddingLeft: 8 }}>"{(ins.para || "").slice(0, 200)}{(ins.para || "").length > 200 ? "…" : ""}"</div>
+                  {ensureArray(ins.actions).length > 0 && (
                     <div style={{ marginBottom: 6 }}>
                       <div style={{ fontSize: 10, fontWeight: 700, color: T.navy, marginBottom: 4, textTransform: "uppercase", letterSpacing: .5 }}>Actions</div>
-                      {ins.actions.map(a => (
+                      {ensureArray(ins.actions).map(a => (
                         <div key={a.id} style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 4, background: a._staged ? "#D5F5E3" : "#fff", borderRadius: 6, padding: "5px 8px", border: `1px solid ${a._staged ? T.green + "40" : T.border}` }}>
                           <div style={{ flex: 1 }}>
                             <div style={{ fontSize: 11, fontWeight: 500, color: T.text }}>{a.text}</div>
@@ -2999,22 +3016,22 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
                       ))}
                     </div>
                   )}
-                  {ins.decisions.length > 0 && (
+                  {ensureArray(ins.decisions).length > 0 && (
                     <div style={{ marginBottom: 6 }}>
                       <div style={{ fontSize: 10, fontWeight: 700, color: T.green, marginBottom: 3, textTransform: "uppercase", letterSpacing: .5 }}>✅ Decisions</div>
-                      {ins.decisions.map((d, i) => <div key={i} style={{ fontSize: 11, color: T.text, padding: "2px 0", paddingLeft: 8, borderLeft: `2px solid ${T.green}` }}>{d}</div>)}
+                      {ensureArray(ins.decisions).map((d, i) => <div key={i} style={{ fontSize: 11, color: T.text, padding: "2px 0", paddingLeft: 8, borderLeft: `2px solid ${T.green}` }}>{d}</div>)}
                     </div>
                   )}
-                  {ins.risks.length > 0 && (
+                  {ensureArray(ins.risks).length > 0 && (
                     <div style={{ marginBottom: 6 }}>
                       <div style={{ fontSize: 10, fontWeight: 700, color: T.red, marginBottom: 3, textTransform: "uppercase", letterSpacing: .5 }}>⚠ Risks</div>
-                      {ins.risks.map((r, i) => <div key={i} style={{ fontSize: 11, color: T.text, padding: "2px 0", paddingLeft: 8, borderLeft: `2px solid ${T.red}` }}>{r}</div>)}
+                      {ensureArray(ins.risks).map((r, i) => <div key={i} style={{ fontSize: 11, color: T.text, padding: "2px 0", paddingLeft: 8, borderLeft: `2px solid ${T.red}` }}>{r}</div>)}
                     </div>
                   )}
-                  {ins.keyPoints.length > 0 && (
+                  {ensureArray(ins.keyPoints).length > 0 && (
                     <div>
                       <div style={{ fontSize: 10, fontWeight: 700, color: T.slate, marginBottom: 3, textTransform: "uppercase", letterSpacing: .5 }}>💡 Key Points</div>
-                      {ins.keyPoints.map((k, i) => <div key={i} style={{ fontSize: 11, color: T.text, padding: "2px 0", paddingLeft: 8, borderLeft: `2px solid ${T.slate}` }}>{k}</div>)}
+                      {ensureArray(ins.keyPoints).map((k, i) => <div key={i} style={{ fontSize: 11, color: T.text, padding: "2px 0", paddingLeft: 8, borderLeft: `2px solid ${T.slate}` }}>{k}</div>)}
                     </div>
                   )}
                 </div>
@@ -5659,6 +5676,9 @@ function useAPIBridge(actions, setActions, projects) {
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { hasError: false, error: null }; }
   static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  componentDidCatch(error, errorInfo) {
+    console.error("[MCS ErrorBoundary] CRASH:", error?.message, "\nStack:", error?.stack, "\nComponent Stack:", errorInfo?.componentStack);
+  }
   render() {
     if (this.state.hasError) {
       return (
@@ -5807,6 +5827,11 @@ export default function App() {
       withSN.forEach(r => apiCreate("actions", resolveRecordIds(r, plants, depts, machines, projects)));
       return [...p, ...withSN];
     });
+    if (globalActiveMtg && globalActiveMtg.id) {
+      const sessionEntry = { date: todayStr(), duration: mtgElapsed || 0, actionCount: rows.length };
+      setMeetings(p => (p || []).map(m => m.id === globalActiveMtg.id ? { ...m, completedSessions: [...ensureArray(m.completedSessions), sessionEntry] } : m));
+      apiUpdate("meetings", globalActiveMtg.id, { completedSessions: [...ensureArray(globalActiveMtg.completedSessions), sessionEntry] });
+    }
   };
   const updateAction = (id, patch) => {
     setActions(p => p.map(a => {
@@ -5856,7 +5881,7 @@ export default function App() {
     <ErrorBoundary>
       <style>{CSS}</style>
       <Shell page={page} setPage={setPage} user={user} onLogout={() => { setUser(null); setPage(0); clearMeetingState(); }} onQuickAdd={() => setShowQuickAdd(true)} pendingCount={pendingForMe} auditCount={audit.length} activeMtg={globalActiveMtg} onResumeActiveMtg={() => setPage(1)} mtgRunning={mtgRunning} mtgElapsed={mtgElapsed} notifications={notifs} unreadCount={unreadNotifs} onMarkAllRead={markAllRead} users={users} actions={actions} onShowSupport={() => setShowSupport(true)} onShowProfile={() => setShowProfile(true)} onShowAdminNotifs={() => setShowAdminNotifs(true)}>
-        {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} plants={plants} depts={depts} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} />}
+        {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} plants={plants} depts={depts} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} machines={machines} projects={projects} />}
         {page === 1 && <WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows => { commitFinal(rows); clearMeetingState(); }} actions={actions} setActions={setActions} user={user} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); apiUpdate("projects", updated.id, updated); }} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); }} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState} mtgPresets={mtgPresets} machines={machines} reasons={reasons} />}
         {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} machines={machines} />}
         {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} />}
