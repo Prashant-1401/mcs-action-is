@@ -1794,7 +1794,7 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
 }
 
 /* ===================== WORK PAGE ===================== */
-function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, user, onProjectUpdate, allProjects, setProjects: setProjectsUp, allMeetings, setMeetings: setMeetingsUp, setPage, globalActiveMtg, setGlobalActiveMtg, mtgRunning, setMtgRunning, mtgElapsed, mtgTxLines, setMtgTxLines, mtgFastActions, setMtgFastActions, mtgInsights, setMtgInsights, clearMeetingState, mtgPresets, reasons }) {
+function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, user, onProjectUpdate, allProjects, setProjects: setProjectsUp, allMeetings, setMeetings: setMeetingsUp, setPage, globalActiveMtg, setGlobalActiveMtg, mtgRunning, setMtgRunning, mtgElapsed, mtgTxLines, setMtgTxLines, mtgFastActions, setMtgFastActions, mtgInsights, setMtgInsights, clearMeetingState, mtgPresets, machines, reasons }) {
   // activeMtg is now global — WorkPage just reads/writes it
   const activeMtg = globalActiveMtg;
   const setActiveMtg = (m) => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); };
@@ -1852,7 +1852,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
             : a.src === activeMtg.type;
           const matchesProject = activeMtg.project && (a.projectName || a.project) === activeMtg.project;
           return matchesMeeting || matchesProject;
-        })} running={mtgRunning} setRunning={setMtgRunning} elapsed={mtgElapsed} txLines={mtgTxLines} setTxLines={setMtgTxLines} fastActions={mtgFastActions} setFastActions={setMtgFastActions} insights={mtgInsights} setInsights={setMtgInsights} currentUser={user} mtgPresets={mtgPresets} setActions={setActions} reasons={reasons} />;
+        })} running={mtgRunning} setRunning={setMtgRunning} elapsed={mtgElapsed} txLines={mtgTxLines} setTxLines={setMtgTxLines} fastActions={mtgFastActions} setFastActions={setMtgFastActions} insights={mtgInsights} setInsights={setMtgInsights} currentUser={user} mtgPresets={mtgPresets} setActions={setActions} machines={machines} reasons={reasons} />;
 
   return (
     <div className="fade-in">
@@ -2007,7 +2007,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
         </div>
       </div>
       {charter && <ProjectCharterModal pr={charter} onClose={() => { setCharter(null); setCharterActionSel(null); }} actions={actions} meetings={meetings} user={user} users={users} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); onProjectUpdate(updated); }} onActionSelect={a => setCharterActionSel(a)} />}
-      {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={() => { }} user={user} users={users} allUsers={users} plants={plants} />}
+      {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={() => { }} user={user} users={users} allUsers={users} plants={plants} machines={machines} />}
       {showAddMtg && <AddMeetingModal plants={plants} users={users} projects={projects} onSave={m => { const mtg = { ...m, id: "M" + Date.now(), completedSessions: [] }; setMeetings(p => [...p, mtg]); apiCreate("meetings", resolveRecordIds(mtg, plants, depts, machines, projects)); setShowAddMtg(false); }} onClose={() => setShowAddMtg(false)} />}
       {/* Feature 3: Add Project Modal */}
       {showAddProject && <AddProjectModal plants={plants} users={users} onSave={p => { const pr = { ...p, id: "PR" + Date.now(), milestones: [], risks: [], team: [], budget: p.budget ? Number(p.budget) || 0 : 0 }; setProjects(prev => [...prev, pr]); apiCreate("projects", pr); showAddProject && setShowAddProject(false); }} onClose={() => setShowAddProject(false)} />}
@@ -2252,7 +2252,7 @@ function AddMeetingModal({ plants, users, projects, onSave, onClose }) {
 }
 
 /* ===================== MEETING ROOM ===================== */
-function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBack, prevActions, relatedActions, running, setRunning, elapsed, txLines, setTxLines, fastActions, setFastActions, insights, setInsights, currentUser, mtgPresets, setActions, reasons }) {
+function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBack, prevActions, relatedActions, running, setRunning, elapsed, txLines, setTxLines, fastActions, setFastActions, insights, setInsights, currentUser, mtgPresets, setActions, machines, reasons }) {
   const [phase, setPhase] = useState("live");
   const [showSidePanel, setShowSidePanel] = useState(false);
   const [selAction, setSelAction] = useState(null);
@@ -2573,8 +2573,8 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
     stopSTT();
     setRunning(false);
     // Gather all AI-suggested actions from insights
-    const aiActions = insights.flatMap(ins =>
-      ins.actions.map((a, i) => ({
+    const aiActions = (Array.isArray(insights) ? insights : []).flatMap(ins =>
+      ensureArray(ins.actions).map((a, i) => ({
         id: Date.now() + Math.random(),
         text: a.text,
         responsible: a.responsible || null,
@@ -2620,10 +2620,10 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   /* ── Paused Meeting Prompt ─────────────────────────────────────── */
   /* When meeting was stopped (running=false) but session data exists, 
      show Resume/Exit choice instead of jumping into live view */
-  const hasSessionData = (elapsed || 0) > 0 || txLines.filter(l => l.trim()).length > 0 || (Array.isArray(fastActions) && fastActions.length > 0) || insights.length > 0;
+  const hasSessionData = (elapsed || 0) > 0 || (Array.isArray(txLines) && txLines.filter(l => l.trim()).length > 0) || (Array.isArray(fastActions) && fastActions.length > 0) || (Array.isArray(insights) && insights.length > 0);
   if (!running && hasSessionData && !exitConfirm) {
     const wordCount = txLines.join(" ").split(" ").filter(Boolean).length;
-    const actionCount = insights.reduce((n, ins) => n + ins.actions.length, 0) + (Array.isArray(fastActions) ? fastActions.length : 0);
+    const actionCount = (Array.isArray(insights) ? insights : []).reduce((n, ins) => n + ensureArray(ins.actions).length, 0) + (Array.isArray(fastActions) ? fastActions.length : 0);
     return (
       <div className="fade-in" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "70vh" }}>
         <div style={{ width: 520, textAlign: "center" }}>
@@ -2672,8 +2672,8 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   // Reset exitConfirm if we get back to running
   if (running && exitConfirm) setExitConfirm(false);
 
-  const pendingRelated = (relatedActions || [])
-    .filter(a => a.status !== "DROPPED")
+  const pendingRelated = (Array.isArray(relatedActions) ? relatedActions : [])
+    .filter(a => a && a.status !== "DROPPED")
     .sort((a, b) => {
       const over_a = isOverdue(a) ? -1 : 0, over_b = isOverdue(b) ? -1 : 0;
       if (over_a !== over_b) return over_a - over_b;
@@ -2683,7 +2683,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   const myPending = pendingRelated.filter(a => responsibleMatchesUsers(a.responsible, [(currentUser?.name || "").toLowerCase()]) || a.allocatedBy === currentUser?.name);
   const displayPending = mtgShowMine ? myPending : pendingRelated;
 
-  const insightCount = insights.reduce((n, ins) => n + ins.actions.length + ins.decisions.length + ins.risks.length + ins.keyPoints.length, 0);
+  const insightCount = insights.reduce((n, ins) => n + ensureArray(ins.actions).length + ensureArray(ins.decisions).length + ensureArray(ins.risks).length + ensureArray(ins.keyPoints).length, 0);
 
   return (
     <div className="fade-in">
@@ -2756,9 +2756,9 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
         <div style={{ padding: "12px 16px", borderBottom: `1.5px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fff", flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontWeight: 700, fontSize: 13, color: T.navy }}>📋 {mtg.type} — Action Points</span>
-            {insights.flatMap(i => i.actions).length > 0 && (
+            {insights.flatMap(i => ensureArray(i.actions)).length > 0 && (
               <span style={{ background: T.amber + "20", color: T.amber, border: `1px solid ${T.amber}40`, borderRadius: 10, padding: "2px 10px", fontSize: 10, fontWeight: 700 }}>
-                +{insights.flatMap(i => i.actions).length} from this meeting
+                +{insights.flatMap(i => ensureArray(i.actions)).length} from this meeting
               </span>
             )}
           </div>
@@ -2824,11 +2824,11 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
           </div>
         </div>
         {/* AI-identified actions from current meeting */}
-        {insights.flatMap(ins => ins.actions).length > 0 && (
+        {insights.flatMap(ins => ensureArray(ins.actions)).length > 0 && (
           <div style={{ padding: "10px 18px", background: T.amber + "10", borderBottom: `1.5px solid ${T.amber}30` }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: T.amber, marginBottom: 6, textTransform: "uppercase", letterSpacing: .4 }}>⚡ Discussed in This Meeting (AI-Identified)</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {insights.flatMap(ins => ins.actions).filter((a, idx, arr) => arr.findIndex(x => x.text === a.text) === idx).map((a, i) => (
+              {insights.flatMap(ins => ensureArray(ins.actions)).filter((a, idx, arr) => arr.findIndex(x => x.text === a.text) === idx).map((a, i) => (
                 <div key={a.id || i} style={{ display: "flex", alignItems: "flex-start", gap: 8, background: a._staged ? T.greenL : "#fff", borderRadius: 7, padding: "6px 10px", border: `1px solid ${a._staged ? T.green + "50" : T.amber + "40"}` }}>
                   <span style={{ fontSize: 11, color: T.amber, fontWeight: 700, flexShrink: 0, marginTop: 1 }}>•</span>
                   <div style={{ flex: 1 }}>
@@ -3022,7 +3022,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
             }
           </div>
           <div style={{ fontSize: 10, color: T.text2, textAlign: "center" }}>
-            {insights.length} batch{insights.length !== 1 ? "es" : ""} analyzed · {insights.reduce((n, i) => n + i.actions.length, 0)} actions found
+            {insights.length} batch{insights.length !== 1 ? "es" : ""} analyzed · {insights.reduce((n, i) => n + ensureArray(i.actions).length, 0)} actions found
           </div>
         </div>
 
@@ -3059,8 +3059,8 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
         </div>
       </div>
 
-      {showSidePanel && <AddActionPanel users={users} plants={plants} depts={depts} defaultPlant={mtg.plant} defaultSrc={mtg.type} reasons={reasons} onSave={a => { setFastActions(p => Array.isArray(p) ? [...p, { ...a, id: Date.now() }] : [{ ...a, id: Date.now() }]); setShowSidePanel(false); }} onClose={() => setShowSidePanel(false)} />}
-      {selAction && <ActionDetailPanel action={selAction} onClose={() => setSelAction(null)} onUpdate={() => { }} user={currentUser} users={users} allUsers={users} plants={plants} />}
+      {showSidePanel && <AddActionPanel users={users} plants={plants} depts={depts} defaultPlant={mtg.plant} defaultSrc={mtg.type} machines={machines} reasons={reasons} onSave={a => { setFastActions(p => Array.isArray(p) ? [...p, { ...a, id: Date.now() }] : [{ ...a, id: Date.now() }]); setShowSidePanel(false); }} onClose={() => setShowSidePanel(false)} />}
+      {selAction && <ActionDetailPanel action={selAction} onClose={() => setSelAction(null)} onUpdate={() => { }} user={currentUser} users={users} allUsers={users} plants={plants} machines={machines} />}
     </div>
   );
 }
@@ -5857,7 +5857,7 @@ export default function App() {
       <style>{CSS}</style>
       <Shell page={page} setPage={setPage} user={user} onLogout={() => { setUser(null); setPage(0); clearMeetingState(); }} onQuickAdd={() => setShowQuickAdd(true)} pendingCount={pendingForMe} auditCount={audit.length} activeMtg={globalActiveMtg} onResumeActiveMtg={() => setPage(1)} mtgRunning={mtgRunning} mtgElapsed={mtgElapsed} notifications={notifs} unreadCount={unreadNotifs} onMarkAllRead={markAllRead} users={users} actions={actions} onShowSupport={() => setShowSupport(true)} onShowProfile={() => setShowProfile(true)} onShowAdminNotifs={() => setShowAdminNotifs(true)}>
         {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} plants={plants} depts={depts} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} />}
-        {page === 1 && <WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows => { commitFinal(rows); clearMeetingState(); }} actions={actions} setActions={setActions} user={user} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); apiUpdate("projects", updated.id, updated); }} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); }} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState} reasons={reasons} />}
+        {page === 1 && <WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows => { commitFinal(rows); clearMeetingState(); }} actions={actions} setActions={setActions} user={user} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); apiUpdate("projects", updated.id, updated); }} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); }} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState} mtgPresets={mtgPresets} machines={machines} reasons={reasons} />}
         {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} machines={machines} />}
         {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} />}
         {page === 4 && <EscalationsPage actions={actions} setActions={setActions} audit={audit} users={users} escMatrix={escMatrix} plants={plants} depts={depts} user={user} />}
