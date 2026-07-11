@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
 def migrate_schema(conn):
     from sqlalchemy import inspect, text
     inspector = inspect(conn)
+    # Escalation matrix columns
     columns = {c["name"] for c in inspector.get_columns("escalation_matrix")}
     if "from_role" not in columns:
         conn.execute(text(
@@ -47,6 +48,37 @@ def migrate_schema(conn):
     conn.execute(text(
         "UPDATE escalation_matrix SET superiors = '[]'::jsonb WHERE superiors IS NULL"
     ))
+    # Users table columns
+    user_cols = {c["name"] for c in inspector.get_columns("users")}
+    if "master_access" not in user_cols:
+        conn.execute(text(
+            "ALTER TABLE users ADD COLUMN master_access BOOLEAN DEFAULT FALSE"
+        ))
+    # Seed default escalation matrix if empty
+    from app.models.models import EscalationMatrix
+    from sqlalchemy import select as sa_select
+    # Use raw text to check count since this is a sync conn
+    count_row = conn.execute(text("SELECT COUNT(*) FROM escalation_matrix")).scalar()
+    if count_row == 0:
+        defaults = [
+            {"id": "E1-OP", "level": 1, "label": "Level 1 — Operator → Supervisor", "from_role": "Operator", "target_role": "Supervisor", "overdue_hrs": 24, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING","NORMAL"]', "color": "#E69903", "active": True, "description": "Operator overdue → Supervisor"},
+            {"id": "E1-SV", "level": 1, "label": "Level 1 — Supervisor → HOD", "from_role": "Supervisor", "target_role": "HOD", "overdue_hrs": 24, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING","NORMAL"]', "color": "#E69903", "active": True, "description": "Supervisor overdue → HOD"},
+            {"id": "E1-SE", "level": 1, "label": "Level 1 — Shift Engineer → HOD", "from_role": "Shift Engineer", "target_role": "HOD", "overdue_hrs": 24, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING","NORMAL"]', "color": "#E69903", "active": True, "description": "Shift Engineer overdue → HOD"},
+            {"id": "E1-HD", "level": 1, "label": "Level 1 — HOD → Plant Head", "from_role": "HOD", "target_role": "Plant Head", "overdue_hrs": 24, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING","NORMAL"]', "color": "#E69903", "active": True, "description": "HOD overdue → Plant Head"},
+            {"id": "E1-PH", "level": 1, "label": "Level 1 — Plant Head → MD", "from_role": "Plant Head", "target_role": "MD", "overdue_hrs": 24, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING","NORMAL"]', "color": "#E69903", "active": True, "description": "Plant Head overdue → MD"},
+            {"id": "E2-OP", "level": 2, "label": "Level 2 — Operator → HOD", "from_role": "Operator", "target_role": "HOD", "overdue_hrs": 72, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING"]', "color": "#E67E22", "active": True, "description": "Operator still in process → HOD"},
+            {"id": "E2-SV", "level": 2, "label": "Level 2 — Supervisor → Plant Head", "from_role": "Supervisor", "target_role": "Plant Head", "overdue_hrs": 72, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING"]', "color": "#E67E22", "active": True, "description": "Supervisor still in process → Plant Head"},
+            {"id": "E2-SE", "level": 2, "label": "Level 2 — Shift Engineer → Plant Head", "from_role": "Shift Engineer", "target_role": "Plant Head", "overdue_hrs": 72, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING"]', "color": "#E67E22", "active": True, "description": "Shift Engineer still in process → Plant Head"},
+            {"id": "E2-HD", "level": 2, "label": "Level 2 — HOD → MD", "from_role": "HOD", "target_role": "MD", "overdue_hrs": 72, "notify_method": "In-App + Email", "priorities": '["CRITICAL","WARNING"]', "color": "#E67E22", "active": True, "description": "HOD still in process → MD"},
+            {"id": "E3-OP", "level": 3, "label": "Level 3 — Operator → Plant Head", "from_role": "Operator", "target_role": "Plant Head", "overdue_hrs": 168, "notify_method": "In-App + Email", "priorities": '["CRITICAL"]', "color": "#C0392B", "active": True, "description": "Operator unresolved 7 days → Plant Head"},
+            {"id": "E3-SV", "level": 3, "label": "Level 3 — Supervisor → MD", "from_role": "Supervisor", "target_role": "MD", "overdue_hrs": 168, "notify_method": "In-App + Email", "priorities": '["CRITICAL"]', "color": "#C0392B", "active": True, "description": "Supervisor unresolved 7 days → MD"},
+            {"id": "E3-SE", "level": 3, "label": "Level 3 — Shift Engineer → MD", "from_role": "Shift Engineer", "target_role": "MD", "overdue_hrs": 168, "notify_method": "In-App + Email", "priorities": '["CRITICAL"]', "color": "#C0392B", "active": True, "description": "Shift Engineer unresolved 7 days → MD"},
+        ]
+        for d in defaults:
+            conn.execute(text(
+                "INSERT INTO escalation_matrix (id, level, label, from_role, target_role, overdue_hrs, notify_method, priorities, color, active, description) "
+                "VALUES (:id, :level, :label, :from_role, :target_role, :overdue_hrs, :notify_method, :priorities::jsonb, :color, :active, :description)"
+            ), d)
 
 
 app = FastAPI(

@@ -26,6 +26,7 @@ class UserResponse(BaseModel):
     initials: Optional[str] = None
     color: Optional[str] = None
     is_active: Optional[bool] = True
+    master_access: Optional[bool] = False
 
     class Config:
         from_attributes = True
@@ -45,6 +46,7 @@ def _safe_user(user: User) -> UserResponse:
         initials=user.initials,
         color=user.color,
         is_active=user.is_active,
+        master_access=user.master_access,
     )
 
 

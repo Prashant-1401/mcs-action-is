@@ -14,6 +14,8 @@ class LoginResponse(BaseModel):
 
 
 class PlantCreate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: str
     name: str
     location: Optional[str] = None
@@ -21,12 +23,16 @@ class PlantCreate(BaseModel):
 
 
 class PlantUpdate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     name: Optional[str] = None
     location: Optional[str] = None
     head: Optional[str] = None
 
 
 class DepartmentCreate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: str
     name: str
     plant_id: Optional[str] = None
@@ -35,6 +41,8 @@ class DepartmentCreate(BaseModel):
 
 
 class DepartmentUpdate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     name: Optional[str] = None
     plant_id: Optional[str] = None
     head: Optional[str] = None
@@ -42,17 +50,23 @@ class DepartmentUpdate(BaseModel):
 
 
 class RoleCreate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: str
     name: str
     level: int
 
 
 class RoleUpdate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     name: Optional[str] = None
     level: Optional[int] = None
 
 
 class UserCreate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: str
     name: str
     username: str
@@ -65,9 +79,12 @@ class UserCreate(BaseModel):
     email: Optional[str] = None
     initials: Optional[str] = None
     color: Optional[str] = "#7C80B0"
+    master_access: Optional[bool] = False
 
 
 class UserUpdate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     name: Optional[str] = None
     password: Optional[str] = None
     role: Optional[str] = None
@@ -78,9 +95,12 @@ class UserUpdate(BaseModel):
     email: Optional[str] = None
     initials: Optional[str] = None
     color: Optional[str] = None
+    master_access: Optional[bool] = None
 
 
 class MachineCreate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: str
     name: Optional[str] = None
     plant_id: Optional[str] = None
@@ -90,6 +110,8 @@ class MachineCreate(BaseModel):
 
 
 class MachineUpdate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     name: Optional[str] = None
     plant_id: Optional[str] = None
     dept_id: Optional[str] = None
@@ -98,17 +120,23 @@ class MachineUpdate(BaseModel):
 
 
 class ReasonCreate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: str
     text: str
     category: Optional[str] = None
 
 
 class ReasonUpdate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     text: Optional[str] = None
     category: Optional[str] = None
 
 
 class ProjectCreate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: str
     name: str
     plant_id: Optional[str] = None
@@ -129,6 +157,8 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectUpdate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     name: Optional[str] = None
     plant_id: Optional[str] = None
     dept_id: Optional[str] = None
@@ -148,6 +178,8 @@ class ProjectUpdate(BaseModel):
 
 
 class MeetingCreate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: str
     name: Optional[str] = None
     type: Optional[str] = None
@@ -168,6 +200,8 @@ class MeetingCreate(BaseModel):
 
 
 class MeetingUpdate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     name: Optional[str] = None
     type: Optional[str] = None
     plant_id: Optional[str] = None
@@ -187,17 +221,23 @@ class MeetingUpdate(BaseModel):
 
 
 class MeetingPresetCreate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     type: str
     attendees: Optional[List[str]] = None
     instructions: Optional[List[str]] = None
 
 
 class MeetingPresetUpdate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     attendees: Optional[List[str]] = None
     instructions: Optional[List[str]] = None
 
 
 class EscalationMatrixCreate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: str
     level: int
     label: Optional[str] = None
@@ -216,6 +256,8 @@ class EscalationMatrixCreate(BaseModel):
 
 
 class EscalationMatrixUpdate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     level: Optional[int] = None
     label: Optional[str] = None
     from_role: Optional[str] = None
@@ -265,6 +307,8 @@ class ActionCreate(BaseModel):
 
 
 class ActionUpdate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     text: Optional[str] = None
     responsible_user_id: Optional[str] = None
     responsible: Optional[str] = None
@@ -293,6 +337,8 @@ class ActionUpdate(BaseModel):
 
 
 class ActionMessageCreate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: Optional[int] = None
     action_id: str
     source_msg_id: Optional[str] = None
@@ -304,6 +350,8 @@ class ActionMessageCreate(BaseModel):
 
 
 class AuditCreate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: str
     ts: Optional[str] = None
     action_sn: Optional[str] = None
@@ -347,6 +395,8 @@ class EmailEscalateReq(BaseModel):
 
 
 class ActionsEmailReq(BaseModel):
+    model_config = {"extra": "ignore"}
+
     responsible: str
     email: str
     status: Optional[str] = None

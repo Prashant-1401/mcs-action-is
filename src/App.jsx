@@ -63,6 +63,7 @@ const SNAKE_TO_CAMEL = {
   overdue_days: "overdueDays", overdue_hrs: "overdueHrs",
   from_role: "fromRole", target_role: "targetRole",
   applicable_to: "applicableTo",
+  master_access: "masterAccess",
 };
 const CAMEL_TO_SNAKE = Object.fromEntries(
   Object.entries(SNAKE_TO_CAMEL).map(([s, c]) => [c, s])
@@ -81,6 +82,32 @@ function normKeys(obj) {
   const out = {};
   Object.keys(obj).forEach(k => { out[CAMEL_TO_SNAKE[k] || k] = obj[k]; });
   return out;
+}
+
+/* ─── Resolve display names → FK IDs for actions & meetings ────── */
+function resolveRecordIds(record, plants, depts, machines, projects) {
+  const r = { ...record };
+  // Action: plant name → plant_id
+  if (r.plant && !r.plant_id) {
+    const match = plants.find(p => p.name === r.plant || p.id === r.plant);
+    if (match) { r.plant_id = match.id; delete r.plant; }
+  }
+  // Action: section (dept name) → dept_id
+  if (r.section && !r.dept_id) {
+    const match = depts.find(d => d.name === r.section || d.id === r.section);
+    if (match) { r.dept_id = match.id; }
+  }
+  // Action: machineName → machine_id
+  if (r.machineName && !r.machine_id) {
+    const match = machines.find(m => m.name === r.machineName || m.id === r.machineName);
+    if (match) { r.machine_id = match.id; delete r.machineName; }
+  }
+  // Action/Meeting: project name → project_id
+  if (r.project && !r.project_id) {
+    const match = projects.find(p => p.name === r.project || p.id === r.project);
+    if (match) { r.project_id = match.id; }
+  }
+  return r;
 }
 
 /* ─── Smart name matching for responsible fields ────────────────
@@ -1336,7 +1363,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
       if (patch.due && patch.due !== a.due) { const rev = { date: todayStr(), from: a.due, to: patch.due, by: user?.name || "Unknown" }; return { ...a, ...patch, revisions: (a.revisions || 0) + 1, revisionHistory: [...(a.revisionHistory || []), rev] }; }
       return { ...a, ...patch };
     }));
-    apiUpdate("actions", id, patch);
+    apiUpdate("actions", id, resolveRecordIds(patch, plants, depts, machines, projects));
   };
 
   // State — single unified action detail panel
@@ -1662,7 +1689,7 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
   const pActions = actions.filter(a => (a.projectName || a.project) === pr.name);
   const projectMeetings = (meetings || []).filter(m => m.project === pr.name);
   const now = new Date();
-  const start = new Date(pr.start), end = new Date(pr.end);
+  const start = new Date(pr.startDate || pr.start), end = new Date(pr.endDate || pr.end);
   const done = (editMode ? draft : pr).milestones.filter(m => m.done).length;
   const total = (editMode ? draft : pr).milestones.length;
   const milestonePct = total > 0 ? Math.round(done / total * 100) : 0;
@@ -1686,7 +1713,7 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
               <div style={{ fontSize: 11, opacity: .6, marginBottom: 4, letterSpacing: 1, textTransform: "uppercase" }}>Project Charter</div>
               <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 22, fontWeight: 800, marginBottom: 6 }}>{pr.name}</h2>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ padding: "3px 10px", borderRadius: 20, background: "rgba(255,255,255,.15)", fontSize: 11, fontWeight: 600 }}>{pr.plant}</span>
+                <span style={{ padding: "3px 10px", borderRadius: 20, background: "rgba(255,255,255,.15)", fontSize: 11, fontWeight: 600 }}>{pr.plantId || pr.plant}</span>
                 <span style={{ padding: "3px 10px", borderRadius: 20, background: pr.priority === "CRITICAL" ? T.red + "80" : pr.priority === "WARNING" ? T.amber + "80" : "rgba(255,255,255,.15)", fontSize: 11, fontWeight: 600 }}>{pr.priority}</span>
                 <span style={{ padding: "3px 10px", borderRadius: 20, background: "rgba(255,255,255,.15)", fontSize: 11, fontWeight: 600 }}>{pr.status}</span>
               </div>
@@ -1699,11 +1726,11 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
           </div>
           <div style={{ marginTop: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, opacity: .85, marginBottom: 6 }}>
-              <span>{fmt(pr.start)}</span>
+              <span>{fmt(pr.startDate || pr.start)}</span>
               <span style={{ fontWeight: 700, color: isOverdueProject ? "#ffaaaa" : barColor === T.green ? "#aaffcc" : "#ffd580" }}>
                 {pr.status === "COMPLETED" ? "✓ Completed" : isOverdueProject ? "⚠ Overdue" : milestonePct === 100 ? "All milestones done" : `${done}/${total} milestones`}
               </span>
-              <span>{fmt(pr.end)}</span>
+              <span>{fmt(pr.endDate || pr.end)}</span>
             </div>
             <div style={{ background: "rgba(255,255,255,.2)", borderRadius: 6, height: 8 }}>
               <div style={{ height: "100%", borderRadius: 6, background: barColor, width: `${milestonePct}%`, transition: "width .6s" }} />
@@ -1849,7 +1876,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
   const canEditMeetings = isAdmin || userPerms.canEditMeetings;
 
   const visibleMeetings = (meetings || []).filter(m => user?.plant === "All" ? true : m.plant === user?.plant || m.plant === "All");
-  const visibleProjects = (projects || []).filter(p => user?.plant === "All" ? true : p.plant === user?.plant || p.plant === "All");
+  const visibleProjects = (projects || []).filter(p => user?.plant === "All" ? true : (p.plantId || p.plant) === user?.plant || (p.plantId || p.plant) === "All");
 
   // Fix 8: detect time conflicts for current user's meetings
   const timeToMins = (t) => {
@@ -1987,7 +2014,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {visibleProjects.map((pr, idx) => {
-              const start = new Date(pr.start), end = new Date(pr.end), now2 = new Date();
+              const start = new Date(pr.startDate || pr.start), end = new Date(pr.endDate || pr.end), now2 = new Date();
               const ms = Array.isArray(pr.milestones) ? pr.milestones : [];
               const done = ms.filter(m => m.done).length;
               const total = ms.length;
@@ -2000,7 +2027,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 14, color: T.text }}>{pr.name}</div>
-                      <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{pr.plant} · <b style={{ color: T.text }}>{pr.owner}</b></div>
+                      <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{pr.plantId || pr.plant} · <b style={{ color: T.text }}>{pr.owner}</b></div>
                     </div>
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}><PBadge p={pr.priority} /></div>
                   </div>
@@ -2023,7 +2050,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
                     <span style={{ fontSize: 11, fontWeight: 700, color: barColor, minWidth: 36 }}>{milestonePct}%</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: T.text2 }}>
-                    <span>{fmt(pr.start)} → {fmt(pr.end)}</span>
+                    <span>{fmt(pr.startDate || pr.start)} → {fmt(pr.endDate || pr.end)}</span>
                     <div style={{ display: "flex", gap: 8 }}>
                       <span>{done}/{ms.length} milestones</span>
                       {projMeetings.length > 0 && <span>· {projMeetings.length} meeting{projMeetings.length !== 1 ? "s" : ""}</span>}
@@ -2037,11 +2064,11 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
       </div>
       {charter && <ProjectCharterModal pr={charter} onClose={() => { setCharter(null); setCharterActionSel(null); }} actions={actions} meetings={meetings} user={user} users={users} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); onProjectUpdate(updated); }} onActionSelect={a => setCharterActionSel(a)} />}
       {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={() => { }} user={user} users={users} allUsers={users} plants={plants} />}
-      {showAddMtg && <AddMeetingModal plants={plants} users={users} projects={projects} onSave={m => { const mtg = { ...m, id: "M" + Date.now(), completedSessions: [] }; setMeetings(p => [...p, mtg]); apiCreate("meetings", mtg); setShowAddMtg(false); }} onClose={() => setShowAddMtg(false)} />}
+      {showAddMtg && <AddMeetingModal plants={plants} users={users} projects={projects} onSave={m => { const mtg = { ...m, id: "M" + Date.now(), completedSessions: [] }; setMeetings(p => [...p, mtg]); apiCreate("meetings", resolveRecordIds(mtg, plants, depts, machines, projects)); setShowAddMtg(false); }} onClose={() => setShowAddMtg(false)} />}
       {/* Feature 3: Add Project Modal */}
-      {showAddProject && <AddProjectModal plants={plants} users={users} onSave={p => { const pr = { ...p, id: "PR" + Date.now(), milestones: [], risks: "", team: [] }; setProjects(prev => [...prev, pr]); apiCreate("projects", pr); showAddProject && setShowAddProject(false); }} onClose={() => setShowAddProject(false)} />}
+      {showAddProject && <AddProjectModal plants={plants} users={users} onSave={p => { const pr = { ...p, id: "PR" + Date.now(), milestones: [], risks: [], team: [], budget: p.budget ? Number(p.budget) || 0 : 0 }; setProjects(prev => [...prev, pr]); apiCreate("projects", pr); showAddProject && setShowAddProject(false); }} onClose={() => setShowAddProject(false)} />}
       {/* Feature 4: Meeting Plan Side Panel */}
-      {mtgPlan && <MeetingPlanPanel key={mtgPlan.id} mtg={mtgPlan} canEdit={canEditMeetings} projects={projects} users={users} plants={plants} onSave={updated => { setMeetings(p => p.map(m => m.id === updated.id ? updated : m)); setMtgPlan(updated); apiUpdate("meetings", updated.id, updated); }} onClose={() => setMtgPlan(null)} mtgPresets={mtgPresets} />}
+      {mtgPlan && <MeetingPlanPanel key={mtgPlan.id} mtg={mtgPlan} canEdit={canEditMeetings} projects={projects} users={users} plants={plants} onSave={updated => { setMeetings(p => p.map(m => m.id === updated.id ? updated : m)); setMtgPlan(updated); apiUpdate("meetings", updated.id, resolveRecordIds(updated, plants, depts, machines, projects)); }} onClose={() => setMtgPlan(null)} mtgPresets={mtgPresets} />}
     </div>
   );
 }
@@ -2049,9 +2076,9 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
 /* Feature 3: Add Project Modal */
 function AddProjectModal({ plants, users, onSave, onClose }) {
   useEscClose(onClose);
-  const [f, setF] = useState({ name: "", plant: "", owner: "", start: "", end: "", priority: "NORMAL", status: "NOT STARTED", objective: "", scope: "", budget: "", sponsor: "" });
+  const [f, setF] = useState({ name: "", plantId: "", owner: "", startDate: "", endDate: "", priority: "NORMAL", status: "NOT STARTED", objective: "", scope: "", budget: "", sponsor: "" });
   const up = (k, v) => setF(x => ({ ...x, [k]: v }));
-  const valid = f.name && f.plant && f.owner && f.start && f.end;
+  const valid = f.name && f.plantId && f.owner && f.startDate && f.endDate;
   const submit = () => { if (valid) onSave(f); };
   return (
     <div className="overlay" onClick={onClose}>
@@ -2063,7 +2090,7 @@ function AddProjectModal({ plants, users, onSave, onClose }) {
         <div style={{ display: "grid", gap: 12 }}>
           <div><Lbl t="Project Name" req /><input value={f.name} onChange={e => up("name", e.target.value)} placeholder="e.g. Safety Drive Q3" /></div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <div><Lbl t="Plant" req /><select value={f.plant} onChange={e => up("plant", e.target.value)}><option value="">Select</option><option>All</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
+            <div><Lbl t="Plant" req /><select value={f.plantId} onChange={e => up("plantId", e.target.value)}><option value="">Select</option><option value="All">All</option>{plants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
             <div><Lbl t="Priority" /><select value={f.priority} onChange={e => up("priority", e.target.value)}>{PRIORITY_LIST.map(p => <option key={p}>{p}</option>)}</select></div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -2071,8 +2098,8 @@ function AddProjectModal({ plants, users, onSave, onClose }) {
             <div><Lbl t="Sponsor" /><select value={f.sponsor} onChange={e => up("sponsor", e.target.value)}><option value="">Select</option>{users.map(u => <option key={u.id} value={u.name}>{u.name}</option>)}</select></div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <div><Lbl t="Start Date" req /><input type="date" value={f.start} onChange={e => up("start", e.target.value)} /></div>
-            <div><Lbl t="End Date" req /><input type="date" value={f.end} onChange={e => up("end", e.target.value)} /></div>
+            <div><Lbl t="Start Date" req /><input type="date" value={f.startDate} onChange={e => up("startDate", e.target.value)} /></div>
+            <div><Lbl t="End Date" req /><input type="date" value={f.endDate} onChange={e => up("endDate", e.target.value)} /></div>
           </div>
           <div><Lbl t="Budget" /><input value={f.budget} onChange={e => up("budget", e.target.value)} placeholder="INR 0,00,000" /></div>
           <div><Lbl t="Objective" /><textarea value={f.objective} onChange={e => up("objective", e.target.value)} style={{ height: 64, resize: "none" }} /></div>
@@ -3652,7 +3679,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
       }
       return { ...a, ...patch };
     }));
-    apiUpdate("actions", id, patch);
+    apiUpdate("actions", id, resolveRecordIds(patch, plants, depts, machines, projects));
   };
   const upStatus = (id, status) => {
     if (status === "COMPLETED") {
@@ -5152,7 +5179,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
           onUpdate={(id, patch) => {
             setActions(p => p.map(a => a.id === id ? { ...a, ...patch } : a));
             setSelectedAction(p => p ? { ...p, ...patch } : p);
-            apiUpdate("actions", id, patch);
+            apiUpdate("actions", id, resolveRecordIds(patch, plants, depts, machines, projects));
           }}
           user={user}
           users={users}
@@ -5258,21 +5285,23 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
     const reports = allUsers.filter(x => x.superior === name);
     const color = u?.color || T.slate;
     if (depth > 5) return null;
+    const CARD_W = 140;
+    const GAP = 16;
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-        <div style={{ background: "#fff", border: `2px solid ${color}`, borderRadius: 12, padding: "10px 14px", textAlign: "center", minWidth: 120, maxWidth: 150, boxShadow: "0 2px 8px rgba(0,0,0,.08)" }}>
+        <div style={{ background: "#fff", border: `2px solid ${color}`, borderRadius: 12, padding: "10px 14px", textAlign: "center", width: CARD_W, boxShadow: "0 2px 8px rgba(0,0,0,.08)", flexShrink: 0 }}>
           <div style={{ width: 36, height: 36, borderRadius: "50%", background: color + "20", color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, margin: "0 auto 6px" }}>{u?.initials || (name || "?").slice(0, 2).toUpperCase()}</div>
-          <div style={{ fontWeight: 700, fontSize: 11, color: T.text, lineHeight: 1.3 }}>{name}</div>
-          <div style={{ fontSize: 10, color: T.text2, marginTop: 2 }}>{u?.role}</div>
-          {u?.dept && u.dept !== "Management" && <div style={{ fontSize: 9, color: T.text2 }}>{u.dept}</div>}
+          <div style={{ fontWeight: 700, fontSize: 11, color: T.text, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+          <div style={{ fontSize: 10, color: T.text2, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u?.role}</div>
+          {u?.dept && u.dept !== "Management" && <div style={{ fontSize: 9, color: T.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.dept}</div>}
         </div>
         {reports.length > 0 && (
           <>
             <div style={{ width: 2, height: 18, background: T.border }} />
-            <div style={{ display: "flex", alignItems: "flex-start", position: "relative" }}>
-              <div style={{ position: "absolute", top: 0, left: "50%", height: 2, background: T.border, transform: "translateX(-50%)", width: `${Math.max((reports.length - 1) * 165, 2)}px` }} />
+            <div style={{ display: "flex", position: "relative" }}>
+              <div style={{ position: "absolute", top: 0, left: CARD_W / 2, right: CARD_W / 2, height: 2, background: T.border }} />
               {reports.map(r => (
-                <div key={r.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "0 8px" }}>
+                <div key={r.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: `0 ${GAP / 2}px` }}>
                   <div style={{ width: 2, height: 18, background: T.border }} />
                   <OrgNode name={r.name} allUsers={allUsers} depth={depth + 1} />
                 </div>
@@ -5462,7 +5491,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
       </>}
 
       {/* ── ORG CHART ── */}
-      {tab === "org" && <div className="card" style={{ padding: 24, overflowX: "auto" }}>
+      {tab === "org" && <div className="card" style={{ padding: 24, overflowX: "auto", overflowY: "auto", maxHeight: "calc(100vh - 160px)" }}>
         <div style={{ minWidth: 600, display: "flex", flexDirection: "column", gap: 32, alignItems: "center" }}>
           {roots.map(u => <div key={u.id} style={{ width: "100%", display: "flex", justifyContent: "center" }}><OrgNode name={u.name} allUsers={users} depth={0} /></div>)}
           {roots.length === 0 && <Empty icon="🌳" title="No org structure" sub="Add users with superior relationships to build the organogram." />}
@@ -5880,7 +5909,7 @@ export default function App() {
   const commitFinal = rows => {
     setActions(p => {
       const withSN = rows.map((r, i) => ({ ...r, sn: nextSN([...p, ...rows.slice(0, i)]), id: Date.now() + i, messages: r.messages || [], revisionHistory: r.revisionHistory || [], pendingConfirmation: false, allocatedBy: r.allocatedBy || user?.name || "" }));
-      withSN.forEach(r => apiCreate("actions", r));
+      withSN.forEach(r => apiCreate("actions", resolveRecordIds(r, plants, depts, machines, projects)));
       return [...p, ...withSN];
     });
   };
@@ -5893,7 +5922,7 @@ export default function App() {
       }
       return { ...a, ...patch };
     }));
-    apiUpdate("actions", id, patch);
+    apiUpdate("actions", id, resolveRecordIds(patch, plants, depts, machines, projects));
   };
 
   // Sidebar Actions badge = open (non-completed, non-dropped) actions in user's plant scope
@@ -5954,7 +5983,7 @@ export default function App() {
           onSave={a => {
             const newAction = { ...a, id: Date.now(), sn: nextSN(actions), dateOfAction: todayStr(), revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null, status: "IN PROCESS", messages: [], pendingConfirmation: false, allocatedBy: user?.name || "" };
             setActions(p => [...p, newAction]);
-            apiCreate("actions", newAction);
+            apiCreate("actions", resolveRecordIds(newAction, plants, depts, machines, projects));
             setShowQuickAdd(false);
           }}
           onClose={() => setShowQuickAdd(false)}

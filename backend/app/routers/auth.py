@@ -32,6 +32,7 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
         "phone": user.phone,
         "email": user.email,
         "superior": user.superior,
+        "masterAccess": bool(user.master_access),
     }
     token = create_token({"sub": user.username, "role": user.role, "id": user.id})
     return {"token": token, "user": user_data}
@@ -54,5 +55,6 @@ async def master_login(req: LoginRequest):
         "initials": "MA",
         "color": "#272262",
         "isMaster": True,
+        "masterAccess": True,
     }
     return {"token": token, "user": user_data}
