@@ -3586,6 +3586,9 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(null);
   const [openFilter, setOpenFilter] = useState(null);
+  const [emailModal, setEmailModal] = useState(null);
+  const [emailForm, setEmailForm] = useState({ responsible: "", email: "", status: "" });
+  const [emailSending, setEmailSending] = useState(false);
   const canEdit = user?.role === "Admin" || getPerms(user).canEditActions;
   const allProjects = [...new Set(actions.map(a => a.projectName || a.project).filter(Boolean))];
 
@@ -3712,6 +3715,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
           <button className="btn btn-ghost btn-sm" onClick={exportCSV} title="Download CSV">📥 CSV</button>
           <button className="btn btn-ghost btn-sm" onClick={exportPDF} title="Download PDF">📄 PDF</button>
           <button className="btn btn-ghost btn-sm" onClick={printPage} title="Print">🖨 Print</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setEmailModal(true)} title="Email Actions" style={{ color: T.navy }}>✉ Email</button>
         </div>
       </PageHeader>
 
@@ -3790,6 +3794,56 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
 />}
       {view === "timeline" && <TimelineView fa={fa} />}
       {sel && <ActionDetailPanel action={sel} onClose={() => setSel(null)} onUpdate={(id, patch) => { upAction(id, patch); setSel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} machines={machines} />}
+      {emailModal && (
+        <div className="overlay" onClick={() => setEmailModal(null)}>
+          <div className="modal" style={{ width: 420, padding: 28 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+              <h3 style={{ fontFamily: "'Sora',sans-serif", fontSize: 15, fontWeight: 800, color: T.navy, margin: 0 }}>✉ Email Actions</h3>
+              <button onClick={() => setEmailModal(null)} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 20, color: T.text2 }}>×</button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <Lbl t="Responsible Person" />
+                <select value={emailForm.responsible} onChange={e => setEmailForm(f => ({ ...f, responsible: e.target.value }))} style={{ width: "100%" }}>
+                  <option value="">Select…</option>
+                  {allResponsible.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <div>
+                <Lbl t="Email Address" />
+                <input type="email" value={emailForm.email} onChange={e => setEmailForm(f => ({ ...f, email: e.target.value }))} placeholder="name@company.com" style={{ width: "100%" }} />
+              </div>
+              <div>
+                <Lbl t="Status Filter (optional)" />
+                <select value={emailForm.status} onChange={e => setEmailForm(f => ({ ...f, status: e.target.value }))} style={{ width: "100%" }}>
+                  <option value="">All statuses</option>
+                  {STATUS_LIST.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <button
+                disabled={!emailForm.responsible || !emailForm.email || emailSending}
+                onClick={async () => {
+                  setEmailSending(true);
+                  try {
+                    const body = { responsible: emailForm.responsible, email: emailForm.email };
+                    if (emailForm.status) body.status = emailForm.status;
+                    await apiPost("/api/actions/send-to-email", body);
+                    setEmailModal(null);
+                    setEmailForm({ responsible: "", email: "", status: "" });
+                  } catch (e) {
+                    alert("Failed to send email: " + e.message);
+                  } finally {
+                    setEmailSending(false);
+                  }
+                }}
+                style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: (!emailForm.responsible || !emailForm.email || emailSending) ? T.border : T.navy, color: (!emailForm.responsible || !emailForm.email || emailSending) ? T.text2 : "#fff", fontWeight: 700, fontSize: 13, cursor: (!emailForm.responsible || !emailForm.email || emailSending) ? "not-allowed" : "pointer" }}
+              >
+                {emailSending ? "Sending…" : "Send Email"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

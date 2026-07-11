@@ -103,6 +103,41 @@ def send_welcome_email(name: str, username: str, email: str) -> bool:
     return send_email([email], subject, body)
 
 
+def send_actions_email(to_email: str, responsible: str, actions: List[Dict[str, Any]]) -> bool:
+    safe_name = html_escape(str(responsible))
+    subject = f"MCS — All Actions for {safe_name}"
+    rows = ""
+    for a in actions:
+        sn = html_escape(str(a.get("sn", "")))
+        text = html_escape(str(a.get("text", "")))
+        due = html_escape(str(a.get("due", "")) or "—")
+        status = html_escape(str(a.get("status", "")))
+        priority = html_escape(str(a.get("priority", "")))
+        rows += (
+            f"<tr>"
+            f"<td style='padding:6px 10px;border:1px solid #ddd'>{sn}</td>"
+            f"<td style='padding:6px 10px;border:1px solid #ddd'>{text}</td>"
+            f"<td style='padding:6px 10px;border:1px solid #ddd'>{due}</td>"
+            f"<td style='padding:6px 10px;border:1px solid #ddd'>{status}</td>"
+            f"<td style='padding:6px 10px;border:1px solid #ddd'>{priority}</td>"
+            f"</tr>"
+        )
+    body = (
+        f"<h2>Actions for {safe_name}</h2>"
+        f"<p>Total actions: <b>{len(actions)}</b></p>"
+        f"<table style='border-collapse:collapse;width:100%'>"
+        f"<thead><tr>"
+        f"<th style='padding:6px 10px;border:1px solid #ddd;background:#f4f4f4'>SN</th>"
+        f"<th style='padding:6px 10px;border:1px solid #ddd;background:#f4f4f4'>Action</th>"
+        f"<th style='padding:6px 10px;border:1px solid #ddd;background:#f4f4f4'>Due</th>"
+        f"<th style='padding:6px 10px;border:1px solid #ddd;background:#f4f4f4'>Status</th>"
+        f"<th style='padding:6px 10px;border:1px solid #ddd;background:#f4f4f4'>Priority</th>"
+        f"</tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+    )
+    return send_email([to_email], subject, body)
+
+
 def share_insights_email(to_emails: List[str], subject: str, content: str, plant: str = "") -> bool:
     safe_content = html_escape(str(content))
     safe_plant = html_escape(str(plant))

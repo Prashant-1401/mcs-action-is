@@ -1,12 +1,118 @@
-from fastapi import APIRouter, Depends, HTTPException
+import asyncio
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.database import get_db
-from app.models.models import Action, ActionMessage
-from app.schemas.schemas import ActionCreate, ActionUpdate, ActionMessageCreate
+from app.database import get_db, async_session
+from app.models.models import Action, ActionMessage, EscalationMatrix, User
+from app.schemas.schemas import ActionCreate, ActionUpdate, ActionMessageCreate, ActionsEmailReq
 from app.middleware.auth import require_api_key
+from app.services.email_service import dispatch_escalation_emails, send_actions_email
 
 router = APIRouter(prefix="/api/actions", tags=["Actions"], dependencies=[Depends(require_api_key)])
+
+
+def _bg_check_escalations():
+    """Run escalation resolution in a fresh DB session (background thread)."""
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_check_and_dispatch_escalations())
+    except Exception as e:
+        print(f"[escalation-trigger] background check failed: {e}")
+    finally:
+        loop.close()
+
+
+async def _check_and_dispatch_escalations():
+    """Query all open actions against the escalation matrix and dispatch emails."""
+    async with async_session() as db:
+        tiers_q = await db.execute(
+            select(EscalationMatrix).where(EscalationMatrix.active == True)
+        )
+        tiers = tiers_q.scalars().all()
+        if not tiers:
+            return
+
+        users_q = await db.execute(select(User))
+        all_users = users_q.scalars().all()
+
+        role_by_name = {u.name: u.role for u in all_users if u.name}
+        user_emails_by_role = {}
+        for u in all_users:
+            if u.email and u.role:
+                user_emails_by_role.setdefault(u.role, []).append(u.email)
+
+        actions_q = await db.execute(
+            select(Action).where(
+                Action.status.notin_(["COMPLETED", "DROPPED"]),
+                Action.due.isnot(None),
+                Action.responsible.isnot(None),
+                Action.responsible != "",
+            )
+        )
+        open_actions = actions_q.scalars().all()
+
+        now = datetime.now(timezone.utc)
+        email_groups = {}
+
+        for action in open_actions:
+            try:
+                due_dt = datetime.combine(action.due, datetime.max.time()).replace(tzinfo=timezone.utc)
+                hrs_overdue = (now - due_dt).total_seconds() / 3600
+            except (ValueError, TypeError):
+                continue
+            if hrs_overdue < 0:
+                continue
+
+            resp_names = [n.strip() for n in (action.responsible or "").split(",") if n.strip()]
+            for resp_name in resp_names:
+                resp_role = role_by_name.get(resp_name, "")
+                for tier in tiers:
+                    if (tier.from_role or "") != resp_role:
+                        continue
+                    if hrs_overdue < (tier.overdue_hrs or 0):
+                        continue
+                    tier_priorities = (
+                        tier.priorities if isinstance(tier.priorities, list)
+                        else [x.strip() for x in tier.priorities.split(",") if x.strip()]
+                        if isinstance(tier.priorities, str) and tier.priorities.strip()
+                        else ["CRITICAL", "WARNING", "NORMAL"]
+                    )
+                    if (action.priority or "NORMAL") not in tier_priorities:
+                        continue
+                    notify = (tier.notify_method or "").lower()
+                    if "email" not in notify:
+                        continue
+                    target_role = tier.target_role or tier.target or ""
+                    group_key = f"{target_role}::{tier.level}"
+                    if group_key not in email_groups:
+                        email_groups[group_key] = {
+                            "target_role": target_role,
+                            "level": tier.level,
+                            "actions": [],
+                        }
+                    email_groups[group_key]["actions"].append({
+                        "sn": action.sn,
+                        "text": action.text,
+                        "due": str(action.due),
+                        "responsible": action.responsible or "",
+                        "priority": action.priority or "NORMAL",
+                    })
+
+        to_send = []
+        for group in email_groups.values():
+            recipients = user_emails_by_role.get(group["target_role"], [])
+            if not recipients or not group["actions"]:
+                continue
+            to_send.append({
+                "recipients": recipients,
+                "level": group["level"],
+                "target_role": group["target_role"],
+                "actions": group["actions"],
+            })
+
+        if to_send:
+            dispatch_escalation_emails(to_send)
 
 
 @router.get("/")
@@ -34,6 +140,26 @@ async def list_actions(
     return result.scalars().all()
 
 
+@router.post("/send-to-email")
+async def send_actions_to_email(data: ActionsEmailReq, db: AsyncSession = Depends(get_db)):
+    q = select(Action).where(Action.responsible == data.responsible)
+    if data.status:
+        q = q.where(Action.status == data.status)
+    q = q.order_by(Action.created.desc())
+    result = await db.execute(q)
+    actions = result.scalars().all()
+    if not actions:
+        raise HTTPException(status_code=404, detail="No actions found for this person")
+    action_dicts = [
+        {"sn": a.sn, "text": a.text, "due": str(a.due) if a.due else "", "status": a.status, "priority": a.priority}
+        for a in actions
+    ]
+    sent = send_actions_email(data.email, data.responsible, action_dicts)
+    if not sent:
+        raise HTTPException(status_code=500, detail="Failed to send email")
+    return {"ok": True, "count": len(action_dicts)}
+
+
 @router.get("/{action_id}")
 async def get_action(action_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Action).where(Action.id == action_id))
@@ -44,7 +170,7 @@ async def get_action(action_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/")
-async def create_action(data: ActionCreate, db: AsyncSession = Depends(get_db)):
+async def create_action(data: ActionCreate, bg: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     import datetime
     payload = data.model_dump()
     if "project" in payload:
@@ -60,11 +186,12 @@ async def create_action(data: ActionCreate, db: AsyncSession = Depends(get_db)):
     db.add(action)
     await db.commit()
     await db.refresh(action)
+    bg.add_task(_bg_check_escalations)
     return action
 
 
 @router.patch("/{action_id}")
-async def update_action(action_id: str, data: ActionUpdate, db: AsyncSession = Depends(get_db)):
+async def update_action(action_id: str, data: ActionUpdate, bg: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     import datetime
     result = await db.execute(select(Action).where(Action.id == action_id))
     action = result.scalar_one_or_none()
@@ -90,6 +217,7 @@ async def update_action(action_id: str, data: ActionUpdate, db: AsyncSession = D
         setattr(action, k, v)
     await db.commit()
     await db.refresh(action)
+    bg.add_task(_bg_check_escalations)
     return action
 
 
@@ -121,7 +249,7 @@ async def create_action_message(action_id: str, data: ActionMessageCreate, db: A
     return msg
 
 @router.post("/bulk")
-async def bulk_upsert_actions(rows: list[ActionCreate], db: AsyncSession = Depends(get_db)):
+async def bulk_upsert_actions(rows: list[ActionCreate], bg: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     import datetime
     upserted = 0
     for data in rows:
@@ -144,4 +272,5 @@ async def bulk_upsert_actions(rows: list[ActionCreate], db: AsyncSession = Depen
             db.add(Action(**payload))
         upserted += 1
     await db.commit()
+    bg.add_task(_bg_check_escalations)
     return {"ok": True, "upserted": upserted}
