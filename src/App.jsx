@@ -5225,7 +5225,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
   useEscClose(close);
   const saveUser = () => {
     if (!form.name || !form.role || !form.plant) return;
-    if (!isGuestRole(form.role) && (!form.username || !form.password)) return;
+    if (modal.mode !== "edit" && !isGuestRole(form.role) && (!form.username || !form.password)) return;
     const { _showPw, ...cleanForm } = form;
     const pMap = {}; plants.forEach(p => { pMap[p.name] = p.id; });
     const dMap = {}; depts.forEach(d => { dMap[d.name] = d.id; });
