@@ -657,17 +657,6 @@ function LoginPage({ onLogin }) {
   const [errMsg, setErrMsg] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [backendOnline, setBackendOnline] = useState(null);
-  useEffect(() => {
-    const check = () => {
-      fetch(`${API_BASE_URL}/api/health`, { method: "GET", signal: AbortSignal.timeout(5000) })
-        .then(r => { setBackendOnline(r.ok); })
-        .catch(() => setBackendOnline(false));
-    };
-    check();
-    const id = setInterval(check, 15000);
-    return () => clearInterval(id);
-  }, []);
   const tryLogin = async () => {
     setLoading(true); setErrMsg("");
     try {
@@ -721,10 +710,6 @@ function LoginPage({ onLogin }) {
           </div>
           <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 18, color: T.navy, lineHeight: 1.2 }}>Management Control System</div>
           <div style={{ fontSize: 11, color: T.text2, marginTop: 6 }}>Decentralized Work Management Platform</div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginBottom: 20, padding: "7px 14px", borderRadius: 20, background: "#EAE7F8", border: `1px solid #7C80B040` }}>
-          <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: backendOnline === null ? "#F0AD4E" : backendOnline ? "#22C55E" : "#EF4444" }} />
-          <span style={{ fontSize: 11, fontWeight: 600, color: "#4A3F8C" }}>MCS Backend API</span>
         </div>
         <div style={{ marginBottom: 14 }}><Lbl t="Username" req /><input value={u} onChange={e => setU(e.target.value)} placeholder="Enter your username" onKeyDown={e => e.key === "Enter" && tryLogin()} /></div>
         <div style={{ marginBottom: 20 }}>
@@ -1837,6 +1822,17 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
   // Feature 4: can edit meetings if admin or has permission
   const canEditMeetings = isAdmin || userPerms.canEditMeetings;
 
+  const deleteMeeting = (m) => {
+    if (!window.confirm(`Delete "${m.type}" (${m.plant}, ${m.time})? This cannot be undone.`)) return;
+    setMeetings(p => (p || []).filter(x => x.id !== m.id));
+    apiRemove("meetings", m.id);
+  };
+  const deleteProject = (pr) => {
+    if (!window.confirm(`Delete project "${pr.name}"? This cannot be undone.`)) return;
+    setProjects(p => (p || []).filter(x => x.id !== pr.id));
+    apiRemove("projects", pr.id);
+  };
+
   const visibleMeetings = (meetings || []).filter(m => user?.plant === "All" ? true : m.plant === user?.plant || m.plant === "All" || !m.plant);
   const visibleProjects = (projects || []).filter(p => user?.plant === "All" ? true : p.plant === user?.plant || p.plant === "All" || !p.plant);
 
@@ -1932,6 +1928,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
                       {/* Feature 4: View Plan button */}
                       <button className="btn btn-ghost btn-sm" onClick={() => setMtgPlan(m)}>📋 Plan</button>
                       {!isGuestRole(user?.role) && <button className="btn btn-green btn-sm" onClick={() => setActiveMtg(m)}>▶ Start</button>}
+                      {canEditMeetings && <button className="btn btn-ghost btn-sm" style={{ color: T.red }} onClick={() => deleteMeeting(m)}>🗑 Delete</button>}
                     </div>
                   </div>
                 </div>
@@ -1991,7 +1988,12 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
                       <div style={{ fontWeight: 700, fontSize: 14, color: T.text }}>{pr.name}</div>
                       <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{pr.plant} · <b style={{ color: T.text }}>{pr.owner}</b></div>
                     </div>
-                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}><PBadge p={pr.priority} /></div>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <PBadge p={pr.priority} />
+                      {(isAdmin || user?.name === pr.owner || user?.name === pr.sponsor) && (
+                        <button className="btn btn-ghost btn-sm" style={{ color: T.red, padding: "3px 8px" }} onClick={ev => { ev.stopPropagation(); deleteProject(pr); }}>🗑</button>
+                      )}
+                    </div>
                   </div>
                   {/* Feature 5: Milestones directly clickable/editable */}
                   <div style={{ marginBottom: 10 }}>
@@ -4925,14 +4927,26 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
   const [deptFilter, setDeptFilter] = useState("");
   const [tierFilter, setTierFilter] = useState("");
   const [selectedAction, setSelectedAction] = useState(null);
+  // Only Admin / MD get to see the whole org's escalations (and the Total/Mine
+  // toggle). Everyone else is locked to their own — matches Dashboard scoping.
+  const isEscAdmin = user?.role === "Admin" || user?.role === "MD";
   const [showOnlyMine, setShowOnlyMine] = useState(true);
+  const userNameLower = (user?.name || "").toLowerCase();
 
   const getActionEscalationState = (action, matrix) => resolveEscalationState(action, matrix, users);
 
-  const activeEscalations = actions.map(a => {
+  const scopedActions = isEscAdmin ? actions : actions.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower]));
+  const scopedAudit = isEscAdmin ? audit : audit.filter(log => {
+    const action = actions.find(a => a.sn === log.sn);
+    return action && responsibleMatchesUsers(action.responsible, [userNameLower]);
+  });
+
+  const activeEscalations = scopedActions.map(a => {
     const escState = getActionEscalationState(a, escMatrix);
     return escState ? { action: a, ...escState } : null;
   }).filter(Boolean);
+
+  const effectiveShowOnlyMine = isEscAdmin ? showOnlyMine : true;
 
   const filteredActive = activeEscalations.filter(item => {
     const a = item.action;
@@ -4942,17 +4956,17 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
     const matchesPlant = !plantFilter || a.plant === plantFilter;
     const matchesDept = !deptFilter || a.dept === deptFilter;
     const matchesTier = !tierFilter || String(item.tier.level) === tierFilter;
-    const matchesMine = !showOnlyMine || responsibleMatchesUsers(a.responsible, [(user?.name || "").toLowerCase()]);
+    const matchesMine = !effectiveShowOnlyMine || responsibleMatchesUsers(a.responsible, [userNameLower]);
     return matchesSearch && matchesPlant && matchesDept && matchesTier && matchesMine;
   });
 
-  const filteredHistory = audit.filter(log => {
+  const filteredHistory = scopedAudit.filter(log => {
     const matchesSearch = log.sn.toLowerCase().includes(search.toLowerCase()) ||
       log.text.toLowerCase().includes(search.toLowerCase()) ||
       (log.reason || "").toLowerCase().includes(search.toLowerCase());
     const matchesTier = !tierFilter || String(log.level) === tierFilter;
     const action = actions.find(a => a.sn === log.sn);
-    const matchesMine = !showOnlyMine || (action && responsibleMatchesUsers(action.responsible, [(user?.name || "").toLowerCase()]));
+    const matchesMine = !effectiveShowOnlyMine || (action && responsibleMatchesUsers(action.responsible, [userNameLower]));
     return matchesSearch && matchesTier && matchesMine;
   });
 
@@ -4967,7 +4981,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 16, marginBottom: 24 }}>
         <KPICard icon="🚨" value={activeEscalations.length} label="Active Escalations" sub="Actions currently unresolved beyond due dates" color={T.red} alert={activeEscalations.length > 0} />
         <KPICard icon="⚠️" value={highestLevel > 0 ? `Level ${highestLevel}` : "None"} label="Highest Active Level" sub={highestLevel > 0 ? "Requires management attention" : "No active escalations"} color={highestLevel > 0 ? T.amber : T.green} />
-        <KPICard icon="📋" value={audit.length} label="Total Escalation Triggers" sub="Logged history of escalation events" color={T.slate} />
+        <KPICard icon="📋" value={scopedAudit.length} label="Total Escalation Triggers" sub="Logged history of escalation events" color={T.slate} />
       </div>
 
       <div className="card" style={{ padding: 16, marginBottom: 20, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", background: "#fff" }}>
@@ -4992,39 +5006,41 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
             {[1, 2, 3, 4].map(l => <option key={l} value={String(l)}>Level {l}</option>)}
           </select>
         </div>
-        {(search || plantFilter || deptFilter || tierFilter || !showOnlyMine) && (
+        {(search || plantFilter || deptFilter || tierFilter || (isEscAdmin && !showOnlyMine)) && (
           <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(""); setPlantFilter(""); setDeptFilter(""); setTierFilter(""); setShowOnlyMine(true); }} style={{ padding: "8px 12px" }}>Reset</button>
         )}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
-          <button onClick={() => setShowOnlyMine(false)}
-            style={{
-              padding: "6px 12px",
-              borderRadius: 20,
-              border: "none",
-              cursor: "pointer",
-              fontSize: 12,
-              fontWeight: 600,
-              background: !showOnlyMine ? T.navy : T.bg,
-              color: !showOnlyMine ? "#fff" : T.text2,
-              transition: "all .2s"
-            }}>
-            Total ({activeEscalations.length})
-          </button>
-          <button onClick={() => setShowOnlyMine(true)}
-            style={{
-              padding: "6px 12px",
-              borderRadius: 20,
-              border: "none",
-              cursor: "pointer",
-              fontSize: 12,
-              fontWeight: 600,
-              background: showOnlyMine ? T.navy : T.bg,
-              color: showOnlyMine ? "#fff" : T.text2,
-              transition: "all .2s"
-            }}>
-            My Escalations ({activeEscalations.filter(e => responsibleMatchesUsers(e.action.responsible, [(user?.name || "").toLowerCase()])).length})
-          </button>
-        </div>
+        {isEscAdmin && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
+            <button onClick={() => setShowOnlyMine(false)}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 20,
+                border: "none",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+                background: !showOnlyMine ? T.navy : T.bg,
+                color: !showOnlyMine ? "#fff" : T.text2,
+                transition: "all .2s"
+              }}>
+              Total ({activeEscalations.length})
+            </button>
+            <button onClick={() => setShowOnlyMine(true)}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 20,
+                border: "none",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+                background: showOnlyMine ? T.navy : T.bg,
+                color: showOnlyMine ? "#fff" : T.text2,
+                transition: "all .2s"
+              }}>
+              My Escalations ({activeEscalations.filter(e => responsibleMatchesUsers(e.action.responsible, [userNameLower])).length})
+            </button>
+          </div>
+        )}
       </div>
 
       <div style={{ borderBottom: `2px solid ${T.border}`, marginBottom: 20, display: "flex", gap: 0 }}>
@@ -5217,11 +5233,17 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
     }
   };
 
-  function OrgNode({ name, allUsers, depth }) {
+  function OrgNode({ name, allUsers, depth, visitedPath }) {
+    // Cycle guard: if this name is already an ancestor of itself in the current
+    // branch (bad data — e.g. A's superior is B and B's superior is A), stop
+    // instead of looping forever. This replaces the old hard "depth > 6" cutoff,
+    // which was silently chopping off — and hiding — anyone deeper than 6 levels.
+    const path = visitedPath || new Set();
+    if (path.has(name)) return null;
+    const nextPath = new Set(path); nextPath.add(name);
     const u = allUsers.find(x => x.name === name);
     const reports = allUsers.filter(x => x.superior === name);
     const color = u?.color || T.slate;
-    if (depth > 6) return null;
     const GAP = 12;
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -5238,7 +5260,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
               {reports.map(r => (
                 <div key={r.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: `0 ${GAP / 2}px` }}>
                   <div style={{ width: 2, height: 18, background: T.border }} />
-                  <OrgNode name={r.name} allUsers={allUsers} depth={depth + 1} />
+                  <OrgNode name={r.name} allUsers={allUsers} depth={depth + 1} visitedPath={nextPath} />
                 </div>
               ))}
             </div>
@@ -5257,11 +5279,30 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
   const missingSuperiorLabels = Array.from(new Set(
     users.filter(u => u.superior && !users.find(x => x.name === u.superior)).map(u => u.superior)
   ));
-  const roots = [...rootlessUsers.map(u => u.name), ...missingSuperiorLabels];
+  // Dedupe: two rootless users sharing an identical name would otherwise
+  // collide on the same React key below and one would silently vanish.
+  const roots = Array.from(new Set([...rootlessUsers.map(u => u.name), ...missingSuperiorLabels]));
+
+  // Belt-and-suspenders visibility check: walk the tree the same way OrgNode
+  // does (name-based, cycle-safe) and record which user IDs actually get
+  // placed. The `superior` field is a free-text name, so duplicate names,
+  // typos, or a reporting cycle (A→B→A) can leave a real user unreachable
+  // from any root even though they exist in `users`. Anyone left over is
+  // still shown, in a flagged section, instead of silently disappearing.
+  const reachedIds = new Set();
+  const walkOrg = (name, path) => {
+    if (path.has(name)) return;
+    const nextPath = new Set(path); nextPath.add(name);
+    users.filter(u => u.superior === name).forEach(u => { reachedIds.add(u.id); walkOrg(u.name, nextPath); });
+  };
+  roots.forEach(r => walkOrg(r, new Set()));
+  users.filter(u => roots.includes(u.name)).forEach(u => reachedIds.add(u.id));
+  const unplacedUsers = users.filter(u => !reachedIds.has(u.id));
 
   /* ── Section header with Save button ── */
   const SectionHeader = ({ title, sub, onSave, addLabel, onAdd }) => (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+
       <div>
         <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 15, color: T.navy }}>{title}</div>
         {sub && <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>{sub}</div>}
@@ -5438,6 +5479,23 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
           {roots.map(name => <div key={name} style={{ width: "100%", display: "flex", justifyContent: "center" }}><OrgNode name={name} allUsers={users} depth={0} /></div>)}
           {roots.length === 0 && <Empty icon="🌳" title="No org structure" sub="Add users with superior relationships to build the organogram." />}
         </div>
+        {unplacedUsers.length > 0 && (
+          <div style={{ marginTop: 32, paddingTop: 24, borderTop: `1.5px dashed ${T.border}` }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: T.amber, marginBottom: 12, textAlign: "center" }}>
+              ⚠ {unplacedUsers.length} user{unplacedUsers.length !== 1 ? "s" : ""} couldn't be placed in the hierarchy — check their "Superior" field for a typo or reporting loop
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center" }}>
+              {unplacedUsers.map(u => (
+                <div key={u.id} className="org-node-card" style={{ background: "#fff", border: `2px dashed ${T.amber}`, borderRadius: 12, padding: "10px 14px", textAlign: "center" }}>
+                  <div style={{ width: 36, height: 36, borderRadius: "50%", background: (u.color || T.slate) + "20", color: u.color || T.slate, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, margin: "0 auto 6px" }}>{u.initials || (u.name || "?").slice(0, 2).toUpperCase()}</div>
+                  <div style={{ fontWeight: 700, fontSize: 11, color: T.text }}>{u.name}</div>
+                  <div style={{ fontSize: 10, color: T.text2, marginTop: 2 }}>{u.role}</div>
+                  <div style={{ fontSize: 9, color: T.amber, marginTop: 3 }}>Superior: "{u.superior || "—"}"</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>}
 
       {/* ── TEAM ── */}
