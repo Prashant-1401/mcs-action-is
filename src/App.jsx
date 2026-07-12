@@ -141,16 +141,18 @@ function responsibleMatchesUsers(responsible, userNamesLower) {
   return false;
 }
 
-function resolveForeignKeys(items, plants, depts, projects) {
-  const pName = {}, dName = {}, prName = {};
+function resolveForeignKeys(items, plants, depts, projects, machines) {
+  const pName = {}, dName = {}, prName = {}, mName = {};
   (plants || []).forEach(p => { pName[p.id] = p.name; });
   (depts || []).forEach(d => { dName[d.id] = d.name; });
   (projects || []).forEach(p => { prName[p.id] = p.name; });
+  (machines || []).forEach(m => { mName[m.id] = m.name; });
   return (items || []).map(item => {
     const out = { ...item };
     if (out.plantId && pName[out.plantId]) out.plant = pName[out.plantId];
     if (out.deptId && dName[out.deptId]) out.dept = dName[out.deptId];
     if (out.projectId && prName[out.projectId]) out.project = prName[out.projectId];
+    if (out.machineId && mName[out.machineId]) out.machineName = mName[out.machineId];
     return out;
   });
 }
@@ -218,7 +220,7 @@ function usePostgresDB({ defaultUsers, defaultPlants, defaultDepts,
       const roDenorm = denormKeys(rawRo);
 
       const resolvedU = resolveForeignKeys(uDenorm, pDenorm, dDenorm);
-      const resolvedA = resolveForeignKeys(aDenorm, pDenorm, dDenorm);
+      const resolvedA = resolveForeignKeys(aDenorm, pDenorm, dDenorm, undefined, mcDenorm);
       const resolvedM = resolveForeignKeys(mDenorm, pDenorm, dDenorm, prDenorm);
       const resolvedPr = resolveForeignKeys(prDenorm, pDenorm, dDenorm);
       const resolvedMc = resolveForeignKeys(mcDenorm, pDenorm, dDenorm);
@@ -4907,7 +4909,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
   const [deptFilter, setDeptFilter] = useState("");
   const [tierFilter, setTierFilter] = useState("");
   const [selectedAction, setSelectedAction] = useState(null);
-  const [showOnlyMine, setShowOnlyMine] = useState(false);
+  const [showOnlyMine, setShowOnlyMine] = useState(true);
 
   const getActionEscalationState = (action, matrix) => resolveEscalationState(action, matrix, users);
 
@@ -4974,8 +4976,8 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
             {[1, 2, 3, 4].map(l => <option key={l} value={String(l)}>Level {l}</option>)}
           </select>
         </div>
-        {(search || plantFilter || deptFilter || tierFilter || showOnlyMine) && (
-          <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(""); setPlantFilter(""); setDeptFilter(""); setTierFilter(""); setShowOnlyMine(false); }} style={{ padding: "8px 12px" }}>Reset</button>
+        {(search || plantFilter || deptFilter || tierFilter || !showOnlyMine) && (
+          <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(""); setPlantFilter(""); setDeptFilter(""); setTierFilter(""); setShowOnlyMine(true); }} style={{ padding: "8px 12px" }}>Reset</button>
         )}
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
           <button onClick={() => setShowOnlyMine(false)}
@@ -5500,13 +5502,15 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
               <div><Lbl t="Superior (Reports To)" /><select value={form.superior || ""} onChange={e => setForm(f => ({ ...f, superior: e.target.value }))}><option value="">None (Top level)</option>{users.filter(u => u.id !== form.id).map(u => <option key={u.id} value={u.name}>{u.name} ({u.role})</option>)}</select></div>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Phone Number" /><input value={form.phone || ""} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+91-98000-00000" /></div>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Email Address" /><input type="email" value={form.email || ""} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@company.com" /></div>
-              <div style={{ gridColumn: "1/-1" }}>
-                <Lbl t="Password" req={!isGuestRole(form.role)} />
-                <div style={{ position: "relative" }}>
-                  <input type={form._showPw ? "text" : "password"} value={form.password || ""} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Set login password" style={{ paddingRight: 44 }} />
-                  <button type="button" onClick={() => setForm(f => ({ ...f, _showPw: !f._showPw }))} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", cursor: "pointer", fontSize: 16, color: T.text2, lineHeight: 1, padding: 0, display: "flex", alignItems: "center" }}>{form._showPw ? "🙈" : "👁"}</button>
+              {modal.mode !== "edit" && (
+                <div style={{ gridColumn: "1/-1" }}>
+                  <Lbl t="Password" req={!isGuestRole(form.role)} />
+                  <div style={{ position: "relative" }}>
+                    <input type={form._showPw ? "text" : "password"} value={form.password || ""} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Set login password" style={{ paddingRight: 44 }} />
+                    <button type="button" onClick={() => setForm(f => ({ ...f, _showPw: !f._showPw }))} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", cursor: "pointer", fontSize: 16, color: T.text2, lineHeight: 1, padding: 0, display: "flex", alignItems: "center" }}>{form._showPw ? "🙈" : "👁"}</button>
+                  </div>
                 </div>
-              </div>
+              )}
               {isAdmin && (
                 <div style={{ gridColumn: "1/-1", display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
                   <input type="checkbox" id="masterAccess" checked={form.masterAccess === true || form.masterAccess === "true"} onChange={e => setForm(f => ({ ...f, masterAccess: e.target.checked }))} style={{ width: 16, height: 16, cursor: "pointer" }} />

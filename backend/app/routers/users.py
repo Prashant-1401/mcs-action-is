@@ -72,6 +72,7 @@ async def create_user(data: UserCreate, db: AsyncSession = Depends(get_db), bg: 
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Username already exists")
     user_data = data.model_dump()
+    plain_password = user_data.get("password") or ""
     if user_data.get("password"):
         user_data["password"] = hash_password(user_data["password"])
     else:
@@ -82,9 +83,11 @@ async def create_user(data: UserCreate, db: AsyncSession = Depends(get_db), bg: 
     await db.refresh(user)
     if user.email:
         if bg:
-            bg.add_task(send_welcome_email, user.name, user.username, user.email)
+            bg.add_task(send_welcome_email, user.name, user.username, user.email,
+                        plain_password, user.superior, user.phone)
         else:
-            send_welcome_email(user.name, user.username, user.email)
+            send_welcome_email(user.name, user.username, user.email,
+                                plain_password, user.superior, user.phone)
     return _safe_user(user)
 
 
@@ -129,6 +132,7 @@ async def bulk_upsert_users(rows: list[UserCreate], db: AsyncSession = Depends(g
                 setattr(existing, k, v)
         else:
             user_data = data.model_dump()
+            plain_password = user_data.get("password") or ""
             if user_data.get("password"):
                 user_data["password"] = hash_password(user_data["password"])
             else:
@@ -136,9 +140,11 @@ async def bulk_upsert_users(rows: list[UserCreate], db: AsyncSession = Depends(g
             db.add(User(**user_data))
             if data.email:
                 if bg:
-                    bg.add_task(send_welcome_email, data.name, data.username, data.email)
+                    bg.add_task(send_welcome_email, data.name, data.username, data.email,
+                                plain_password, data.superior, data.phone)
                 else:
-                    send_welcome_email(data.name, data.username, data.email)
+                    send_welcome_email(data.name, data.username, data.email,
+                                        plain_password, data.superior, data.phone)
         upserted += 1
     await db.commit()
     return {"ok": True, "upserted": upserted}

@@ -7,7 +7,7 @@ from app.database import get_db, async_session
 from app.models.models import Action, ActionMessage, EscalationMatrix, User
 from app.schemas.schemas import ActionCreate, ActionUpdate, ActionMessageCreate, ActionsEmailReq
 from app.middleware.auth import require_api_key
-from app.services.email_service import dispatch_escalation_emails, send_actions_email
+from app.services.email_service import dispatch_escalation_emails, send_actions_email, dispatch_daily_digests
 
 router = APIRouter(prefix="/api/actions", tags=["Actions"], dependencies=[Depends(require_api_key)])
 
@@ -151,6 +151,41 @@ async def list_actions(
     q = q.order_by(Action.created.desc())
     result = await db.execute(q)
     return result.scalars().all()
+
+
+@router.post("/send-daily-digests")
+async def send_daily_digests(bg: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    """Call once/day from an external cron. Groups open actions by responsible
+    user and emails each user their own list."""
+    users_q = await db.execute(select(User))
+    all_users = users_q.scalars().all()
+    email_by_name = {u.name: u.email for u in all_users if u.name and u.email}
+
+    actions_q = await db.execute(
+        select(Action).where(Action.status.notin_(["COMPLETED", "DROPPED"]))
+    )
+    open_actions = actions_q.scalars().all()
+
+    grouped: dict[str, list] = {}
+    for a in open_actions:
+        for name in [n.strip() for n in (a.responsible or "").split(",") if n.strip()]:
+            grouped.setdefault(name, []).append({
+                "sn": a.sn, "text": a.text,
+                "due": str(a.due) if a.due else "",
+                "status": a.status, "priority": a.priority,
+            })
+
+    digest_groups = [
+        {"email": email_by_name[name], "name": name, "actions": actions}
+        for name, actions in grouped.items()
+        if name in email_by_name
+    ]
+
+    if not digest_groups:
+        return {"status": "ok", "queued": 0, "reason": "No users with open actions and an email on file"}
+
+    bg.add_task(dispatch_daily_digests, digest_groups)
+    return {"status": "ok", "queued": len(digest_groups)}
 
 
 @router.post("/send-to-email")
