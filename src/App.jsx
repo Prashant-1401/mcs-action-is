@@ -4196,7 +4196,10 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
     if (!a.due || !a.closedOn) return sum + 0;
     return sum + (new Date(a.closedOn) <= new Date(a.due) ? 100 : 0);
   }, 0) / comp) : 0;
-  const visibleDepts = deptF !== "All" ? depts.filter(d => String(d.name ?? "").toLowerCase().trim() === String(deptF ?? "").toLowerCase().trim()) : (plantF !== "All" ? depts.filter(d => (users || []).some(u => u.plant === plantF && u.dept === d.name) || fa.some(a => String(a.section ?? "").toLowerCase().trim() === String(d.name ?? "").toLowerCase().trim())) : depts);
+  // Non-admins only ever see their own department on the heat map, regardless
+  // of the department filter dropdown.
+  const deptScopedDepts = isDashAdmin ? depts : depts.filter(d => String(d.name ?? "").toLowerCase().trim() === String(user?.dept ?? "").toLowerCase().trim());
+  const visibleDepts = deptF !== "All" ? deptScopedDepts.filter(d => String(d.name ?? "").toLowerCase().trim() === String(deptF ?? "").toLowerCase().trim()) : (plantF !== "All" ? deptScopedDepts.filter(d => (users || []).some(u => u.plant === plantF && u.dept === d.name) || fa.some(a => String(a.section ?? "").toLowerCase().trim() === String(d.name ?? "").toLowerCase().trim())) : deptScopedDepts);
 
   // Build heat map rows: merge dept master + unique section values from actual actions
   // This ensures actions always appear even if section doesn't match any dept name
@@ -4204,9 +4207,12 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
 
   const allSessions = (meetings || []).flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : []).map(s => ({ ...s, type: m.type, plant: m.plant })));
   const totalMtgMins = allSessions.reduce((s, x) => s + (x.duration || 0), 0);
-  // Deduplicate audit for badge (keep highest level per action SN)
+  // Deduplicate audit for badge (keep highest level per action SN) — scoped to
+  // the same action set (fa) the user is allowed to see, not the global audit log.
+  const faSnSet = new Set(fa.map(a => a.sn));
+  const scopedAudit = isDashAdmin ? (audit || []) : (audit || []).filter(e => faSnSet.has(e.sn));
   const dedupedAuditBadge = Object.values(
-    (audit || []).reduce((acc, e) => {
+    scopedAudit.reduce((acc, e) => {
       if (!acc[e.sn] || e.level > acc[e.sn].level) acc[e.sn] = e;
       return acc;
     }, {})
