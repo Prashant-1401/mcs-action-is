@@ -93,7 +93,8 @@ def dispatch_escalation_emails(email_groups: List[Dict[str, Any]]) -> bool:
     return any_sent
 
 
-def send_welcome_email(name: str, username: str, email: str) -> bool:
+def send_welcome_email(name: str, username: str, email: str,
+                       password: str = "", superior: str = "", phone: str = "") -> bool:
     safe_name = html_escape(str(name))
     safe_user = html_escape(str(username))
     subject = f"Welcome to MCS — Your Account is Ready"
@@ -101,8 +102,14 @@ def send_welcome_email(name: str, username: str, email: str) -> bool:
         f"<h2>Welcome, {safe_name}!</h2>"
         f"<p>Your MCS account has been created.</p>"
         f"<p><b>Username:</b> {safe_user}</p>"
-        f"<p><a href='{settings.frontend_url}'>Login to MCS</a></p>"
     )
+    if password:
+        body += f"<p><b>Password:</b> {html_escape(password)}</p>"
+    if superior:
+        body += f"<p><b>Reports To:</b> {html_escape(superior)}</p>"
+    if phone:
+        body += f"<p><b>Phone:</b> {html_escape(phone)}</p>"
+    body += f"<p><a href='{settings.frontend_url}'>Login to MCS</a></p>"
     return send_email([email], subject, body)
 
 
@@ -139,6 +146,58 @@ def send_actions_email(to_email: str, responsible: str, actions: List[Dict[str, 
         f"<tbody>{rows}</tbody></table>"
     )
     return send_email([to_email], subject, body)
+
+
+def dispatch_daily_digests(digest_groups: List[Dict[str, Any]]) -> bool:
+    """Send daily digest emails — each user gets their own open-action list.
+
+    Each entry in digest_groups has:
+      - email: recipient email address
+      - name: user name
+      - actions: list of action dicts (sn, text, due, status, priority)
+    """
+    any_sent = False
+    for group in digest_groups:
+        email = group.get("email")
+        name = group.get("name", "")
+        actions = group.get("actions", [])
+        if not email or not actions:
+            continue
+        safe_name = html_escape(str(name))
+        subject = f"MCS Daily Digest — {len(actions)} Open Action(s) for {safe_name}"
+        rows = ""
+        for a in actions:
+            sn = html_escape(str(a.get("sn", "")))
+            text = html_escape(str(a.get("text", "")))
+            due = html_escape(str(a.get("due", "")) or "—")
+            status = html_escape(str(a.get("status", "")))
+            priority = html_escape(str(a.get("priority", "")))
+            rows += (
+                f"<tr>"
+                f"<td style='padding:6px 10px;border:1px solid #ddd'>{sn}</td>"
+                f"<td style='padding:6px 10px;border:1px solid #ddd'>{text}</td>"
+                f"<td style='padding:6px 10px;border:1px solid #ddd'>{due}</td>"
+                f"<td style='padding:6px 10px;border:1px solid #ddd'>{status}</td>"
+                f"<td style='padding:6px 10px;border:1px solid #ddd'>{priority}</td>"
+                f"</tr>"
+            )
+        body = (
+            f"<h2>Daily Digest for {safe_name}</h2>"
+            f"<p>You have <b>{len(actions)}</b> open action(s):</p>"
+            f"<table style='border-collapse:collapse;width:100%'>"
+            f"<thead><tr>"
+            f"<th style='padding:6px 10px;border:1px solid #ddd;background:#f4f4f4'>SN</th>"
+            f"<th style='padding:6px 10px;border:1px solid #ddd;background:#f4f4f4'>Action</th>"
+            f"<th style='padding:6px 10px;border:1px solid #ddd;background:#f4f4f4'>Due</th>"
+            f"<th style='padding:6px 10px;border:1px solid #ddd;background:#f4f4f4'>Status</th>"
+            f"<th style='padding:6px 10px;border:1px solid #ddd;background:#f4f4f4'>Priority</th>"
+            f"</tr></thead>"
+            f"<tbody>{rows}</tbody></table>"
+            f"<p style='margin-top:12px'><a href='{settings.frontend_url}'>Open MCS</a></p>"
+        )
+        if send_email([email], subject, body):
+            any_sent = True
+    return any_sent
 
 
 def share_insights_email(to_emails: List[str], subject: str, content: str, plant: str = "") -> bool:
