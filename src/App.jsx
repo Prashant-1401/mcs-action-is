@@ -548,6 +548,13 @@ tbody tr:hover td{background:#FAFAFE;}tbody tr:last-child td{border-bottom:none;
   .master-mobile-cards{display:none!important;}
   .master-desktop-table{display:block!important;}
 }
+.org-node-card{width:clamp(96px,26vw,140px)!important;padding:8px 10px!important;}
+@media(max-width:640px){
+  .org-node-card{padding:6px 8px!important;}
+  .org-node-card .org-avatar{width:28px!important;height:28px!important;font-size:11px!important;}
+  .org-node-card .org-name{font-size:10px!important;}
+  .org-node-card .org-role{font-size:9px!important;}
+}
 .kanban-card{transition:transform .15s,box-shadow .15s,opacity .15s;}
 .kanban-card:active{cursor:grabbing!important;}
 .kanban-card.is-dragging{opacity:.45;transform:scale(.97);box-shadow:none!important;}
@@ -4168,7 +4175,14 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
   useEscClose(useCallback(() => { setDrill(null); setDeptDrill(null); setMtgDrill(false); }, []));
 
   const allPlants = plants ? plants.map(p => p.name) : [...new Set(actions.map(a => a.plant))];
-  let fa = actions;
+  // Only Admin / MD see everyone's actions on the dashboard. Everyone else
+  // (including Plant Head) only sees actions where they are responsible —
+  // matches the same scoping already used on the Actions Register page.
+  const isDashAdmin = user?.role === "Admin" || user?.role === "MD";
+  const userNameLower = (user?.name || "").trim().toLowerCase();
+  let fa = isDashAdmin
+    ? actions
+    : actions.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower].filter(Boolean)));
   if (plantF !== "All") fa = fa.filter(a => a.plant === plantF);
   if (deptF !== "All") fa = fa.filter(a => String(a.section ?? "").toLowerCase().trim() === String(deptF ?? "").toLowerCase().trim() || String(a.dept ?? "").toLowerCase().trim() === String(deptF ?? "").toLowerCase().trim());
 
@@ -5201,22 +5215,20 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
     const u = allUsers.find(x => x.name === name);
     const reports = allUsers.filter(x => x.superior === name);
     const color = u?.color || T.slate;
-    if (depth > 5) return null;
-    const CARD_W = 140;
-    const GAP = 16;
+    if (depth > 6) return null;
+    const GAP = 12;
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-        <div style={{ background: "#fff", border: `2px solid ${color}`, borderRadius: 12, padding: "10px 14px", textAlign: "center", width: CARD_W, boxShadow: "0 2px 8px rgba(0,0,0,.08)", flexShrink: 0 }}>
-          <div style={{ width: 36, height: 36, borderRadius: "50%", background: color + "20", color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, margin: "0 auto 6px" }}>{u?.initials || (name || "?").slice(0, 2).toUpperCase()}</div>
-          <div style={{ fontWeight: 700, fontSize: 11, color: T.text, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
-          <div style={{ fontSize: 10, color: T.text2, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u?.role}</div>
+        <div className="org-node-card" style={{ background: "#fff", border: `2px solid ${color}`, borderRadius: 12, padding: "10px 14px", textAlign: "center", boxShadow: "0 2px 8px rgba(0,0,0,.08)", flexShrink: 0 }}>
+          <div className="org-avatar" style={{ width: 36, height: 36, borderRadius: "50%", background: color + "20", color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, margin: "0 auto 6px" }}>{u?.initials || (name || "?").slice(0, 2).toUpperCase()}</div>
+          <div className="org-name" style={{ fontWeight: 700, fontSize: 11, color: T.text, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+          <div className="org-role" style={{ fontSize: 10, color: T.text2, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u?.role}</div>
           {u?.dept && u.dept !== "Management" && <div style={{ fontSize: 9, color: T.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.dept}</div>}
         </div>
         {reports.length > 0 && (
           <>
             <div style={{ width: 2, height: 18, background: T.border }} />
-            <div style={{ display: "flex", position: "relative" }}>
-              <div style={{ position: "absolute", top: 0, left: CARD_W / 2, right: CARD_W / 2, height: 2, background: T.border }} />
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", position: "relative" }}>
               {reports.map(r => (
                 <div key={r.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: `0 ${GAP / 2}px` }}>
                   <div style={{ width: 2, height: 18, background: T.border }} />
@@ -5230,7 +5242,16 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
     );
   }
 
-  const roots = users.filter(u => !u.superior || !users.find(x => x.name === u.superior));
+  // True roots: users with no superior at all.
+  const rootlessUsers = users.filter(u => !u.superior);
+  // Orphans: users whose stated superior doesn't match any real user in the DB
+  // (e.g. "Admin", the built-in owner account, which isn't itself a row in `users`).
+  // Group these by the missing-superior label so they render as ONE tree instead
+  // of N disconnected flat roots.
+  const missingSuperiorLabels = Array.from(new Set(
+    users.filter(u => u.superior && !users.find(x => x.name === u.superior)).map(u => u.superior)
+  ));
+  const roots = [...rootlessUsers.map(u => u.name), ...missingSuperiorLabels];
 
   /* ── Section header with Save button ── */
   const SectionHeader = ({ title, sub, onSave, addLabel, onAdd }) => (
@@ -5284,7 +5305,6 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                 <div><span style={{ color: T.text2 }}>Dept: </span>{u.dept || "—"}</div>
                 <div><span style={{ color: T.text2 }}>Superior: </span>{u.superior || "Top"}</div>
                 <div><span style={{ color: T.text2 }}>Phone: </span>{u.phone || "—"}</div>
-                <div><span style={{ color: T.text2 }}>Password: </span>{u.password ? "••••••" : <span style={{ color: T.amber, fontWeight: 600 }}>Not set</span>}</div>
               </div>
               {canModify("users", u.id) && <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
                 <button className="btn btn-ghost btn-sm" style={{ color: T.red }} onClick={() => { if (window.confirm(`Remove "${u.name}"?`)) { setUsers(p => p.filter(x => x.id !== u.id)); apiRemove("users", u.id); } }}>✕ Remove</button>
@@ -5296,7 +5316,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
         {/* Desktop table */}
         <div className="card master-desktop-table" style={{ padding: 0, overflow: "hidden" }}>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ minWidth: 700 }}><thead><tr><th>User</th><th>Role</th><th>Plant</th><th>Dept</th><th>Superior</th><th>Phone</th><th>Password</th><th></th></tr></thead>
+            <table style={{ minWidth: 700 }}><thead><tr><th>User</th><th>Role</th><th>Plant</th><th>Dept</th><th>Superior</th><th>Phone</th><th></th></tr></thead>
               <tbody>{users.map(u => <tr key={u.id}>
                 <td><div style={{ display: "flex", alignItems: "center", gap: 10 }}><Avatar name={u.name} size={32} users={users} /><div style={{ fontWeight: 600 }}>{u.name}</div></div></td>
                 <td><span style={{ padding: "3px 9px", borderRadius: 20, background: T.navy + "15", color: T.navy, fontSize: 11, fontWeight: 600 }}>{u.role}</span></td>
@@ -5304,7 +5324,6 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                 <td style={{ fontSize: 12 }}>{u.dept || "—"}</td>
                 <td style={{ fontSize: 12, color: T.text2 }}>{u.superior || "—"}</td>
                 <td style={{ fontSize: 12, color: T.text2 }}>{u.phone || "—"}</td>
-                <td style={{ fontSize: 12, color: T.text2 }}>{u.password ? "••••••••" : <span style={{ color: T.amber, fontWeight: 600 }}>Not set</span>}</td>
                 <td style={{ whiteSpace: "nowrap" }}>
                   {canModify("users", u.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("users", u)}>Edit</button>}
                   {canModify("users", u.id) && <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove "${u.name}" from the system?`)) { setUsers(p => p.filter(x => x.id !== u.id)); apiRemove("users", u.id); } }}>✕</button>}
@@ -5409,8 +5428,8 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
 
       {/* ── ORG CHART ── */}
       {tab === "org" && <div className="card" style={{ padding: 24, overflowX: "auto", overflowY: "auto", maxHeight: "calc(100vh - 160px)" }}>
-        <div style={{ minWidth: 600, display: "flex", flexDirection: "column", gap: 32, alignItems: "center" }}>
-          {roots.map(u => <div key={u.id} style={{ width: "100%", display: "flex", justifyContent: "center" }}><OrgNode name={u.name} allUsers={users} depth={0} /></div>)}
+        <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 32, alignItems: "center" }}>
+          {roots.map(name => <div key={name} style={{ width: "100%", display: "flex", justifyContent: "center" }}><OrgNode name={name} allUsers={users} depth={0} /></div>)}
           {roots.length === 0 && <Empty icon="🌳" title="No org structure" sub="Add users with superior relationships to build the organogram." />}
         </div>
       </div>}
