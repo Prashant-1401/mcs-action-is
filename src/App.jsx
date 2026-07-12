@@ -82,6 +82,8 @@ function normKeys(obj) {
   if (Array.isArray(obj)) return obj.map(normKeys);
   const out = {};
   Object.keys(obj).forEach(k => { out[CAMEL_TO_SNAKE[k] || k] = obj[k]; });
+  // Backend schemas use "project" (not "project_name") — remap after normKeys
+  if ("project_name" in out) { out.project = out.project_name; delete out.project_name; }
   return out;
 }
 
@@ -141,18 +143,16 @@ function responsibleMatchesUsers(responsible, userNamesLower) {
   return false;
 }
 
-function resolveForeignKeys(items, plants, depts, projects, machines) {
-  const pName = {}, dName = {}, prName = {}, mName = {};
+function resolveForeignKeys(items, plants, depts, projects) {
+  const pName = {}, dName = {}, prName = {};
   (plants || []).forEach(p => { pName[p.id] = p.name; });
   (depts || []).forEach(d => { dName[d.id] = d.name; });
   (projects || []).forEach(p => { prName[p.id] = p.name; });
-  (machines || []).forEach(m => { mName[m.id] = m.name; });
   return (items || []).map(item => {
     const out = { ...item };
     if (out.plantId && pName[out.plantId]) out.plant = pName[out.plantId];
     if (out.deptId && dName[out.deptId]) out.dept = dName[out.deptId];
     if (out.projectId && prName[out.projectId]) out.project = prName[out.projectId];
-    if (out.machineId && mName[out.machineId]) out.machineName = mName[out.machineId];
     return out;
   });
 }
@@ -220,7 +220,7 @@ function usePostgresDB({ defaultUsers, defaultPlants, defaultDepts,
       const roDenorm = denormKeys(rawRo);
 
       const resolvedU = resolveForeignKeys(uDenorm, pDenorm, dDenorm);
-      const resolvedA = resolveForeignKeys(aDenorm, pDenorm, dDenorm, undefined, mcDenorm);
+      const resolvedA = resolveForeignKeys(aDenorm, pDenorm, dDenorm);
       const resolvedM = resolveForeignKeys(mDenorm, pDenorm, dDenorm, prDenorm);
       const resolvedPr = resolveForeignKeys(prDenorm, pDenorm, dDenorm);
       const resolvedMc = resolveForeignKeys(mcDenorm, pDenorm, dDenorm);
@@ -2018,7 +2018,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
         </div>
       </div>
       {charter && <ProjectCharterModal pr={charter} onClose={() => { setCharter(null); setCharterActionSel(null); }} actions={actions} meetings={meetings} user={user} users={users} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); onProjectUpdate(updated); }} onActionSelect={a => setCharterActionSel(a)} />}
-      {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={() => { }} user={user} users={users} allUsers={users} plants={plants} machines={machines} />}
+      {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={(id, patch) => { setActions(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); apiUpdate("actions", id, patch); setCharterActionSel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} machines={machines} />}
       {showAddMtg && <AddMeetingModal plants={plants} users={users} projects={projects} onSave={m => { const mtg = { ...m, id: "M" + Date.now(), completedSessions: [] }; setMeetings(p => [...p, mtg]); apiCreate("meetings", resolveRecordIds(mtg, plants, depts, machines, projects)); setShowAddMtg(false); }} onClose={() => setShowAddMtg(false)} />}
       {/* Feature 3: Add Project Modal */}
       {showAddProject && <AddProjectModal plants={plants} users={users} onSave={p => { const pr = { ...p, id: "PR" + Date.now(), milestones: [], risks: [], team: [], budget: p.budget ? Number(p.budget) || 0 : 0 }; setProjects(prev => [...prev, pr]); apiCreate("projects", pr); showAddProject && setShowAddProject(false); }} onClose={() => setShowAddProject(false)} />}
@@ -3152,7 +3152,7 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
         ...r, sn: nextSN(Array(i)), id: Date.now() + i, dateOfAction: todayStr(), revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null, pendingConfirmation: false,
         responsible: r.responsible || null,
         due: r.due || null,
-        status: isComplete ? "IN PROCESS" : "IN PROCESS",
+        status: isComplete ? "IN PROCESS" : "NOT STARTED",
         allocatedBy: r.allocatedBy || null
       };
     });
@@ -3313,7 +3313,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
   const isAllocator = user?.name === allocator;
   const isAllocatorSuperior = user?.name === allocatorSuperior?.name;
   const isAdmin = user?.role === "Admin";
-  const _hasEditPerm = isAdmin || getPerms(user).canEditActions;
+  const _hasEditPerm = isAdmin || (getPerms(user).canEditActions && isAssignee);
   const canConfirm = isAllocator || isAllocatorSuperior || isAdmin;
   const canMsg = _hasEditPerm || isAssignee || isAllocator;
   const canEdit = _hasEditPerm && !isPendingConfirm && action.status !== "COMPLETED" && action.status !== "DROPPED";
@@ -3604,11 +3604,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const userNameLower = (user?.name || "").trim().toLowerCase();
   const scoped = isAdmin
     ? (user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant || !a.plant))
-    : actions.filter(a => {
-    // Non-admin: scope by plant (same as admin), show all plant actions
-    if (user?.plant !== "All" && a.plant && a.plant !== user?.plant) return false;
-    return true;
-  });
+    : actions.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower].filter(Boolean)));
 
   const toggleFilter = (key, val) => {
     setFiltersPersist(f => {
@@ -3703,13 +3699,13 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
 
   return (
     <div className="fade-in">
-      <PageHeader title="Actions Register" sub={`${myActionsOnly ? "My actions" : isAdmin ? "Plant-wide" : "My team"} · ${displayScope.length} actions · ${fa.length} shown`}>
+      <PageHeader title="Actions Register" sub={`${isAdmin ? (myActionsOnly ? "My actions" : "Plant-wide") : "My actions"} · ${displayScope.length} actions · ${fa.length} shown`}>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {/* My / All toggle */}
-          <div style={{ display: "flex", background: T.bg, borderRadius: 8, padding: 3, border: `1.5px solid ${T.border}` }}>
+          {isAdmin && <div style={{ display: "flex", background: T.bg, borderRadius: 8, padding: 3, border: `1.5px solid ${T.border}` }}>
             <button onClick={() => setMyActionsOnly(false)} style={{ padding: "5px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: !myActionsOnly ? T.navy : "transparent", color: !myActionsOnly ? "#fff" : T.text2, transition: "all .18s" }}>All Actions</button>
             <button onClick={() => setMyActionsOnly(true)} style={{ padding: "5px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: myActionsOnly ? T.navy : "transparent", color: myActionsOnly ? "#fff" : T.text2, transition: "all .18s" }}>My Actions</button>
-          </div>
+          </div>}
           <button className="btn btn-ghost btn-sm" onClick={exportCSV} title="Download CSV">📥 CSV</button>
           <button className="btn btn-ghost btn-sm" onClick={exportPDF} title="Download PDF">📄 PDF</button>
           <button className="btn btn-ghost btn-sm" onClick={printPage} title="Print">🖨 Print</button>
