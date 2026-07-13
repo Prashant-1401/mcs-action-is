@@ -218,10 +218,8 @@ async def get_action(action_id: str, db: AsyncSession = Depends(get_db)):
 @router.post("/")
 async def create_action(data: ActionCreate, bg: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     payload = data.model_dump()
-    if not payload.get("id"):
-        payload["id"] = str(uuid.uuid4())
-    if not payload.get("sn"):
-        payload["sn"] = await _generate_sn(db)
+    payload["id"] = str(uuid.uuid4())
+    payload["sn"] = await _generate_sn(db)
     if "project" in payload:
         payload["project_name"] = payload.pop("project")
     for k in ("due", "date_of_action", "created", "closed_on"):
@@ -237,7 +235,6 @@ async def create_action(data: ActionCreate, bg: BackgroundTasks, db: AsyncSessio
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        payload["id"] = str(uuid.uuid4())
         payload["sn"] = await _generate_sn(db)
         action = Action(**payload)
         db.add(action)

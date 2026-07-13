@@ -3183,7 +3183,7 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
     const all = draft.filter(r => r.text?.trim()).map((r, i) => {
       const isComplete = !!(r.responsible && r.due);
       return {
-        ...r, sn: nextSN(Array(i)), id: Date.now() + i, dateOfAction: todayStr(), revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null, pendingConfirmation: false,
+        ...r, id: String(Date.now() + i), dateOfAction: todayStr(), revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null, pendingConfirmation: false,
         responsible: r.responsible || null,
         due: r.due || null,
         status: isComplete ? "IN PROCESS" : "NOT STARTED",
@@ -5740,7 +5740,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
    
    This satisfies requirement #6 — API/MCP integration option.
 */
-function useAPIBridge(actions, setActions, projects) {
+function useAPIBridge(actions, setActions, projects, plants, depts, machines) {
   const actionsRef = useRef(actions);
   useEffect(() => { actionsRef.current = actions; }, [actions]);
 
@@ -5753,10 +5753,11 @@ function useAPIBridge(actions, setActions, projects) {
             updateAction: (id, patch) => { setActions(p => p.map(a => a.id === id ? { ...a, ...patch } : a)); apiUpdate("actions", id, patch); },
             addAction: async (action) => {
               const localId = String(Date.now());
-              const n = { ...action, id: localId, sn: "ACT-...", created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false };
-              setActions(p => [...p, n]);
+              const n = { ...action, id: localId, created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false };
+              const resolved = resolveRecordIds(n, plants, depts, machines, projects);
+              setActions(p => [...p, resolved]);
               try {
-                const saved = await apiCreate("actions", n);
+                const saved = await apiCreate("actions", resolved);
                 if (saved && saved.id) setActions(p => p.map(x => x.id === localId ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
               } catch (e) { setActions(p => p.filter(x => x.id !== localId)); }
             },
@@ -5781,12 +5782,13 @@ function useAPIBridge(actions, setActions, projects) {
           break;
         case "MCS_ADD_ACTION": {
           const localId = String(Date.now());
-          const newA = { ...e.data.action, id: localId, sn: "ACT-...", created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false };
-          setActions(p => [...p, newA]);
-          apiCreate("actions", newA).then(saved => {
+          const newA = { ...e.data.action, id: localId, created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false };
+          const resolved = resolveRecordIds(newA, plants, depts, machines, projects);
+          setActions(p => [...p, resolved]);
+          apiCreate("actions", resolved).then(saved => {
             if (saved && saved.id) setActions(p => p.map(x => x.id === localId ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
           }).catch(() => { setActions(p => p.filter(x => x.id !== localId)); });
-          e.source?.postMessage({ type: "MCS_ADD_OK", action: newA, ok: true }, "*");
+          e.source?.postMessage({ type: "MCS_ADD_OK", action: resolved, ok: true }, "*");
           break;
         }
         case "MCS_GET_PROJECTS":
@@ -5797,7 +5799,7 @@ function useAPIBridge(actions, setActions, projects) {
     };
     window.addEventListener("message", handler);
     return () => { window.removeEventListener("message", handler); delete window.MCS_API; };
-  }, [setActions, projects]);
+  }, [setActions, projects, plants, depts, machines]);
 }
 
 /* ===================== ERROR BOUNDARY ===================== */
@@ -5927,7 +5929,7 @@ export default function App() {
     setMtgTxLines([]); setMtgFastActions([]); setMtgInsights([]); mtgTxLineNo.current = 0;
   };
 
-  useAPIBridge(actions, setActions, projects);
+  useAPIBridge(actions, setActions, projects, plants, depts, machines);
 
   useEffect(() => {
     const t = setTimeout(() => runEscalation(actions, (updater) => {
@@ -5949,27 +5951,31 @@ export default function App() {
     return () => clearTimeout(t);
   }, [actions]);
 
+  const committingRef = useRef(false);
   const commitFinal = rows => {
+    if (committingRef.current) return;
+    committingRef.current = true;
     const localIds = [];
-    setActions(p => {
-      const withSN = rows.map((r, i) => {
-        const localId = String(Date.now() + i);
-        localIds.push(localId);
-        return { ...r, sn: "ACT-...", id: localId, messages: r.messages || [], revisionHistory: r.revisionHistory || [], pendingConfirmation: false, allocatedBy: r.allocatedBy || user?.name || "" };
-      });
-      withSN.forEach(async (r, i) => {
-        try {
-          const saved = await apiCreate("actions", resolveRecordIds(r, plants, depts, machines, projects));
-          if (saved && saved.id) {
-            setActions(p => p.map(x => x.id === localIds[i] ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
-          }
-        } catch (e) {
-          setActions(p => p.filter(x => x.id !== localIds[i]));
-          setDbError("Failed to save action: " + e.message);
-          setTimeout(() => setDbError(null), 5000);
+    const resolvedRows = rows.map((r, i) => {
+      const localId = String(Date.now() + i);
+      localIds.push(localId);
+      const base = { ...r, id: localId, messages: r.messages || [], revisionHistory: r.revisionHistory || [], pendingConfirmation: false, allocatedBy: r.allocatedBy || user?.name || "" };
+      return resolveRecordIds(base, plants, depts, machines, projects);
+    });
+    setActions(p => [...p, ...resolvedRows]);
+    resolvedRows.forEach(async (r, i) => {
+      try {
+        const saved = await apiCreate("actions", r);
+        if (saved && saved.id) {
+          setActions(p => p.map(x => x.id === localIds[i] ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
         }
-      });
-      return [...p, ...withSN];
+      } catch (e) {
+        setActions(p => p.filter(x => x.id !== localIds[i]));
+        setDbError("Failed to save action: " + e.message);
+        setTimeout(() => setDbError(null), 5000);
+      } finally {
+        if (i === resolvedRows.length - 1) committingRef.current = false;
+      }
     });
     if (globalActiveMtg && globalActiveMtg.id) {
       const sessionEntry = { date: todayStr(), duration: mtgElapsed || 0, actionCount: rows.length };
@@ -6054,11 +6060,14 @@ export default function App() {
           reasons={reasons}
           currentUser={user}
           onSave={async a => {
+            if (committingRef.current) return;
+            committingRef.current = true;
             const localId = String(Date.now());
-            const newAction = { ...a, id: localId, sn: "ACT-...", dateOfAction: todayStr(), revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null, status: "IN PROCESS", messages: [], pendingConfirmation: false, allocatedBy: user?.name || "" };
-            setActions(p => [...p, newAction]);
+            const newAction = { ...a, id: localId, dateOfAction: todayStr(), revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null, status: "IN PROCESS", messages: [], pendingConfirmation: false, allocatedBy: user?.name || "" };
+            const resolved = resolveRecordIds(newAction, plants, depts, machines, projects);
+            setActions(p => [...p, resolved]);
             try {
-              const saved = await apiCreate("actions", resolveRecordIds(newAction, plants, depts, machines, projects));
+              const saved = await apiCreate("actions", resolved);
               if (saved && saved.id) {
                 setActions(p => p.map(x => x.id === localId ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
               }
@@ -6066,6 +6075,8 @@ export default function App() {
               setActions(p => p.filter(x => x.id !== localId));
               setDbError("Failed to save action: " + e.message);
               setTimeout(() => setDbError(null), 5000);
+            } finally {
+              committingRef.current = false;
             }
             setShowQuickAdd(false);
           }}
