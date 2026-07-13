@@ -38,13 +38,31 @@ function apiDelete(path) { return apiFetch(path, { method: "DELETE" }); }
 
 /* ─── API Persistence Sync (fire-and-forget with error log) ── */
 async function apiCreate(resource, data) {
-  return apiPost(`/api/${resource}/`, normKeys(data)).catch(e => console.warn(`POST /api/${resource}/ failed:`, e.message));
+  try {
+    const result = await apiPost(`/api/${resource}/`, normKeys(data));
+    return result;
+  } catch (e) {
+    console.error(`POST /api/${resource}/ failed:`, e.message);
+    throw e;
+  }
 }
 async function apiUpdate(resource, id, data) {
-  return apiPatch(`/api/${resource}/${id}`, normKeys(data)).catch(e => console.warn(`PATCH /api/${resource}/${id} failed:`, e.message));
+  try {
+    const result = await apiPatch(`/api/${resource}/${id}`, normKeys(data));
+    return result;
+  } catch (e) {
+    console.error(`PATCH /api/${resource}/${id} failed:`, e.message);
+    throw e;
+  }
 }
 async function apiRemove(resource, id) {
-  return apiDelete(`/api/${resource}/${id}`).catch(e => console.warn(`DELETE /api/${resource}/${id} failed:`, e.message));
+  try {
+    const result = await apiDelete(`/api/${resource}/${id}`);
+    return result;
+  } catch (e) {
+    console.error(`DELETE /api/${resource}/${id} failed:`, e.message);
+    throw e;
+  }
 }
 
 /* ─── Key transforms (snake_case ↔ camelCase) ─────────────── */
@@ -345,6 +363,13 @@ const getPerms = (user) => {
     canViewDashboard:    level >= 2,
     canManageEscalations: level >= 7,
   };
+};
+
+const isUserAdmin = (user) => {
+  if (!user) return false;
+  if (user.role === "Admin" || user.role === "MD" || user.role === "Plant Head") return true;
+  if (user.masterAccess === true || user.masterAccess === "true") return true;
+  return false;
 };
 
 const SAMPLE_TRANSCRIPT_LINES = [
@@ -997,10 +1022,10 @@ function AdminNotifManager({ users, onClose }) {
 function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCount, auditCount, activeMtg, onResumeActiveMtg, mtgRunning, mtgElapsed, notifications, onMarkAllRead, unreadCount, users, actions, onShowSupport, onShowProfile, onShowAdminNotifs }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
-  const isAdmin = user?.role === "Admin";
+  const isAdmin = isUserAdmin(user);
   const userPerms = getPerms(user);
   const canAccessPage = (id) => {
-    if (id === 99) return isAdmin || user?.masterAccess === true || user?.masterAccess === "true";
+    if (id === 99) return isAdmin;
     return true;
   };
   const hms = s => `${String(Math.floor(s / 3600)).padStart(2, "0")}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -1196,7 +1221,7 @@ function ActionSidePanel({ action, onClose, onUpdate, users, plants, depts, curr
 
 function HomePage({ actions, setActions, user, setPage, users, meetings, plants, depts, setGlobalActiveMtg, machines, projects }) {
   const now = new Date();
-  const isAdmin = user?.role === "Admin" || user?.role === "MD" || user?.role === "Plant Head";
+  const isAdmin = isUserAdmin(user);
   // Scope: my plant OR all
   const myPlantActions = user?.plant === "All" ? actions : actions.filter(a => !a.plant || a.plant === user?.plant);
 
@@ -1625,7 +1650,7 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
   useEscClose(onClose);
   const [editMode, setEditMode] = useState(false);
   const [draft, setDraft] = useState({ ...pr, milestones: [...(Array.isArray(pr.milestones) ? pr.milestones : []).map(m => ({ ...m }))], team: [...((Array.isArray(pr.team) ? pr.team : (typeof pr.team === "string" ? [pr.team] : [])) || [])], risks: pr.risks || "" });
-  const canEdit = user?.role === "Admin" || (user?.name === pr.owner) || (user?.name === pr.sponsor);
+  const canEdit = isUserAdmin(user) || (user?.name === pr.owner) || (user?.name === pr.sponsor);
   const pActions = actions.filter(a => (a.projectName || a.project) === pr.name);
   const projectMeetings = (meetings || []).filter(m => m.project === pr.name);
   const now = new Date();
@@ -1815,7 +1840,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
   const [charterActionSel, setCharterActionSel] = useState(null);
   const [mtgPlan, setMtgPlan] = useState(null);  // Feature 4: meeting plan view
 
-  const isAdmin = user?.role === "Admin";
+  const isAdmin = isUserAdmin(user);
   const userPerms = getPerms(user);
   // Feature 3: can create projects if admin or has permission
   const canCreateProject = isAdmin || userPerms.canCreateProjects;
@@ -3321,7 +3346,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
   const isAssignee = responsibleMatchesUsers(assignee, [(user?.name || "").toLowerCase()]);
   const isAllocator = user?.name === allocator;
   const isAllocatorSuperior = user?.name === allocatorSuperior?.name;
-  const isAdmin = user?.role === "Admin";
+  const isAdmin = isUserAdmin(user);
   const _hasEditPerm = isAdmin || (getPerms(user).canEditActions && isAssignee);
   const canConfirm = isAllocator || isAllocatorSuperior || isAdmin;
   const canMsg = _hasEditPerm || isAssignee || isAllocator;
@@ -3581,7 +3606,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const userKey = user?.id || "guest";
   const [view, setView] = useState(userViewPref[userKey] || "table");
   // Multi-select filters: persistent across page changes
-  const isAdmin = user?.role === "Admin" || user?.role === "MD" || user?.role === "Plant Head";
+  const isAdmin = isUserAdmin(user);
   const [filters, setFilters] = useState(userFilterPref[userKey] || { 
     plant: user?.plant && user.plant !== "All" ? [user.plant] : [], 
     section: [], 
@@ -3595,7 +3620,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const [emailModal, setEmailModal] = useState(null);
   const [emailForm, setEmailForm] = useState({ responsible: "", email: "", status: "" });
   const [emailSending, setEmailSending] = useState(false);
-  const canEdit = user?.role === "Admin" || getPerms(user).canEditActions;
+  const canEdit = isUserAdmin(user) || getPerms(user).canEditActions;
   const allProjects = [...new Set(actions.map(a => a.projectName || a.project).filter(Boolean))];
 
   const changeView = v => { setView(v); userViewPref[userKey] = v; };
@@ -4180,7 +4205,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
   // Only Admin / MD see everyone's actions on the dashboard. Everyone else
   // (including Plant Head) only sees actions where they are responsible —
   // matches the same scoping already used on the Actions Register page.
-  const isDashAdmin = user?.role === "Admin" || user?.role === "MD";
+  const isDashAdmin = isUserAdmin(user);
   const userNameLower = (user?.name || "").trim().toLowerCase();
   let fa = isDashAdmin
     ? actions
@@ -4929,7 +4954,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
   const [selectedAction, setSelectedAction] = useState(null);
   // Only Admin / MD get to see the whole org's escalations (and the Total/Mine
   // toggle). Everyone else is locked to their own — matches Dashboard scoping.
-  const isEscAdmin = user?.role === "Admin" || user?.role === "MD";
+  const isEscAdmin = isUserAdmin(user);
   const [showOnlyMine, setShowOnlyMine] = useState(true);
   const userNameLower = (user?.name || "").toLowerCase();
 
@@ -5145,7 +5170,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
 }
 
 function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers, escMatrix, setEscMatrix, mtgPresets, setMtgPresets, machines, setMachines, refreshMaster, roles = [], setRoles, actions, setActions }) {
-  const isAdmin = user?.role === "Admin";
+  const isAdmin = isUserAdmin(user);
   const [tab, setTab] = useState("users");
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
@@ -5726,7 +5751,15 @@ function useAPIBridge(actions, setActions, projects) {
             getActions: () => actionsRef.current,
             getAction: (id) => actionsRef.current.find(a => a.id === id || a.sn === id),
             updateAction: (id, patch) => { setActions(p => p.map(a => a.id === id ? { ...a, ...patch } : a)); apiUpdate("actions", id, patch); },
-            addAction: (action) => { const n = { ...action, id: Date.now(), sn: nextSN(actionsRef.current), created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false }; setActions(p => [...p, n]); apiCreate("actions", n); },
+            addAction: async (action) => {
+              const localId = String(Date.now());
+              const n = { ...action, id: localId, sn: "ACT-...", created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false };
+              setActions(p => [...p, n]);
+              try {
+                const saved = await apiCreate("actions", n);
+                if (saved && saved.id) setActions(p => p.map(x => x.id === localId ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
+              } catch (e) { setActions(p => p.filter(x => x.id !== localId)); }
+            },
             getProjects: () => projects,
           };
     // postMessage bridge
@@ -5741,13 +5774,18 @@ function useAPIBridge(actions, setActions, projects) {
           break;
         case "MCS_UPDATE_ACTION":
           setActions(p => p.map(a => a.id === e.data.id ? { ...a, ...e.data.patch } : a));
-          apiUpdate("actions", e.data.id, e.data.patch);
+          apiUpdate("actions", e.data.id, e.data.patch).catch(err => {
+            setActions(p => p.map(a => a.id === e.data.id ? { ...a } : a));
+          });
           e.source?.postMessage({ type: "MCS_UPDATE_OK", id: e.data.id, ok: true }, "*");
           break;
         case "MCS_ADD_ACTION": {
-          const newA = { ...e.data.action, id: Date.now(), sn: nextSN(actionsRef.current), created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false };
+          const localId = String(Date.now());
+          const newA = { ...e.data.action, id: localId, sn: "ACT-...", created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false };
           setActions(p => [...p, newA]);
-          apiCreate("actions", newA);
+          apiCreate("actions", newA).then(saved => {
+            if (saved && saved.id) setActions(p => p.map(x => x.id === localId ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
+          }).catch(() => { setActions(p => p.filter(x => x.id !== localId)); });
           e.source?.postMessage({ type: "MCS_ADD_OK", action: newA, ok: true }, "*");
           break;
         }
@@ -5912,9 +5950,25 @@ export default function App() {
   }, [actions]);
 
   const commitFinal = rows => {
+    const localIds = [];
     setActions(p => {
-      const withSN = rows.map((r, i) => ({ ...r, sn: nextSN([...p, ...rows.slice(0, i)]), id: Date.now() + i, messages: r.messages || [], revisionHistory: r.revisionHistory || [], pendingConfirmation: false, allocatedBy: r.allocatedBy || user?.name || "" }));
-      withSN.forEach(r => apiCreate("actions", resolveRecordIds(r, plants, depts, machines, projects)));
+      const withSN = rows.map((r, i) => {
+        const localId = String(Date.now() + i);
+        localIds.push(localId);
+        return { ...r, sn: "ACT-...", id: localId, messages: r.messages || [], revisionHistory: r.revisionHistory || [], pendingConfirmation: false, allocatedBy: r.allocatedBy || user?.name || "" };
+      });
+      withSN.forEach(async (r, i) => {
+        try {
+          const saved = await apiCreate("actions", resolveRecordIds(r, plants, depts, machines, projects));
+          if (saved && saved.id) {
+            setActions(p => p.map(x => x.id === localIds[i] ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
+          }
+        } catch (e) {
+          setActions(p => p.filter(x => x.id !== localIds[i]));
+          setDbError("Failed to save action: " + e.message);
+          setTimeout(() => setDbError(null), 5000);
+        }
+      });
       return [...p, ...withSN];
     });
     if (globalActiveMtg && globalActiveMtg.id) {
@@ -5923,7 +5977,7 @@ export default function App() {
       apiUpdate("meetings", globalActiveMtg.id, { completedSessions: [...ensureArray(globalActiveMtg.completedSessions), sessionEntry] });
     }
   };
-  const updateAction = (id, patch) => {
+  const updateAction = async (id, patch) => {
     setActions(p => p.map(a => {
       if (a.id !== id) return a;
       if (patch.due && patch.due !== a.due) {
@@ -5932,13 +5986,22 @@ export default function App() {
       }
       return { ...a, ...patch };
     }));
-    apiUpdate("actions", id, resolveRecordIds(patch, plants, depts, machines, projects));
+    try {
+      const saved = await apiUpdate("actions", id, resolveRecordIds(patch, plants, depts, machines, projects));
+      if (saved && saved.id) {
+        setActions(p => p.map(a => a.id === id ? { ...a, version: saved.version, revisions: saved.revisions } : a));
+      }
+    } catch (e) {
+      setDbError("Failed to update action: " + e.message);
+      setTimeout(() => setDbError(null), 5000);
+      fetchData();
+    }
   };
 
   // Sidebar Actions badge = open (non-completed, non-dropped) actions in user's plant scope
   const pendingForMe = actions.filter(a => {
     if (a.status === "COMPLETED" || a.status === "DROPPED") return false;
-    if (user?.role === "Admin" || user?.plant === "All") return true;
+    if (isUserAdmin(user) || user?.plant === "All") return true;
     return !a.plant || a.plant === user?.plant;
   }).length;
 
@@ -5980,7 +6043,7 @@ export default function App() {
       </Shell>
       {showSupport && <SupportModal user={user} onClose={() => setShowSupport(false)} />}
       {showProfile && <UserProfilePanel user={user} users={users} actions={actions} onClose={() => setShowProfile(false)} />}
-      {showAdminNotifs && user?.role === "Admin" && <AdminNotifManager users={users} onClose={() => setShowAdminNotifs(false)} />}
+      {showAdminNotifs && isUserAdmin(user) && <AdminNotifManager users={users} onClose={() => setShowAdminNotifs(false)} />}
       {showQuickAdd && (
         <AddActionPanel
           users={users} plants={plants} depts={depts}
@@ -5990,10 +6053,20 @@ export default function App() {
           machines={machines}
           reasons={reasons}
           currentUser={user}
-          onSave={a => {
-            const newAction = { ...a, id: Date.now(), sn: nextSN(actions), dateOfAction: todayStr(), revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null, status: "IN PROCESS", messages: [], pendingConfirmation: false, allocatedBy: user?.name || "" };
+          onSave={async a => {
+            const localId = String(Date.now());
+            const newAction = { ...a, id: localId, sn: "ACT-...", dateOfAction: todayStr(), revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null, status: "IN PROCESS", messages: [], pendingConfirmation: false, allocatedBy: user?.name || "" };
             setActions(p => [...p, newAction]);
-            apiCreate("actions", resolveRecordIds(newAction, plants, depts, machines, projects));
+            try {
+              const saved = await apiCreate("actions", resolveRecordIds(newAction, plants, depts, machines, projects));
+              if (saved && saved.id) {
+                setActions(p => p.map(x => x.id === localId ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
+              }
+            } catch (e) {
+              setActions(p => p.filter(x => x.id !== localId));
+              setDbError("Failed to save action: " + e.message);
+              setTimeout(() => setDbError(null), 5000);
+            }
             setShowQuickAdd(false);
           }}
           onClose={() => setShowQuickAdd(false)}

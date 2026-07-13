@@ -279,8 +279,8 @@ class EscalationMatrixUpdate(BaseModel):
 class ActionCreate(BaseModel):
     model_config = {"extra": "ignore"}
 
-    id: str
-    sn: str
+    id: Optional[str] = None
+    sn: Optional[str] = None
     text: str
     responsible_user_id: Optional[str] = None
     responsible: Optional[str] = None
@@ -336,6 +336,8 @@ class ActionUpdate(BaseModel):
     project: Optional[str] = None
     src: Optional[str] = None
     pending_confirmation: Optional[bool] = None
+    revisions: Optional[int] = None
+    revision_history: Optional[List[Any]] = None
 
 
 class ActionMessageCreate(BaseModel):

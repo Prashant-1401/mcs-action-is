@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.database import engine, Base
 from app.routers import (
@@ -181,6 +182,17 @@ def migrate_schema(conn):
         except Exception as e:
             print(f"[migrate] meetings column migration skipped: {e}")
 
+    # Actions table columns
+    if "actions" in existing_tables:
+        try:
+            action_cols = {c["name"] for c in inspector.get_columns("actions")}
+            if "version" not in action_cols:
+                conn.execute(text(
+                    "ALTER TABLE actions ADD COLUMN version INTEGER DEFAULT 1"
+                ))
+        except Exception as e:
+            print(f"[migrate] actions column migration skipped: {e}")
+
 
 app = FastAPI(
     title="MCS Backend API",
@@ -211,9 +223,18 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(IntegrityError)
+async def integrity_error_handler(request: Request, exc: IntegrityError):
+    print(f"IntegrityError on {request.url.path}: {exc.orig}")
+    return JSONResponse(
+        status_code=409,
+        content={"detail": "Data conflict — a record with this value already exists. Please refresh and try again."},
+    )
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    print(f"Unhandled error on {request.url.path}: {exc}")
+    print(f"Unhandled error on {request.url.path}: {type(exc).__name__}: {exc}")
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 

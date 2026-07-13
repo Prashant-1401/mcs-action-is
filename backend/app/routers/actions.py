@@ -1,8 +1,10 @@
-import asyncio
+import uuid
+import datetime as _dt
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from app.database import get_db, async_session
 from app.models.models import Action, ActionMessage, EscalationMatrix, User
 from app.schemas.schemas import ActionCreate, ActionUpdate, ActionMessageCreate, ActionsEmailReq
@@ -12,32 +14,22 @@ from app.services.email_service import dispatch_escalation_emails, send_actions_
 router = APIRouter(prefix="/api/actions", tags=["Actions"], dependencies=[Depends(require_api_key)])
 
 
-def _bg_check_escalations():
-    """Run escalation resolution in a fresh event loop with its own DB session."""
-    import asyncio
-
-    async def _run():
-        async with async_session() as db:
-            await _check_and_dispatch_escalations_with_db(db)
-
-    try:
-        loop = asyncio.new_event_loop()
+async def _generate_sn(db: AsyncSession) -> str:
+    result = await db.execute(
+        text("SELECT sn FROM actions WHERE sn ~ '^ACT-[0-9]+$' ORDER BY CAST(REPLACE(sn, 'ACT-', '') AS INTEGER) DESC LIMIT 1")
+    )
+    row = result.fetchone()
+    if row and row[0]:
         try:
-            loop.run_until_complete(_run())
-        finally:
-            loop.close()
-    except Exception as e:
-        print(f"[escalation-trigger] background check failed: {e}")
-
-
-async def _check_and_dispatch_escalations():
-    """Query all open actions against the escalation matrix and dispatch emails (creates own session)."""
-    async with async_session() as db:
-        await _check_and_dispatch_escalations_with_db(db)
+            max_num = int(row[0].replace("ACT-", ""))
+        except ValueError:
+            max_num = 0
+    else:
+        max_num = 0
+    return f"ACT-{max_num + 1:03d}"
 
 
 async def _check_and_dispatch_escalations_with_db(db):
-    """Core escalation logic — accepts an existing DB session."""
     tiers_q = await db.execute(
         select(EscalationMatrix).where(EscalationMatrix.active == True)
     )
@@ -128,6 +120,14 @@ async def _check_and_dispatch_escalations_with_db(db):
         dispatch_escalation_emails(to_send)
 
 
+async def _bg_check_escalations():
+    try:
+        async with async_session() as db:
+            await _check_and_dispatch_escalations_with_db(db)
+    except Exception as e:
+        print(f"[escalation-trigger] background check failed: {e}")
+
+
 @router.get("/")
 async def list_actions(
     plant_id: str = None,
@@ -154,9 +154,7 @@ async def list_actions(
 
 
 @router.post("/send-daily-digests")
-async def send_daily_digests(bg: BackgroundTasks, db: AsyncSession = Depends(get_db)):
-    """Call once/day from an external cron. Groups open actions by responsible
-    user and emails each user their own list."""
+async def send_daily_digests_endpoint(bg: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     users_q = await db.execute(select(User))
     all_users = users_q.scalars().all()
     email_by_name = {u.name: u.email for u in all_users if u.name and u.email}
@@ -219,20 +217,31 @@ async def get_action(action_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/")
 async def create_action(data: ActionCreate, bg: BackgroundTasks, db: AsyncSession = Depends(get_db)):
-    import datetime
     payload = data.model_dump()
+    if not payload.get("id"):
+        payload["id"] = str(uuid.uuid4())
+    if not payload.get("sn"):
+        payload["sn"] = await _generate_sn(db)
     if "project" in payload:
         payload["project_name"] = payload.pop("project")
     for k in ("due", "date_of_action", "created", "closed_on"):
         v = payload.get(k)
         if isinstance(v, str):
             try:
-                payload[k] = datetime.date.fromisoformat(v)
+                payload[k] = _dt.date.fromisoformat(v)
             except (ValueError, TypeError):
                 pass
     action = Action(**payload)
     db.add(action)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        payload["id"] = str(uuid.uuid4())
+        payload["sn"] = await _generate_sn(db)
+        action = Action(**payload)
+        db.add(action)
+        await db.commit()
     await db.refresh(action)
     bg.add_task(_bg_check_escalations)
     return action
@@ -240,8 +249,9 @@ async def create_action(data: ActionCreate, bg: BackgroundTasks, db: AsyncSessio
 
 @router.patch("/{action_id}")
 async def update_action(action_id: str, data: ActionUpdate, bg: BackgroundTasks, db: AsyncSession = Depends(get_db)):
-    import datetime
-    result = await db.execute(select(Action).where(Action.id == action_id))
+    result = await db.execute(
+        select(Action).where(Action.id == action_id).with_for_update()
+    )
     action = result.scalar_one_or_none()
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
@@ -249,20 +259,24 @@ async def update_action(action_id: str, data: ActionUpdate, bg: BackgroundTasks,
     if "project" in update_data:
         update_data["project_name"] = update_data.pop("project")
     if update_data.get("status") in ("COMPLETED", "DROPPED") and action.status not in ("COMPLETED", "DROPPED"):
-        update_data["closed_on"] = datetime.date.today().isoformat()
+        update_data["closed_on"] = _dt.date.today()
 
-    current_revisions = action.revisions or 0
     if "revision_history" in update_data:
-        current_revisions += 1
-        update_data["revisions"] = current_revisions
+        incoming_history = update_data.pop("revision_history")
+        current_history = action.revision_history or []
+        if incoming_history and isinstance(incoming_history, list):
+            current_history = current_history + incoming_history
+        update_data["revision_history"] = current_history
+        update_data["revisions"] = (action.revisions or 0) + 1
 
     for k, v in update_data.items():
         if isinstance(v, str) and k in ("due", "date_of_action", "closed_on", "created"):
             try:
-                v = datetime.date.fromisoformat(v)
+                v = _dt.date.fromisoformat(v)
             except (ValueError, TypeError):
                 pass
         setattr(action, k, v)
+    action.version = (action.version or 0) + 1
     await db.commit()
     await db.refresh(action)
     bg.add_task(_bg_check_escalations)
@@ -296,29 +310,64 @@ async def create_action_message(action_id: str, data: ActionMessageCreate, db: A
     await db.refresh(msg)
     return msg
 
+
 @router.post("/bulk")
 async def bulk_upsert_actions(rows: list[ActionCreate], bg: BackgroundTasks, db: AsyncSession = Depends(get_db)):
-    import datetime
     upserted = 0
     for data in rows:
-        result = await db.execute(select(Action).where(Action.id == data.id))
-        existing = result.scalar_one_or_none()
-        payload = data.model_dump(exclude_unset=True)
+        payload = data.model_dump()
         if "project" in payload:
             payload["project_name"] = payload.pop("project")
         for k in ("due", "date_of_action", "created", "closed_on"):
             v = payload.get(k)
             if isinstance(v, str):
                 try:
-                    payload[k] = datetime.date.fromisoformat(v)
+                    payload[k] = _dt.date.fromisoformat(v)
                 except (ValueError, TypeError):
                     pass
-        if existing:
-            for k, v in payload.items():
-                setattr(existing, k, v)
-        else:
-            db.add(Action(**payload))
+        action_id = payload.get("id")
+        if action_id:
+            result = await db.execute(select(Action).where(Action.id == action_id))
+            existing = result.scalar_one_or_none()
+            if existing:
+                for k, v in payload.items():
+                    if k != "id":
+                        setattr(existing, k, v)
+                upserted += 1
+                continue
+        if not payload.get("id"):
+            payload["id"] = str(uuid.uuid4())
+        if not payload.get("sn"):
+            payload["sn"] = await _generate_sn(db)
+        db.add(Action(**payload))
         upserted += 1
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        for data in rows:
+            payload = data.model_dump()
+            if "project" in payload:
+                payload["project_name"] = payload.pop("project")
+            for k in ("due", "date_of_action", "created", "closed_on"):
+                v = payload.get(k)
+                if isinstance(v, str):
+                    try:
+                        payload[k] = _dt.date.fromisoformat(v)
+                    except (ValueError, TypeError):
+                        pass
+            action_id = payload.get("id")
+            if action_id:
+                result = await db.execute(select(Action).where(Action.id == action_id))
+                existing = result.scalar_one_or_none()
+                if existing:
+                    for k, v in payload.items():
+                        if k != "id":
+                            setattr(existing, k, v)
+                    continue
+            payload["id"] = str(uuid.uuid4())
+            payload["sn"] = await _generate_sn(db)
+            db.add(Action(**payload))
+        await db.commit()
     bg.add_task(_bg_check_escalations)
     return {"ok": True, "upserted": upserted}
