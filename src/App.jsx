@@ -3126,7 +3126,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
 }
 
 /* ADD ACTION SIDE PANEL */
-function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projects, onSave, onClose, currentUser, machines, reasons: reasonsProp }) {
+function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projects, onSave, onClose, currentUser, machines, reasons: reasonsProp, saving }) {
   useEscClose(onClose);
   const [f, setF] = useState({ text: "", responsible: "", due: "", section: "General", plant: defaultPlant || "", src: defaultSrc || "", priority: "NORMAL", remarks: "", project: "", reasonOfAction: "", machineName: "", actionPointType: "" });
   // Derive reason suggestions from the reasons state passed in (loaded at app boot)
@@ -3161,7 +3161,9 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projec
         </div>
         <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
           <button className="btn btn-ghost" style={{ flex: 1, justifyContent: "center" }} onClick={onClose}>Cancel</button>
-          <button className="btn btn-navy" style={{ flex: 2, justifyContent: "center" }} onClick={() => { if (f.text.trim() && f.responsible && f.due) onSave(f); }}>Save Action</button>
+          <button className="btn btn-navy" style={{ flex: 2, justifyContent: "center" }} onClick={() => { if (f.text.trim() && f.responsible && f.due) onSave(f); }} disabled={saving}>
+            {saving ? <><Spin /> Saving…</> : "Save Action"}
+          </button>
         </div>
       </div>
     </>
@@ -3173,6 +3175,7 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
   const [draft, setDraft] = useState(() => staged.map((r, i) => ({ ...r, stageSN: "STG-" + String(i + 1).padStart(3, "0"), status: "IN PROCESS", priority: r.priority || "NORMAL", section: r.section || "General", plant: r.plant || mtg.plant })));
   const [analyzingSmart, setAnalyzingSmart] = useState(false);
   const [smartResult, setSmartResult] = useState(null);
+  const [committing, setCommitting] = useState(false);
 
   const up = (id, k, v) => setDraft(d => d.map(r => r.id === id ? { ...r, [k]: v } : r));
   const del = id => setDraft(d => d.filter(r => r.id !== id));
@@ -3180,6 +3183,8 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
   const valid = draft.filter(r => r.text?.trim() && r.responsible && r.due);
   // All actions with text get committed; missing responsible/due become UNASSIGNED
   const commitAll = () => {
+    if (committing) return;
+    setCommitting(true);
     const all = draft.filter(r => r.text?.trim()).map((r, i) => {
       const isComplete = !!(r.responsible && r.due);
       return {
@@ -3255,8 +3260,8 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
           <button className="btn btn-ghost" onClick={exportTranscript} disabled={!txLines || txLines.length === 0} style={{ border: `1px solid ${T.border}` }}>
             📥 Export Transcript
           </button>
-          <button className="btn btn-green" onClick={commitAll} disabled={draft.filter(r => r.text?.trim()).length === 0}>
-            ✓ Commit {draft.filter(r => r.text?.trim()).length} Action{draft.filter(r => r.text?.trim()).length !== 1 ? "s" : ""}
+          <button className="btn btn-green" onClick={commitAll} disabled={committing || draft.filter(r => r.text?.trim()).length === 0}>
+            {committing ? <><Spin /> Committing…</> : <>✓ Commit {draft.filter(r => r.text?.trim()).length} Action{draft.filter(r => r.text?.trim()).length !== 1 ? "s" : ""}</>}
           </button>
         </div>
       </div>
@@ -5838,6 +5843,7 @@ export default function App() {
     return saved ? parseInt(saved, 10) || 0 : 0;
   });
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [quickSaving, setQuickSaving] = useState(false);
 
   // ── Postgres live database ──
   const {
@@ -5952,9 +5958,11 @@ export default function App() {
   }, [actions]);
 
   const committingRef = useRef(false);
+  const [committing, setCommitting] = useState(false);
   const commitFinal = rows => {
     if (committingRef.current) return;
     committingRef.current = true;
+    setCommitting(true);
     const localIds = [];
     const resolvedRows = rows.map((r, i) => {
       const localId = String(Date.now() + i);
@@ -5974,7 +5982,11 @@ export default function App() {
         setDbError("Failed to save action: " + e.message);
         setTimeout(() => setDbError(null), 5000);
       } finally {
-        if (i === resolvedRows.length - 1) committingRef.current = false;
+        if (i === resolvedRows.length - 1) {
+          committingRef.current = false;
+          setCommitting(false);
+          fetchData();
+        }
       }
     });
     if (globalActiveMtg && globalActiveMtg.id) {
@@ -6059,9 +6071,11 @@ export default function App() {
           machines={machines}
           reasons={reasons}
           currentUser={user}
+          saving={quickSaving}
           onSave={async a => {
             if (committingRef.current) return;
             committingRef.current = true;
+            setQuickSaving(true);
             const localId = String(Date.now());
             const newAction = { ...a, id: localId, dateOfAction: todayStr(), revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null, status: "IN PROCESS", messages: [], pendingConfirmation: false, allocatedBy: user?.name || "" };
             const resolved = resolveRecordIds(newAction, plants, depts, machines, projects);
@@ -6071,12 +6085,14 @@ export default function App() {
               if (saved && saved.id) {
                 setActions(p => p.map(x => x.id === localId ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
               }
+              fetchData();
             } catch (e) {
               setActions(p => p.filter(x => x.id !== localId));
               setDbError("Failed to save action: " + e.message);
               setTimeout(() => setDbError(null), 5000);
             } finally {
               committingRef.current = false;
+              setQuickSaving(false);
             }
             setShowQuickAdd(false);
           }}
