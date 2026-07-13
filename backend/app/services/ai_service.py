@@ -16,7 +16,7 @@ def gemini_generate(prompt: str) -> str:
     if not gemini_client:
         return ""
     models_to_try = [GEMINI_MODEL]
-    for m in ["gemini-2.5-flash-lite", "gemini-2.5-flash"]:
+    for m in ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-flash-latest"]:
         if m not in models_to_try:
             models_to_try.append(m)
     for model_id in models_to_try:
