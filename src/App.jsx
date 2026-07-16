@@ -1222,7 +1222,7 @@ function ActionSidePanel({ action, onClose, onUpdate, users, plants, depts, curr
         <div style={{ padding: "16px 22px", overflowY: "auto", flex: 1, maxHeight: "calc(100vh - 200px)" }}>
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: T.text2, textTransform: "uppercase", letterSpacing: .4, marginBottom: 3 }}>Responsible</div>
-            <MultiUserSelect value={action.responsible} users={users} onChange={v => onUpdate && onUpdate(action.id, { responsible: v })} />
+            <MultiUserSelect value={action.responsible} users={(users || []).filter(u => !action.plant || action.plant === "All" || !u.plant || u.plant === "All" || u.plant === action.plant)} onChange={v => onUpdate && onUpdate(action.id, { responsible: v })} />
           </div>
           <InlineField label="Due Date" k="due" value={action.due} type="date" />
           <InlineField label="Status" k="status" value={action.status} opts={["NOT STARTED", "IN PROCESS", "COMPLETED", "DROPPED"]} />
@@ -3182,7 +3182,7 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projec
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div><Lbl t="Action Point Type" req /><select value={f.actionPointType} onChange={e => up("actionPointType", e.target.value)}><option value="">Select type…</option>{["Corrective Action","Preventive Action","Improvement","Safety","Maintenance","Quality","Compliance","Other"].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
           <div><Lbl t="Action Point" req /><textarea value={f.text} onChange={e => up("text", e.target.value)} style={{ height: 72, resize: "none" }} placeholder="Describe the action…" /></div>
-          <div><Lbl t="Responsible Person(s)" req /><MultiUserSelect value={f.responsible} users={users} onChange={v => up("responsible", v)} /></div>
+          <div><Lbl t="Responsible Person(s)" req /><MultiUserSelect value={f.responsible} users={users.filter(u => !f.plant || f.plant === "All" || !u.plant || u.plant === "All" || u.plant === f.plant)} onChange={v => up("responsible", v)} /></div>
           <div><Lbl t="Due Date" req /><input type="date" value={f.due} onChange={e => up("due", e.target.value)} /></div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div><Lbl t="Department" /><select value={f.section} onChange={e => up("section", e.target.value)}><option value="General">General</option>{depts.filter(d => !f.plant || f.plant === "All" || !d.plant || d.plant === "All Plants" || d.plant === f.plant).map(d => <option key={d.id} value={d.name}>{d.name}</option>)}{SECTIONS.filter(s => s !== "General" && !depts.filter(d => !f.plant || f.plant === "All" || !d.plant || d.plant === "All Plants" || d.plant === f.plant).find(d => d.name === s)).map(s => <option key={s}>{s}</option>)}</select></div>
@@ -3349,7 +3349,7 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
                 </div>
                 <div style={{ marginBottom: 10 }}><Lbl t="Action Point" req /><textarea value={r.text || ""} onChange={e => up(r.id, "text", e.target.value)} style={{ resize: "none", height: 52, fontSize: 12 }} /></div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-                  <div><Lbl t="Responsible" /><MultiUserSelect value={r.responsible || ""} users={users} onChange={v => up(r.id, "responsible", v)} placeholder="Leave Unassigned" /></div>
+                  <div><Lbl t="Responsible" /><MultiUserSelect value={r.responsible || ""} users={users.filter(u => !r.plant || r.plant === "All" || !u.plant || u.plant === "All" || u.plant === r.plant)} onChange={v => up(r.id, "responsible", v)} placeholder="Leave Unassigned" /></div>
                   <div><Lbl t="Due Date" /><input type="date" value={r.due || ""} onChange={e => up(r.id, "due", e.target.value)} style={{ borderColor: !r.due ? T.amber : T.border }} /></div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
@@ -3516,7 +3516,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
               <InlineField label="Plant" field="plant" value={action.plant} type="select" opts={(panelPlants || DEFAULT_PLANTS).map(p => p.name)} />
               <div>
                 <div style={{ fontSize: 10, color: T.text2, fontWeight: 700, textTransform: "uppercase", letterSpacing: .4, marginBottom: 3 }}>Responsible</div>
-                <MultiUserSelect value={action.responsible} users={allUsers} onChange={v => onUpdate(action.id, { responsible: v })} />
+                <MultiUserSelect value={action.responsible} users={(allUsers || []).filter(u => !action.plant || action.plant === "All" || !u.plant || u.plant === "All" || u.plant === action.plant)} onChange={v => onUpdate(action.id, { responsible: v })} />
               </div>
               <InlineField label="Due Date" field="due" value={action.due} type="date" />
               <div><div style={{ fontSize: 10, color: T.text2, fontWeight: 700, textTransform: "uppercase", letterSpacing: .4, marginBottom: 3 }}>Closed On</div><div style={{ fontSize: 12, padding: "3px 6px" }}>{fmt(action.closedOn)}</div></div>
