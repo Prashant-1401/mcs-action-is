@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     frontend_url: str = "https://mcs-control-management.vercel.app"
     master_user: str = ""
     master_password: str = ""
+    google_sheets_credentials_path: str = ""
+    google_sheets_spreadsheet_id: str = ""
+    google_sheets_worksheet_name: str = "Actions"
 
     class Config:
         env_file = os.path.join(_BACKEND_DIR, ".env")

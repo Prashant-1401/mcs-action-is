@@ -15,3 +15,5 @@ pytest>=8.0.0
 pytest-asyncio>=0.24.0
 python-multipart>=0.0.7
 requests>=2.31.0
+gspread>=6.0.0
+google-auth>=2.0.0

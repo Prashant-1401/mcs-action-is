@@ -6,12 +6,52 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from app.database import get_db, async_session
-from app.models.models import Action, ActionMessage, EscalationMatrix, User
+from app.models.models import Action, ActionMessage, EscalationMatrix, User, Plant, Department
 from app.schemas.schemas import ActionCreate, ActionUpdate, ActionMessageCreate, ActionsEmailReq
-from app.middleware.auth import require_api_key
-from app.services.email_service import dispatch_escalation_emails, send_actions_email, dispatch_daily_digests
+from app.middleware.auth import require_api_key, get_current_user
+from app.services.email_service import (
+    dispatch_escalation_emails, send_actions_email, dispatch_daily_digests,
+    send_completion_request_email, send_completion_confirmed_email, send_completion_rejected_email,
+)
+from app.services.google_sheets_service import sync_action_to_sheet, sync_all_actions
 
 router = APIRouter(prefix="/api/actions", tags=["Actions"], dependencies=[Depends(require_api_key)])
+
+
+async def _resolve_ids_to_names(db: AsyncSession, plant_id: str = None, dept_id: str = None, responsible: str = None) -> dict:
+    plant_name = ""
+    dept_name = ""
+    resp_email = ""
+    resp_phone = ""
+    if plant_id:
+        plant_q = await db.execute(select(Plant).where(Plant.id == plant_id))
+        plant = plant_q.scalar_one_or_none()
+        if plant:
+            plant_name = plant.name
+    if dept_id:
+        dept_q = await db.execute(select(Department).where(Department.id == dept_id))
+        dept = dept_q.scalar_one_or_none()
+        if dept:
+            dept_name = dept.name
+    if responsible:
+        resp_names = [n.strip() for n in responsible.split(",") if n.strip()]
+        if resp_names:
+            user_q = await db.execute(select(User).where(User.name == resp_names[0]))
+            user = user_q.scalar_one_or_none()
+            if user:
+                resp_email = user.email or ""
+                resp_phone = user.phone or ""
+    return {"plant": plant_name, "dept": dept_name, "responsible_email": resp_email, "responsible_phone": resp_phone}
+
+
+async def _action_to_sheet_dict(db: AsyncSession, action) -> dict:
+    names = await _resolve_ids_to_names(db, action.plant_id, action.dept_id)
+    return {
+        "sn": action.sn, "text": action.text, "responsible": action.responsible,
+        "due": str(action.due) if action.due else "", "status": action.status,
+        "priority": action.priority, "plant": names["plant"],
+        "dept": names["dept"], "created": str(action.created) if action.created else "",
+    }
 
 
 async def _generate_sn(db: AsyncSession) -> str:
@@ -128,6 +168,21 @@ async def _bg_check_escalations():
         print(f"[escalation-trigger] background check failed: {e}")
 
 
+async def _sync_action_bg(action_dict: dict):
+    try:
+        async with async_session() as db:
+            names = await _resolve_ids_to_names(db, action_dict.get("plant_id"), action_dict.get("dept_id"), action_dict.get("responsible"))
+            action_dict["plant"] = names["plant"]
+            action_dict["dept"] = names["dept"]
+            action_dict["responsible_email"] = names["responsible_email"]
+            action_dict["responsible_phone"] = names["responsible_phone"]
+            action_dict.pop("plant_id", None)
+            action_dict.pop("dept_id", None)
+            sync_action_to_sheet(action_dict)
+    except Exception as e:
+        print(f"[google-sheets] background sync failed: {e}")
+
+
 @router.get("/")
 async def list_actions(
     plant_id: str = None,
@@ -241,11 +296,20 @@ async def create_action(data: ActionCreate, bg: BackgroundTasks, db: AsyncSessio
         await db.commit()
     await db.refresh(action)
     bg.add_task(_bg_check_escalations)
+    action_dict = {
+        "sn": action.sn, "text": action.text, "responsible": action.responsible,
+        "due": str(action.due) if action.due else "", "status": action.status,
+        "priority": action.priority, "plant_id": action.plant_id or "",
+        "dept_id": action.dept_id or "", "created": str(action.created) if action.created else "",
+    }
+    bg.add_task(_sync_action_bg, action_dict)
     return action
 
 
 @router.patch("/{action_id}")
-async def update_action(action_id: str, data: ActionUpdate, bg: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+async def update_action(action_id: str, data: ActionUpdate, bg: BackgroundTasks, 
+                        db: AsyncSession = Depends(get_db),
+                        current_user: dict = Depends(get_current_user)):
     result = await db.execute(
         select(Action).where(Action.id == action_id).with_for_update()
     )
@@ -257,6 +321,60 @@ async def update_action(action_id: str, data: ActionUpdate, bg: BackgroundTasks,
         update_data["project_name"] = update_data.pop("project")
     if update_data.get("status") in ("COMPLETED", "DROPPED") and action.status not in ("COMPLETED", "DROPPED"):
         update_data["closed_on"] = _dt.date.today()
+
+    # --- Status transition enforcement ---
+    new_status = update_data.get("status")
+    new_pending = update_data.get("pending_confirmation")
+    old_status = action.status
+    user_name = current_user.get("name") if current_user else None
+
+    if new_status and new_status != old_status:
+        # Rule 1: Only responsible user can request completion (PENDING CONFIRM)
+        if new_status == "PENDING CONFIRM" or new_pending is True:
+            resp_names = [n.strip() for n in (action.responsible or "").split(",")]
+            if user_name and user_name not in resp_names:
+                raise HTTPException(status_code=403, detail="Only the responsible user can request completion")
+            # Ensure status is PENDING CONFIRM and pending_confirmation is True
+            update_data["status"] = "PENDING CONFIRM"
+            update_data["pending_confirmation"] = True
+            # Find allocator's email for notification
+            if action.allocated_by:
+                alloc_q = await db.execute(select(User).where(User.name == action.allocated_by))
+                allocator = alloc_q.scalar_one_or_none()
+                if allocator and allocator.email:
+                    bg.add_task(send_completion_request_email, allocator.email,
+                                action.sn, action.text, user_name or "Unknown", action.allocated_by)
+
+        # Rule 2: Only allocator can confirm completion
+        elif new_status == "COMPLETED" and old_status == "PENDING CONFIRM":
+            if user_name and user_name != action.allocated_by:
+                raise HTTPException(status_code=403, detail="Only the allocator can confirm completion")
+            update_data["pending_confirmation"] = False
+            update_data["closed_by"] = user_name
+            # Notify responsible user
+            resp_q = await db.execute(select(User).where(User.name == action.responsible))
+            resp_user = resp_q.scalar_one_or_none()
+            if resp_user and resp_user.email:
+                bg.add_task(send_completion_confirmed_email, resp_user.email,
+                            action.sn, action.text, user_name or "Unknown")
+
+        # Rule 3: Only allocator can reject completion (back to IN PROCESS)
+        elif new_status == "IN PROCESS" and old_status == "PENDING CONFIRM":
+            if user_name and user_name != action.allocated_by:
+                raise HTTPException(status_code=403, detail="Only the allocator can reject completion")
+            update_data["pending_confirmation"] = False
+            # Notify responsible user
+            resp_q = await db.execute(select(User).where(User.name == action.responsible))
+            resp_user = resp_q.scalar_one_or_none()
+            if resp_user and resp_user.email:
+                bg.add_task(send_completion_rejected_email, resp_user.email,
+                            action.sn, action.text, user_name or "Unknown")
+
+        # Rule 4: Block direct COMPLETED from non-PENDING states (except admin/master)
+        elif new_status == "COMPLETED" and old_status != "PENDING CONFIRM":
+            if current_user and current_user.get("role") not in ("Admin",) and not current_user.get("masterAccess"):
+                raise HTTPException(status_code=403, detail="Actions must go through PENDING CONFIRM before completion")
+    # --- End status enforcement ---
 
     if "revision_history" in update_data:
         incoming_history = update_data.pop("revision_history")
@@ -277,6 +395,13 @@ async def update_action(action_id: str, data: ActionUpdate, bg: BackgroundTasks,
     await db.commit()
     await db.refresh(action)
     bg.add_task(_bg_check_escalations)
+    action_dict = {
+        "sn": action.sn, "text": action.text, "responsible": action.responsible,
+        "due": str(action.due) if action.due else "", "status": action.status,
+        "priority": action.priority, "plant_id": action.plant_id or "",
+        "dept_id": action.dept_id or "", "created": str(action.created) if action.created else "",
+    }
+    bg.add_task(_sync_action_bg, action_dict)
     return action
 
 
@@ -368,3 +493,24 @@ async def bulk_upsert_actions(rows: list[ActionCreate], bg: BackgroundTasks, db:
         await db.commit()
     bg.add_task(_bg_check_escalations)
     return {"ok": True, "upserted": upserted}
+
+
+@router.post("/sync-to-sheet")
+async def sync_actions_to_sheet(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Action).order_by(Action.created.desc()))
+    actions = result.scalars().all()
+    action_dicts = []
+    for a in actions:
+        names = await _resolve_ids_to_names(db, a.plant_id, a.dept_id, a.responsible)
+        action_dicts.append({
+            "sn": a.sn, "text": a.text, "responsible": a.responsible,
+            "responsible_email": names["responsible_email"],
+            "responsible_phone": names["responsible_phone"],
+            "due": str(a.due) if a.due else "", "status": a.status,
+            "priority": a.priority, "plant": names["plant"],
+            "dept": names["dept"], "created": str(a.created) if a.created else "",
+        })
+    success = sync_all_actions(action_dicts)
+    if not success:
+        return {"ok": False, "error": "Google Sheets not configured or sync failed"}
+    return {"ok": True, "synced": len(action_dicts)}
