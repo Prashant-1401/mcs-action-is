@@ -1,4 +1,5 @@
 import os
+import json
 from typing import Dict, Any, List, Optional
 import gspread
 from google.oauth2.service_account import Credentials
@@ -13,18 +14,26 @@ SHEET_HEADERS = ["SN", "Text", "Responsible", "Responsible Email", "Responsible 
 
 
 def _is_configured() -> bool:
-    return bool(settings.google_sheets_credentials_path and settings.google_sheets_spreadsheet_id)
+    return bool(settings.google_sheets_spreadsheet_id) and (
+        settings.google_sheets_credentials_path or os.environ.get("GOOGLE_SHEETS_CREDENTIALS_JSON")
+    )
 
 
 def _get_client() -> Optional[gspread.Client]:
     if not _is_configured():
-        return None
-    creds_path = settings.google_sheets_credentials_path
-    if not os.path.exists(creds_path):
-        print(f"[google-sheets] Credentials file not found: {creds_path}")
+        print("[google-sheets] Not configured — skipping")
         return None
     try:
-        creds = Credentials.from_service_account_file(creds_path, scopes=SCOPES)
+        creds_json = os.environ.get("GOOGLE_SHEETS_CREDENTIALS_JSON")
+        if creds_json:
+            info = json.loads(creds_json)
+            creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+        else:
+            creds_path = settings.google_sheets_credentials_path
+            if not os.path.exists(creds_path):
+                print(f"[google-sheets] Credentials file not found: {creds_path}")
+                return None
+            creds = Credentials.from_service_account_file(creds_path, scopes=SCOPES)
         return gspread.authorize(creds)
     except Exception as e:
         print(f"[google-sheets] Auth failed: {e}")
