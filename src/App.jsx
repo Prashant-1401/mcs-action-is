@@ -1858,8 +1858,8 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
     apiRemove("projects", pr.id);
   };
 
-  const visibleMeetings = (meetings || []).filter(m => user?.plant === "All" ? true : m.plant === user?.plant || m.plant === "All" || !m.plant);
-  const visibleProjects = (projects || []).filter(p => user?.plant === "All" ? true : p.plant === user?.plant || p.plant === "All" || !p.plant);
+  const visibleMeetings = isAdmin ? (meetings || []) : (meetings || []).filter(m => user?.plant === "All" ? true : m.plant === user?.plant || m.plant === "All" || !m.plant);
+  const visibleProjects = isAdmin ? (projects || []) : (projects || []).filter(p => user?.plant === "All" ? true : p.plant === user?.plant || p.plant === "All" || !p.plant);
 
   // Fix 8: detect time conflicts for current user's meetings
   const timeToMins = (t) => {
