@@ -83,6 +83,7 @@ const SNAKE_TO_CAMEL = {
   from_user: "fromUser", target_user: "targetUser",
   applicable_to: "applicableTo",
   master_access: "masterAccess",
+  admin_access: "adminAccess",
 };
 const CAMEL_TO_SNAKE = Object.fromEntries(
   Object.entries(SNAKE_TO_CAMEL).map(([s, c]) => [c, s])
@@ -371,13 +372,37 @@ const isUserAdmin = (user) => {
   return false;
 };
 
+// Master Access: GLOBAL scope. Can add/edit Depts, Users, Roles, Escalation
+// Matrix for ANY plant. Org chart is auto-derived from users' superior/role
+// fields (never manually edited) — see OrgNode/roots in MasterPage.
 const isMasterUser = (user) => {
   if (!user) return false;
   if (user.masterAccess === true || user.masterAccess === "true") return true;
   return false;
 };
 
+// Admin Access: PLANT-SCOPED. Can add new Plants, and add/edit Users, Depts,
+// Roles, Escalation Matrix, and Actions — all scoped to their own plant.
+// Org Chart is auto-derived (never manually edited) and shows only their plant.
+const isAdminAccessUser = (user) => {
+  if (!user) return false;
+  if (user.adminAccess === true || user.adminAccess === "true") return true;
+  return false;
+};
+
+// True Admin (role === "Admin") or Master: unrestricted, global powers.
 const hasElevatedAccess = (user) => isUserAdmin(user) || isMasterUser(user);
+
+// Anyone allowed into Master Setup at all (true Admin, Master, or a
+// plant-scoped Admin-Access user). Individual tabs/actions inside further
+// gate down to what each tier is actually allowed to do.
+const canAccessMasterPage = (user) => isUserAdmin(user) || isMasterUser(user) || isAdminAccessUser(user);
+
+// Only true Admin or Admin-Access users may add new Plants.
+const canAddPlants = (user) => isUserAdmin(user) || isAdminAccessUser(user);
+
+// Only true Admin or Master may add/edit Depts, Users, Roles, Esc Matrix.
+const canManageGlobalOrgData = (user) => isUserAdmin(user) || isMasterUser(user);
 
 const SAMPLE_TRANSCRIPT_LINES = [
   "Good morning everyone. Let's start with yesterday's production numbers.",
@@ -1033,7 +1058,7 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
   const isMaster = isMasterUser(user);
   const userPerms = getPerms(user);
   const canAccessPage = (id) => {
-    if (id === 99) return hasElevatedAccess(user);
+    if (id === 99) return canAccessMasterPage(user);
     return true;
   };
   const hms = s => `${String(Math.floor(s / 3600)).padStart(2, "0")}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -1098,7 +1123,7 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
               </>
             )}
           </div>
-          {hasElevatedAccess(user) && (
+          {canAccessMasterPage(user) && (
             <button onClick={() => setPage(99)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "10px 18px", border: "none", cursor: "pointer", background: page === 99 ? "rgba(255,255,255,.1)" : "transparent", color: "rgba(255,255,255,.45)", fontSize: 12, fontFamily: "'Inter',sans-serif", transition: "all .2s" }}>
               <span style={{ fontSize: 14 }}>⚙</span><span>Master Setup</span>
             </button>
@@ -1251,7 +1276,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   const subNamesLower = subNames.map(n => n.trim().toLowerCase());
   const scopedActions = isAdmin
     ? actions
-    : isMaster
+    : (isMaster || isAdminAccessUser(user))
     ? actions.filter(a => !a.plant || a.plant === user?.plant)
     : actions.filter(a => {
     // Non-admin: scope by plant first, then only show actions where user is responsible
@@ -3365,8 +3390,9 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
   const isAllocator = user?.name === allocator;
   const isAllocatorSuperior = user?.name === allocatorSuperior?.name;
   const isAdmin = isUserAdmin(user);
-  const _hasEditPerm = isAdmin || (getPerms(user).canEditActions && isAssignee);
-  const canConfirm = isAllocator || isAllocatorSuperior || isAdmin;
+  const isPlantAdminAccess = isAdminAccessUser(user) && !isAdmin && !isMasterUser(user) && (!action.plant || action.plant === user?.plant);
+  const _hasEditPerm = isAdmin || isPlantAdminAccess || isAllocator || (getPerms(user).canEditActions && isAssignee);
+  const canConfirm = isAllocator || isAllocatorSuperior || isAdmin || isPlantAdminAccess;
   const canMsg = _hasEditPerm || isAssignee || isAllocator;
   const canEdit = _hasEditPerm && !isPendingConfirm && action.status !== "COMPLETED" && action.status !== "DROPPED";
 
@@ -3657,7 +3683,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const isMaster = isMasterUser(user);
   const scoped = isAdmin
     ? actions
-    : isMaster
+    : (isMaster || isAdminAccessUser(user))
     ? actions.filter(a => !a.plant || a.plant === user?.plant)
     : actions.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower].filter(Boolean)));
 
@@ -5197,7 +5223,19 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
 function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers, escMatrix, setEscMatrix, mtgPresets, setMtgPresets, machines, setMachines, refreshMaster, roles = [], setRoles, actions, setActions }) {
   const isAdmin = isUserAdmin(user);
   const isMaster = isMasterUser(user);
+  const isAdminAccessOnly = isAdminAccessUser(user) && !isAdmin && !isMaster;
+  const canManageGlobal = canManageGlobalOrgData(user); // add/edit Depts, Users, Roles, EscMatrix
+  const canAddNewPlants = canAddPlants(user);
+  // Admin-Access users only ever see their own plant's slice of data.
+  const scopedUsers = isAdminAccessOnly ? users.filter(u => u.plant === user.plant) : users;
+  const scopedDepts = isAdminAccessOnly ? depts.filter(d => !d.plant || d.plant === "All Plants" || d.plant === user.plant) : depts;
+  const scopedEscMatrix = isAdminAccessOnly
+    ? (escMatrix || []).filter(t => scopedUsers.some(u => u.name === t.fromUser))
+    : (escMatrix || []);
   const [tab, setTab] = useState("users");
+  const [userFilterPlant, setUserFilterPlant] = useState("All");
+  const [userFilterRole, setUserFilterRole] = useState("All");
+  const [userFilterDept, setUserFilterDept] = useState("All");
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
   const [mcSaveStatus, setMcSaveStatus] = useState(null);
@@ -5219,17 +5257,36 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
 
   const canModify = (tabKey, rowId) => {
     if (isAdmin || isMaster) return true;
+    if (isAdminAccessOnly) {
+      // Plants: add-only, not edit — never true here for existing plant rows.
+      if (tabKey === "plants") return false;
+      // Roles are global definitions (no plant field) — editable by Admin-Access too.
+      if (tabKey === "roles") return true;
+      // Users/Depts/EscMatrix: editable only when the row is within their own plant.
+      if (tabKey === "users") return scopedUsers.some(u => u.id === rowId);
+      if (tabKey === "depts") return scopedDepts.some(d => d.id === rowId);
+      if (tabKey === "escmatrix") return scopedEscMatrix.some(t => t.id === rowId);
+      return false;
+    }
     if (!initialIds.current || !initialIds.current[tabKey]) return false;
     return !initialIds.current[tabKey].has(rowId);
   };
 
-  const openAdd = t => { setModal({ type: t, mode: "add" }); setForm({}); setMcSaveStatus(null); setPlantSaveStatus(null); setDeptSaveStatus(null); };
+  const openAdd = t => {
+    // Admin-Access (plant-scoped) can add Plants, Users, Depts, Roles, Esc Matrix — never Machines/Presets/Team.
+    if (isAdminAccessOnly && !["plants", "users", "depts", "roles", "escmatrix"].includes(t)) return;
+    setModal({ type: t, mode: "add" });
+    setForm(isAdminAccessOnly && (t === "users" || t === "depts") ? { plant: user.plant } : {});
+    setMcSaveStatus(null); setPlantSaveStatus(null); setDeptSaveStatus(null);
+  };
   const openEdit = (t, d) => { setModal({ type: t, mode: "edit" }); setForm({ ...d }); setMcSaveStatus(null); setPlantSaveStatus(null); setDeptSaveStatus(null); };
   const close = () => { setModal(null); setForm({}); setMcSaveStatus(null); setPlantSaveStatus(null); setDeptSaveStatus(null); };
   useEscClose(close);
   const saveUser = () => {
     if (!form.name || !form.role || !form.plant) return;
     if (modal.mode !== "edit" && !isGuestRole(form.role) && (!form.username || !form.password)) return;
+    // Admin-Access is plant-scoped: never let them move a user in/out of their own plant.
+    if (isAdminAccessOnly && form.plant !== user.plant) return;
     const { _showPw, ...cleanForm } = form;
     const pMap = {}; plants.forEach(p => { pMap[p.name] = p.id; });
     const dMap = {}; depts.forEach(d => { dMap[d.name] = d.id; });
@@ -5245,7 +5302,10 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
     };
     if (modal.mode === "edit") { setUsers(p => p.map(x => x.id === u.id ? u : x)); apiUpdate("users", u.id, u); } else { setUsers(p => [...p, u]); apiCreate("users", u); } close();
   };
-  const TABS = [["users", "👥 Users"], ["plants", "🏭 Plants"], ["depts", "🗂 Depts"], ["machines", "⚙ Machines"], ["roles", "🎭 Roles"], ["org", "🌳 Org"], ["team", "🧑‍🤝‍🧑 Team"], ["escmatrix", "🚨 Escalation"], ["presets", "🎙 Presets"]];
+  const ALL_TABS = [["users", "👥 Users"], ["plants", "🏭 Plants"], ["depts", "🗂 Depts"], ["machines", "⚙ Machines"], ["roles", "🎭 Roles"], ["org", "🌳 Org"], ["team", "🧑‍🤝‍🧑 Team"], ["escmatrix", "🚨 Escalation"], ["presets", "🎙 Presets"]];
+  // Admin-Access (plant-scoped) tier only sees the tabs named in their spec:
+  // Actions/Users/Depts/Role/Org/EscMatrix of their own plant, plus Plants (to add new ones).
+  const TABS = isAdminAccessOnly ? ALL_TABS.filter(([id]) => ["users", "plants", "depts", "roles", "org", "escmatrix"].includes(id)) : ALL_TABS;
 
   const BULK_ENDPOINTS = {
     "Users": "/api/users/bulk",
@@ -5321,14 +5381,18 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
     );
   }
 
+  // Org chart is auto-generated purely from users' role + superior fields —
+  // never manually edited. Admin-Access (plant-scoped) users only get their
+  // own plant's slice; Master/true-Admin get the full org.
+  const orgUsers = scopedUsers;
   // True roots: users with no superior at all.
-  const rootlessUsers = users.filter(u => !u.superior);
+  const rootlessUsers = orgUsers.filter(u => !u.superior);
   // Orphans: users whose stated superior doesn't match any real user in the DB
   // (e.g. "Admin", the built-in owner account, which isn't itself a row in `users`).
   // Group these by the missing-superior label so they render as ONE tree instead
   // of N disconnected flat roots.
   const missingSuperiorLabels = Array.from(new Set(
-    users.filter(u => u.superior && !users.find(x => x.name === u.superior)).map(u => u.superior)
+    orgUsers.filter(u => u.superior && !orgUsers.find(x => x.name === u.superior)).map(u => u.superior)
   ));
   // Dedupe: two rootless users sharing an identical name would otherwise
   // collide on the same React key below and one would silently vanish.
@@ -5344,11 +5408,11 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
   const walkOrg = (name, path) => {
     if (path.has(name)) return;
     const nextPath = new Set(path); nextPath.add(name);
-    users.filter(u => u.superior === name).forEach(u => { reachedIds.add(u.id); walkOrg(u.name, nextPath); });
+    orgUsers.filter(u => u.superior === name).forEach(u => { reachedIds.add(u.id); walkOrg(u.name, nextPath); });
   };
   roots.forEach(r => walkOrg(r, new Set()));
-  users.filter(u => roots.includes(u.name)).forEach(u => reachedIds.add(u.id));
-  const unplacedUsers = users.filter(u => !reachedIds.has(u.id));
+  orgUsers.filter(u => roots.includes(u.name)).forEach(u => reachedIds.add(u.id));
+  const unplacedUsers = orgUsers.filter(u => !reachedIds.has(u.id));
 
   /* ── Section header with Save button ── */
   const SectionHeader = ({ title, sub, onSave, addLabel, onAdd }) => (
@@ -5367,7 +5431,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
 
   return (
     <div className="fade-in">
-      <PageHeader title="Master Setup" sub="Admin only — manage organisation structure" />
+      <PageHeader title="Master Setup" sub={isAdminAccessOnly ? `Admin Access — ${user?.plant || "your plant"} (add/edit scoped to your plant)` : "Admin only — manage organisation structure"} />
 
       {/* Scrollable tab bar */}
       <div style={{ borderBottom: `2px solid ${T.border}`, marginBottom: 20, overflowX: "auto", display: "flex", gap: 0, WebkitOverflowScrolling: "touch" }}>
@@ -5383,58 +5447,93 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
       {tab === "users" && <>
         <SectionHeader
           title="Users"
-          sub="All system users and their login credentials"
-          onAdd={() => openAdd("users")}
-          onSave={() => saveToAPI("Users", users)}
+          sub={isAdminAccessOnly ? "Users at your plant" : "All system users and their login credentials"}
+          onAdd={(canManageGlobal || isAdminAccessOnly) ? () => openAdd("users") : null}
+          onSave={(canManageGlobal || isAdminAccessOnly) ? () => saveToAPI("Users", users) : null}
         />
-        {/* Mobile card list */}
-        <div style={{ display: "none" }} className="master-mobile-cards">
-          {users.map(u => (
-            <div key={u.id} className="card" style={{ padding: 14, marginBottom: 10 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <Avatar name={u.name} size={38} users={users} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>{u.name}</div>
-                  <div style={{ fontSize: 11, color: T.text2 }}>{u.role} · {u.plant}</div>
+        {(() => {
+          const uPlants = Array.from(new Set(scopedUsers.map(u => u.plant).filter(Boolean))).sort();
+          const uRoles = Array.from(new Set(scopedUsers.map(u => u.role).filter(Boolean))).sort();
+          const uDepts = Array.from(new Set(scopedUsers.map(u => u.dept).filter(Boolean))).sort();
+          const filteredUsers = scopedUsers.filter(u =>
+            (userFilterPlant === "All" || u.plant === userFilterPlant) &&
+            (userFilterRole === "All" || u.role === userFilterRole) &&
+            (userFilterDept === "All" || u.dept === userFilterDept)
+          );
+          return (
+            <>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+                {!isAdminAccessOnly && (
+                  <select value={userFilterPlant} onChange={e => setUserFilterPlant(e.target.value)} style={{ fontSize: 12, padding: "6px 10px" }}>
+                    <option value="All">All Plants</option>
+                    {uPlants.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                )}
+                <select value={userFilterRole} onChange={e => setUserFilterRole(e.target.value)} style={{ fontSize: 12, padding: "6px 10px" }}>
+                  <option value="All">All Roles</option>
+                  {uRoles.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <select value={userFilterDept} onChange={e => setUserFilterDept(e.target.value)} style={{ fontSize: 12, padding: "6px 10px" }}>
+                  <option value="All">All Depts</option>
+                  {uDepts.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+                {(userFilterPlant !== "All" || userFilterRole !== "All" || userFilterDept !== "All") &&
+                  <button className="btn btn-ghost btn-sm" onClick={() => { setUserFilterPlant("All"); setUserFilterRole("All"); setUserFilterDept("All"); }}>Clear filters</button>}
+                <span style={{ fontSize: 11, color: T.text2, alignSelf: "center" }}>{filteredUsers.length} of {scopedUsers.length} users</span>
+              </div>
+              {/* Mobile card list */}
+              <div style={{ display: "none" }} className="master-mobile-cards">
+                {filteredUsers.map(u => (
+                  <div key={u.id} className="card" style={{ padding: 14, marginBottom: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                      <Avatar name={u.name} size={38} users={users} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>{u.name}</div>
+                        <div style={{ fontSize: 11, color: T.text2 }}>{u.role} · {u.plant}</div>
+                      </div>
+                      {canModify("users", u.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("users", u)}>Edit</button>}
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, fontSize: 12 }}>
+                      <div><span style={{ color: T.text2 }}>Dept: </span>{u.dept || "—"}</div>
+                      <div><span style={{ color: T.text2 }}>Superior: </span>{u.superior || "Top"}</div>
+                      <div><span style={{ color: T.text2 }}>Phone: </span>{u.phone || "—"}</div>
+                    </div>
+                    {canModify("users", u.id) && <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
+                      <button className="btn btn-ghost btn-sm" style={{ color: T.red }} onClick={() => { if (window.confirm(`Remove "${u.name}"?`)) { setUsers(p => p.filter(x => x.id !== u.id)); apiRemove("users", u.id); } }}>✕ Remove</button>
+                    </div>}
+                  </div>
+                ))}
+                {filteredUsers.length === 0 && <Empty icon="👥" title="No users" sub={scopedUsers.length === 0 ? "Click + Add to create the first user." : "No users match these filters."} />}
+              </div>
+              {/* Desktop table */}
+              <div className="card master-desktop-table" style={{ padding: 0, overflow: "hidden" }}>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ minWidth: 700 }}><thead><tr><th>User</th><th>Role</th><th>Plant</th><th>Dept</th><th>Superior</th><th>Phone</th><th></th></tr></thead>
+                    <tbody>{filteredUsers.map(u => <tr key={u.id}>
+                      <td><div style={{ display: "flex", alignItems: "center", gap: 10 }}><Avatar name={u.name} size={32} users={users} /><div style={{ fontWeight: 600 }}>{u.name}</div></div></td>
+                      <td><span style={{ padding: "3px 9px", borderRadius: 20, background: T.navy + "15", color: T.navy, fontSize: 11, fontWeight: 600 }}>{u.role}</span></td>
+                      <td style={{ fontSize: 12 }}>{u.plant}</td>
+                      <td style={{ fontSize: 12 }}>{u.dept || "—"}</td>
+                      <td style={{ fontSize: 12, color: T.text2 }}>{u.superior || "—"}</td>
+                      <td style={{ fontSize: 12, color: T.text2 }}>{u.phone || "—"}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        {canModify("users", u.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("users", u)}>Edit</button>}
+                        {canModify("users", u.id) && <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove "${u.name}" from the system?`)) { setUsers(p => p.filter(x => x.id !== u.id)); apiRemove("users", u.id); } }}>✕</button>}
+                      </td>
+                    </tr>)}
+                    {filteredUsers.length === 0 && <tr><td colSpan={7} style={{ textAlign: "center", padding: 24, color: T.text2, fontSize: 12 }}>No users match these filters.</td></tr>}
+                    </tbody>
+                  </table>
                 </div>
-                {canModify("users", u.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("users", u)}>Edit</button>}
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, fontSize: 12 }}>
-                <div><span style={{ color: T.text2 }}>Dept: </span>{u.dept || "—"}</div>
-                <div><span style={{ color: T.text2 }}>Superior: </span>{u.superior || "Top"}</div>
-                <div><span style={{ color: T.text2 }}>Phone: </span>{u.phone || "—"}</div>
-              </div>
-              {canModify("users", u.id) && <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
-                <button className="btn btn-ghost btn-sm" style={{ color: T.red }} onClick={() => { if (window.confirm(`Remove "${u.name}"?`)) { setUsers(p => p.filter(x => x.id !== u.id)); apiRemove("users", u.id); } }}>✕ Remove</button>
-              </div>}
-            </div>
-          ))}
-          {users.length === 0 && <Empty icon="👥" title="No users" sub="Click + Add to create the first user." />}
-        </div>
-        {/* Desktop table */}
-        <div className="card master-desktop-table" style={{ padding: 0, overflow: "hidden" }}>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ minWidth: 700 }}><thead><tr><th>User</th><th>Role</th><th>Plant</th><th>Dept</th><th>Superior</th><th>Phone</th><th></th></tr></thead>
-              <tbody>{users.map(u => <tr key={u.id}>
-                <td><div style={{ display: "flex", alignItems: "center", gap: 10 }}><Avatar name={u.name} size={32} users={users} /><div style={{ fontWeight: 600 }}>{u.name}</div></div></td>
-                <td><span style={{ padding: "3px 9px", borderRadius: 20, background: T.navy + "15", color: T.navy, fontSize: 11, fontWeight: 600 }}>{u.role}</span></td>
-                <td style={{ fontSize: 12 }}>{u.plant}</td>
-                <td style={{ fontSize: 12 }}>{u.dept || "—"}</td>
-                <td style={{ fontSize: 12, color: T.text2 }}>{u.superior || "—"}</td>
-                <td style={{ fontSize: 12, color: T.text2 }}>{u.phone || "—"}</td>
-                <td style={{ whiteSpace: "nowrap" }}>
-                  {canModify("users", u.id) && <button className="btn btn-ghost btn-sm" onClick={() => openEdit("users", u)}>Edit</button>}
-                  {canModify("users", u.id) && <button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove "${u.name}" from the system?`)) { setUsers(p => p.filter(x => x.id !== u.id)); apiRemove("users", u.id); } }}>✕</button>}
-                </td>
-              </tr>)}</tbody>
-            </table>
-          </div>
-        </div>
+            </>
+          );
+        })()}
       </>}
 
       {/* ── PLANTS ── */}
       {tab === "plants" && <>
-        <SectionHeader title="Plants" sub="Manufacturing plant locations" onAdd={() => openAdd("plants")} onSave={() => saveToAPI("Plants", plants)} />
+        <SectionHeader title="Plants" sub="Manufacturing plant locations" onAdd={canAddNewPlants ? () => openAdd("plants") : null} onSave={(isAdmin || isMaster) ? () => saveToAPI("Plants", plants) : null} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 14 }}>
           {plants.map(p => <div key={p.id} className="card" style={{ padding: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>🏭</span>{canModify("plants", p.id) && <div><button className="btn btn-ghost btn-sm" onClick={() => openEdit("plants", p)}>Edit</button><button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove plant "${p.name}"?`)) { setPlants(prev => prev.filter(x => x.id !== p.id)); apiRemove("plants", p.id); } }}>✕</button></div>}</div>
@@ -5448,15 +5547,15 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
 
       {/* ── DEPARTMENTS ── */}
       {tab === "depts" && <>
-        <SectionHeader title="Departments" sub="Sections within each plant" onAdd={() => openAdd("depts")} onSave={() => saveToAPI("Departments", depts)} />
+        <SectionHeader title="Departments" sub={isAdminAccessOnly ? "Departments at your plant" : "Sections within each plant"} onAdd={(canManageGlobal || isAdminAccessOnly) ? () => openAdd("depts") : null} onSave={(canManageGlobal || isAdminAccessOnly) ? () => saveToAPI("Departments", depts) : null} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(190px,1fr))", gap: 14 }}>
-          {depts.map(d => <div key={d.id} className="card" style={{ padding: 18 }}>
+          {scopedDepts.map(d => <div key={d.id} className="card" style={{ padding: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>{d.icon || "🗂"}</span>{canModify("depts", d.id) && <div><button className="btn btn-ghost btn-sm" onClick={() => openEdit("depts", d)}>Edit</button><button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove department "${d.name}"?`)) { setDepts(prev => prev.filter(x => x.id !== d.id)); apiRemove("departments", d.id); } }}>✕</button></div>}</div>
             <div style={{ fontWeight: 700, fontSize: 14 }}>{d.name}</div>
             <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>HOD: {d.head || "—"}</div>
             {d.plant && <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>Plant: {d.plant}</div>}
           </div>)}
-          {depts.length === 0 && <Empty icon="🗂" title="No departments" sub="Click + Add to create a department." />}
+          {scopedDepts.length === 0 && <Empty icon="🗂" title="No departments" sub="Click + Add to create a department." />}
         </div>
       </>}
 
@@ -5507,7 +5606,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
 
       {/* ── ROLES ── */}
       {tab === "roles" && <>
-        <SectionHeader title="Roles" sub="System roles and access levels" onAdd={() => openAdd("roles")} onSave={() => saveToAPI("Roles", roles)} />
+        <SectionHeader title="Roles" sub="System roles and access levels" onAdd={(canManageGlobal || isAdminAccessOnly) ? () => openAdd("roles") : null} onSave={(canManageGlobal || isAdminAccessOnly) ? () => saveToAPI("Roles", roles) : null} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 14 }}>
           {roles.map(r => <div key={r.id} className="card" style={{ padding: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
@@ -5527,7 +5626,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
       {/* ── ORG CHART ── */}
       {tab === "org" && <div className="card" style={{ padding: 24, overflowX: "auto", overflowY: "auto", maxHeight: "calc(100vh - 160px)" }}>
         <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 32, alignItems: "center" }}>
-          {roots.map(name => <div key={name} style={{ width: "100%", display: "flex", justifyContent: "center" }}><OrgNode name={name} allUsers={users} depth={0} /></div>)}
+          {roots.map(name => <div key={name} style={{ width: "100%", display: "flex", justifyContent: "center" }}><OrgNode name={name} allUsers={orgUsers} depth={0} /></div>)}
           {roots.length === 0 && <Empty icon="🌳" title="No org structure" sub="Add users with superior relationships to build the organogram." />}
         </div>
         {unplacedUsers.length > 0 && (
@@ -5553,7 +5652,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
       {tab === "team" && <TeamPage users={users} actions={actions} escMatrix={escMatrix} plants={plants} depts={depts} user={user} isAdmin={isAdmin} setActions={setActions} />}
 
       {/* ── ESCALATION MATRIX ── */}
-      {tab === "escmatrix" && <EscMatrixTab escMatrix={escMatrix} setEscMatrix={setEscMatrix} onSave={hasElevatedAccess(user) ? () => saveToAPI("EscalationMatrix", escMatrix || []) : null} isAdmin={isAdmin} canModify={canModify} users={users} roles={roles} />}
+      {tab === "escmatrix" && <EscMatrixTab escMatrix={scopedEscMatrix} setEscMatrix={setEscMatrix} onSave={(canManageGlobal || isAdminAccessOnly) ? () => saveToAPI("EscalationMatrix", escMatrix || []) : null} isAdmin={isAdmin} canModify={canModify} users={scopedUsers} roles={roles} />}
 
       {/* ── MEETING PRESETS ── */}
       {tab === "presets" && <div className="card" style={{ padding: 20 }}>
@@ -5643,8 +5742,14 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
               )}
               {isAdmin && (
                 <div style={{ gridColumn: "1/-1", display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                  <input type="checkbox" id="adminAccess" checked={form.adminAccess === true || form.adminAccess === "true"} onChange={e => setForm(f => ({ ...f, adminAccess: e.target.checked }))} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                  <label htmlFor="adminAccess" style={{ fontSize: 13, fontWeight: 500, color: T.navy, cursor: "pointer" }}>Grant Admin Access (plant-scoped — add Plants; add/edit own plant's Users/Depts/Roles/Esc Matrix, and edit Actions in that plant)</label>
+                </div>
+              )}
+              {isAdmin && (
+                <div style={{ gridColumn: "1/-1", display: "flex", alignItems: "center", gap: 8 }}>
                   <input type="checkbox" id="masterAccess" checked={form.masterAccess === true || form.masterAccess === "true"} onChange={e => setForm(f => ({ ...f, masterAccess: e.target.checked }))} style={{ width: 16, height: 16, cursor: "pointer" }} />
-                  <label htmlFor="masterAccess" style={{ fontSize: 13, fontWeight: 500, color: T.navy, cursor: "pointer" }}>Grant Master Access (single-plant control)</label>
+                  <label htmlFor="masterAccess" style={{ fontSize: 13, fontWeight: 500, color: T.navy, cursor: "pointer" }}>Grant Master Access (global — add/edit Depts, Users, Roles, Esc Matrix across all plants)</label>
                 </div>
               )}
               <div style={{ gridColumn: "1/-1", display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" onClick={saveUser}>Save</button></div>
@@ -5701,7 +5806,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                   ✓ Saved successfully.
                 </div>
               )}
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" disabled={deptSaveStatus === "saving"} onClick={async () => { if (!form.name) return; setDeptSaveStatus("saving"); try { const pMap = {}; plants.forEach(p => { pMap[p.name] = p.id; }); const d = { ...form, id: form.id || "D" + String(Date.now()).slice(-6), icon: form.icon || "🔹", plantId: pMap[form.plant] || form.plantId || null }; const updated = modal.mode === "edit" ? depts.map(x => x.id === d.id ? d : x) : [...depts, d]; setDepts(updated); await saveToAPI("Departments", updated); setDeptSaveStatus("ok"); setTimeout(() => { setDeptSaveStatus(null); close(); }, 800); } catch (err) { setDeptSaveStatus(err.message || "Unknown error"); } }}>{deptSaveStatus === "saving" ? "Saving…" : "Save"}</button></div>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={close}>Cancel</button><button className="btn btn-navy" disabled={deptSaveStatus === "saving"} onClick={async () => { if (!form.name) return; if (isAdminAccessOnly && form.plant && form.plant !== user.plant) return; setDeptSaveStatus("saving"); try { const pMap = {}; plants.forEach(p => { pMap[p.name] = p.id; }); const d = { ...form, id: form.id || "D" + String(Date.now()).slice(-6), icon: form.icon || "🔹", plantId: pMap[form.plant] || form.plantId || null }; const updated = modal.mode === "edit" ? depts.map(x => x.id === d.id ? d : x) : [...depts, d]; setDepts(updated); await saveToAPI("Departments", updated); setDeptSaveStatus("ok"); setTimeout(() => { setDeptSaveStatus(null); close(); }, 800); } catch (err) { setDeptSaveStatus(err.message || "Unknown error"); } }}>{deptSaveStatus === "saving" ? "Saving…" : "Save"}</button></div>
             </div>}
             {modal.type === "machines" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Machine Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Furnace Line 1" /></div>
@@ -6078,7 +6183,7 @@ export default function App() {
         {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} machines={machines} />}
         {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} />}
         {page === 4 && <EscalationsPage actions={actions} setActions={setActions} audit={audit} users={users} escMatrix={escMatrix} plants={plants} depts={depts} user={user} />}
-        {page === 99 && hasElevatedAccess(user) && <MasterPage user={user} plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets} machines={machines} setMachines={setMachines} refreshMaster={fetchData} roles={roles} setRoles={setRoles} actions={actions} setActions={setActions} />}
+        {page === 99 && canAccessMasterPage(user) && <MasterPage user={user} plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets} machines={machines} setMachines={setMachines} refreshMaster={fetchData} roles={roles} setRoles={setRoles} actions={actions} setActions={setActions} />}
       </Shell>
       {showSupport && <SupportModal user={user} onClose={() => setShowSupport(false)} />}
       {showProfile && <UserProfilePanel user={user} users={users} actions={actions} onClose={() => setShowProfile(false)} />}
