@@ -179,6 +179,17 @@ def migrate_schema(conn):
         except Exception as e:
             print(f"[migrate] actions column migration skipped: {e}")
 
+    # Users table — master_access column
+    if "users" in existing_tables:
+        try:
+            user_cols = {c["name"] for c in inspector.get_columns("users")}
+            if "master_access" not in user_cols:
+                conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN master_access BOOLEAN DEFAULT FALSE"
+                ))
+        except Exception as e:
+            print(f"[migrate] users master_access migration skipped: {e}")
+
 
 app = FastAPI(
     title="MCS Backend API",

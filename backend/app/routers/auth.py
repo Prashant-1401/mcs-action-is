@@ -32,6 +32,7 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
         "phone": user.phone,
         "email": user.email,
         "superior": user.superior,
+        "masterAccess": getattr(user, 'master_access', False),
     }
     token = create_token({"sub": user.username, "role": user.role, "id": user.id})
     return {"token": token, "user": user_data}

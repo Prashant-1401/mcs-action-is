@@ -268,10 +268,6 @@ INSERT INTO departments (id, name, plant_id, head, icon) VALUES ('D3', 'General'
 INSERT INTO departments (id, name, plant_id, head, icon) VALUES ('D4', 'Overall', (SELECT id FROM plants WHERE name = 'Adroit' LIMIT 1), 'Saurabh Sangla', NULL);
 
 -- ── Users ──────────────────────────────────────────────────────
-INSERT INTO users (id, name, username, password, role, plant_id, dept_id, superior, phone, email, initials, color) VALUES ('U01', 'Prashant Singh', 'Prash', '1401.0', 'MD', (SELECT id FROM plants WHERE name = 'Signet' LIMIT 1), (SELECT id FROM departments WHERE name = 'PE' LIMIT 1), 'CMD', '7049091928.0', 'singhprashant7972@gmail.com', 'PS', '#7C80B0');
-INSERT INTO users (id, name, username, password, role, plant_id, dept_id, superior, phone, email, initials, color) VALUES ('U02', 'Manish Manjhi', 'Manish', '1975.0', 'HOD', (SELECT id FROM plants WHERE name = 'Signet' LIMIT 1), (SELECT id FROM departments WHERE name = 'ALL' LIMIT 1), 'MD', NULL, 'manish.manjhi@groupsignet.com', 'MM', '#7C80B0');
-INSERT INTO users (id, name, username, password, role, plant_id, dept_id, superior, phone, email, initials, color) VALUES ('U03', 'Aarti Hr', 'Aarti@Adroit', '145236789.0', 'HOD', (SELECT id FROM plants WHERE name = 'Both' LIMIT 1), (SELECT id FROM departments WHERE name = 'General' LIMIT 1), NULL, NULL, 'Hr@Adroit.Com', 'AH', '#7C80B0');
-INSERT INTO users (id, name, username, password, role, plant_id, dept_id, superior, phone, email, initials, color) VALUES ('U04', 'Mohit Patsariya', 'mohit_pmo', '8839738487.0', 'Supervisor', (SELECT id FROM plants WHERE name = 'Adroit' LIMIT 1), (SELECT id FROM departments WHERE name = 'Overall' LIMIT 1), 'Manish Manjhi', '8839738487.0', 'mohit.patsariya@adroitindustries.com', 'MP', '#7C80B0');
 
 -- ── Machines ───────────────────────────────────────────────────
 INSERT INTO machines (id, name, plant_id, dept_id, type, asset_no) VALUES ('MC01', 'ALL', (SELECT id FROM plants WHERE name = 'Signet' LIMIT 1), (SELECT id FROM departments WHERE name = 'PE' LIMIT 1), 'Manual', 'M/c-1');
