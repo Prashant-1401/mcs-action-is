@@ -208,3 +208,65 @@ def share_insights_email(to_emails: List[str], subject: str, content: str, plant
         html_body += f"<p><b>Plant:</b> {safe_plant}</p>"
     html_body += f"<pre style='white-space:pre-wrap;font-family:sans-serif'>{safe_content}</pre>"
     return send_email(to_emails, subject, html_body)
+
+
+def send_completion_request_email(to_email: str, action_sn: str, action_text: str,
+                                   responsible: str, allocator: str) -> bool:
+    """Notify allocator that responsible user has requested completion."""
+    safe_sn = html_escape(str(action_sn))
+    safe_text = html_escape(str(action_text))
+    safe_resp = html_escape(str(responsible))
+    subject = f"MCS — Action {safe_sn} Pending Your Confirmation"
+    body = (
+        f"<h2>Action Completion Request</h2>"
+        f"<p><b>{safe_resp}</b> has marked action <b>{safe_sn}</b> as complete and is requesting your confirmation.</p>"
+        f"<table style='width:100%;border-collapse:collapse;margin:16px 0;'>"
+        f"<tr><td style='padding:8px;font-weight:700;color:#555;'>Action</td><td style='padding:8px;'>{safe_sn}</td></tr>"
+        f"<tr><td style='padding:8px;font-weight:700;color:#555;'>Description</td><td style='padding:8px;'>{safe_text}</td></tr>"
+        f"<tr><td style='padding:8px;font-weight:700;color:#555;'>Requested By</td><td style='padding:8px;'>{safe_resp}</td></tr>"
+        f"</table>"
+        f"<p>Please review and confirm or reject this completion.</p>"
+        f"<p><a href='{settings.frontend_url}' style='display:inline-block;background:#1a237e;color:#fff;padding:12px 24px;text-decoration:none;border-radius:4px;'>Review Action</a></p>"
+    )
+    return send_email([to_email], subject, body)
+
+
+def send_completion_confirmed_email(to_email: str, action_sn: str, action_text: str,
+                                     confirmed_by: str) -> bool:
+    """Notify responsible user that completion was confirmed."""
+    safe_sn = html_escape(str(action_sn))
+    safe_text = html_escape(str(action_text))
+    safe_by = html_escape(str(confirmed_by))
+    subject = f"MCS — Action {safe_sn} Completed"
+    body = (
+        f"<h2>Action Completed</h2>"
+        f"<p>Your action <b>{safe_sn}</b> has been confirmed as complete by <b>{safe_by}</b>.</p>"
+        f"<table style='width:100%;border-collapse:collapse;margin:16px 0;'>"
+        f"<tr><td style='padding:8px;font-weight:700;color:#555;'>Action</td><td style='padding:8px;'>{safe_sn}</td></tr>"
+        f"<tr><td style='padding:8px;font-weight:700;color:#555;'>Description</td><td style='padding:8px;'>{safe_text}</td></tr>"
+        f"<tr><td style='padding:8px;font-weight:700;color:#555;'>Confirmed By</td><td style='padding:8px;'>{safe_by}</td></tr>"
+        f"</table>"
+        f"<p><a href='{settings.frontend_url}' style='display:inline-block;background:#27AE60;color:#fff;padding:12px 24px;text-decoration:none;border-radius:4px;'>Open MCS</a></p>"
+    )
+    return send_email([to_email], subject, body)
+
+
+def send_completion_rejected_email(to_email: str, action_sn: str, action_text: str,
+                                    rejected_by: str) -> bool:
+    """Notify responsible user that completion was rejected."""
+    safe_sn = html_escape(str(action_sn))
+    safe_text = html_escape(str(action_text))
+    safe_by = html_escape(str(rejected_by))
+    subject = f"MCS — Action {safe_sn} Reopened"
+    body = (
+        f"<h2>Action Reopened</h2>"
+        f"<p>Your completion request for action <b>{safe_sn}</b> has been rejected by <b>{safe_by}</b>.</p>"
+        f"<p>The action has been reopened and is now <b>IN PROCESS</b> again.</p>"
+        f"<table style='width:100%;border-collapse:collapse;margin:16px 0;'>"
+        f"<tr><td style='padding:8px;font-weight:700;color:#555;'>Action</td><td style='padding:8px;'>{safe_sn}</td></tr>"
+        f"<tr><td style='padding:8px;font-weight:700;color:#555;'>Description</td><td style='padding:8px;'>{safe_text}</td></tr>"
+        f"<tr><td style='padding:8px;font-weight:700;color:#555;'>Rejected By</td><td style='padding:8px;'>{safe_by}</td></tr>"
+        f"</table>"
+        f"<p><a href='{settings.frontend_url}' style='display:inline-block;background:#E74C3C;color:#fff;padding:12px 24px;text-decoration:none;border-radius:4px;'>Open MCS</a></p>"
+    )
+    return send_email([to_email], subject, body)
