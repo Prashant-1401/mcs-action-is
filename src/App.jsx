@@ -1241,7 +1241,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   const userName = (user?.name || "").trim().toLowerCase();
   const subNamesLower = subNames.map(n => n.trim().toLowerCase());
   const scopedActions = isAdmin
-    ? (user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant || !a.plant))
+    ? actions
     : actions.filter(a => {
     // Non-admin: scope by plant first, then only show actions where user is responsible
     if (user?.plant !== "All" && a.plant && a.plant !== user?.plant) return false;
@@ -3642,7 +3642,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const scopedNames = user ? getSubTree(user.name, users) : [];
   const userNameLower = (user?.name || "").trim().toLowerCase();
   const scoped = isAdmin
-    ? (user?.plant === "All" ? actions : actions.filter(a => a.plant === user?.plant || !a.plant))
+    ? actions
     : actions.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower].filter(Boolean)));
 
   const toggleFilter = (key, val) => {
