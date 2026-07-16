@@ -12,3 +12,4 @@ backend/.pytest_cache/
 *.json
 !package.json
 !package-lock.json
+nohup.out
