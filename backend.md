@@ -160,10 +160,7 @@ def migrate_schema(conn):
     # 1. Add missing columns to escalation_matrix
     #    from_user, target_user, from_role, target_role, priorities
 
-    # 2. Add missing columns to users
-    #    master_access BOOLEAN DEFAULT FALSE
-
-    # 3. Add missing columns to meetings
+    # 2. Add missing columns to meetings
     #    guidelines JSONB DEFAULT '[]'
 
     # 4. Backfill NULL priorities in escalation_matrix
@@ -296,7 +293,7 @@ CREATE VIEW v_audit AS SELECT ...   -- Audit with action details
 | name | VARCHAR(50) | UNIQUE, NOT NULL |
 | level | INTEGER | NOT NULL, CHECK 1-10 |
 
-**Seed data:** Guest User(1), Operator(2), Supervisor(3), Shift Engineer(4), HOD(5), Plant Head(6), MD(7), Admin(8)
+**Seed data:** Guest User(1), Supervisor(3), Shift Engineer(4), HOD(5), Plant Head(6), MD(7), Admin(8)
 
 #### 4. `users` — System users
 
@@ -315,7 +312,6 @@ CREATE VIEW v_audit AS SELECT ...   -- Audit with action details
 | initials | VARCHAR(10) | |
 | color | VARCHAR(20) | Default: #7C80B0 |
 | is_active | BOOLEAN | Default: TRUE |
-| master_access | BOOLEAN | Default: FALSE |
 
 #### 5. `machines` — Industrial machines
 
@@ -883,11 +879,6 @@ def migrate_schema(conn):
         if "from_user" not in columns:
             conn.execute(text("ALTER TABLE escalation_matrix ADD COLUMN from_user VARCHAR(100)"))
         # ... more columns
-
-    if "users" in existing_tables:
-        user_cols = {c["name"] for c in inspector.get_columns("users")}
-        if "master_access" not in user_cols:
-            conn.execute(text("ALTER TABLE users ADD COLUMN master_access BOOLEAN DEFAULT FALSE"))
 
     if "meetings" in existing_tables:
         mtg_cols = {c["name"] for c in inspector.get_columns("meetings")}

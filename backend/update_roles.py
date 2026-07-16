@@ -107,8 +107,8 @@ def main():
         initials = "".join(w[0].upper() for w in name.replace(".", "").split() if w[0].isalpha())[:2]
 
         cur.execute("""
-            INSERT INTO users (id, name, username, password, role, plant_id, dept_id, superior, phone, email, initials, is_active, master_access)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true, false)
+            INSERT INTO users (id, name, username, password, role, plant_id, dept_id, superior, phone, email, initials, is_active)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true)
         """, (uid, name, username, password, role or None, plant_id, dept_id, superior or None, phone or None, email or None, initials))
         inserted += 1
         print(f"  INSERTED  {name} | role={role} | dept={dept_name} | superior={superior}")

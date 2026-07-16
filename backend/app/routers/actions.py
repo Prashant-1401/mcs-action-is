@@ -372,7 +372,7 @@ async def update_action(action_id: str, data: ActionUpdate, bg: BackgroundTasks,
 
         # Rule 4: Block direct COMPLETED from non-PENDING states (except admin/master)
         elif new_status == "COMPLETED" and old_status != "PENDING CONFIRM":
-            if current_user and current_user.get("role") not in ("Admin",) and not current_user.get("masterAccess"):
+            if current_user and current_user.get("role") not in ("Admin",):
                 raise HTTPException(status_code=403, detail="Actions must go through PENDING CONFIRM before completion")
     # --- End status enforcement ---
 

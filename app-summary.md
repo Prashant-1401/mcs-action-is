@@ -216,12 +216,11 @@
 
 ## 7. Business Logic
 
-### 7.1 Role Hierarchy (8 levels)
+### 7.1 Role Hierarchy (7 levels)
 
 | Level | Role | Permissions |
 |-------|------|-------------|
 | 1 | Guest User | View only |
-| 2 | Operator | Basic action management |
 | 3 | Supervisor | Action assignment |
 | 4 | Shift Engineer | Department actions |
 | 5 | HOD | Edit meetings, manage department |

@@ -79,7 +79,6 @@ class UserCreate(BaseModel):
     email: Optional[str] = None
     initials: Optional[str] = None
     color: Optional[str] = "#7C80B0"
-    master_access: Optional[bool] = False
 
 
 class UserUpdate(BaseModel):
@@ -95,7 +94,6 @@ class UserUpdate(BaseModel):
     email: Optional[str] = None
     initials: Optional[str] = None
     color: Optional[str] = None
-    master_access: Optional[bool] = None
 
 
 class MachineCreate(BaseModel):

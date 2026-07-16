@@ -73,7 +73,6 @@ def migrate_schema(conn):
 
                 # Level 1 (24h): each user escalates to their direct superior
                 escalation_chains = [
-                    ("Operator", "Supervisor"),
                     ("Supervisor", "HOD"),
                     ("Shift Engineer", "HOD"),
                     ("HOD", "Plant Head"),
@@ -101,7 +100,6 @@ def migrate_schema(conn):
 
                 # Level 2 (72h): skip one level up
                 escalation_chains_l2 = [
-                    ("Operator", "HOD"),
                     ("Supervisor", "Plant Head"),
                     ("Shift Engineer", "Plant Head"),
                     ("HOD", "MD"),
@@ -128,7 +126,6 @@ def migrate_schema(conn):
 
                 # Level 3 (168h): two levels up
                 escalation_chains_l3 = [
-                    ("Operator", "Plant Head"),
                     ("Supervisor", "MD"),
                     ("Shift Engineer", "MD"),
                 ]
@@ -159,17 +156,6 @@ def migrate_schema(conn):
                     ), d)
         except Exception as e:
             print(f"[migrate] escalation_matrix migration skipped: {e}")
-
-    # Users table columns
-    if "users" in existing_tables:
-        try:
-            user_cols = {c["name"] for c in inspector.get_columns("users")}
-            if "master_access" not in user_cols:
-                conn.execute(text(
-                    "ALTER TABLE users ADD COLUMN master_access BOOLEAN DEFAULT FALSE"
-                ))
-        except Exception as e:
-            print(f"[migrate] users column migration skipped: {e}")
 
     # Meetings table columns
     if "meetings" in existing_tables:

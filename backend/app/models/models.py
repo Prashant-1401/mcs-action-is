@@ -55,7 +55,6 @@ class User(Base):
     initials = Column(String(10))
     color = Column(String(20), default="#7C80B0")
     is_active = Column(Boolean, default=True)
-    master_access = Column(Boolean, default=False)
     plant = relationship("Plant", back_populates="users")
     dept = relationship("Department", back_populates="users")
 

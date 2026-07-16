@@ -249,7 +249,6 @@ CREATE INDEX idx_audit_ts       ON audit(ts);
 
 -- ── Roles (from App.jsx defaultRoles) ──────────────────────────
 INSERT INTO roles (id, name, level) VALUES ('R1', 'Guest User', 1);
-INSERT INTO roles (id, name, level) VALUES ('R2', 'Operator', 2);
 INSERT INTO roles (id, name, level) VALUES ('R3', 'Supervisor', 3);
 INSERT INTO roles (id, name, level) VALUES ('R4', 'Shift Engineer', 4);
 INSERT INTO roles (id, name, level) VALUES ('R5', 'HOD', 5);
@@ -312,11 +311,9 @@ INSERT INTO meeting_presets (type, attendees, instructions) VALUES ('Safety Revi
 INSERT INTO meetings (id, name, type, plant_id, date, time, status, attendees, duration, dur, action_count, notes, facilitator, recurring, recurrence, project_id, completed_sessions) VALUES ('M1780483326652', 'testing', 'testing', (SELECT id FROM plants WHERE name = 'All' LIMIT 1), NULL::date, '10:00:00'::time, NULL, $json$["\""]$json$, NULL, 60, 0, NULL, 'Prashant Singh', FALSE, 'daily', (SELECT id FROM projects WHERE name = 'Testing' LIMIT 1), $json$[]$json$);
 
 -- ── Escalation matrix ──────────────────────────────────────────
-INSERT INTO escalation_matrix (id, level, label, from_role, target_role, overdue_days, overdue_hrs, target, notify_method, applicable_to, color, active, description, priorities, superiors) VALUES ('E6a0d7784', 1, 'Level 1 — Supervisor', 'Operator', 'Supervisor', 1, 24, 'Supervisor', 'In-App + Email', 'All', '#E69903', TRUE, 'Operator overdue → Supervisor', '["CRITICAL","WARNING","NORMAL"]'::jsonb, '[]'::jsonb);
 INSERT INTO escalation_matrix (id, level, label, from_role, target_role, overdue_days, overdue_hrs, target, notify_method, applicable_to, color, active, description, priorities, superiors) VALUES ('Eae621c7f', 2, 'Level 2 — HOD', 'Supervisor', 'HOD', 3, 72, 'HOD', 'In-App + Email', 'All', '#E67E22', TRUE, 'Supervisor overdue → HOD', '["CRITICAL","WARNING"]'::jsonb, '[]'::jsonb);
 
 -- ── Escalation priorities (normalized from EscalationMatrix.priorities JSON) ──
-INSERT INTO escalation_priorities (escalation_id, priority) VALUES ('E6a0d7784', 'CRITICAL'::action_priority) ON CONFLICT DO NOTHING;
 INSERT INTO escalation_priorities (escalation_id, priority) VALUES ('Eae621c7f', 'CRITICAL'::action_priority) ON CONFLICT DO NOTHING;
 
 -- ── Actions ────────────────────────────────────────────────────

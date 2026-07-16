@@ -509,7 +509,7 @@ function getPerms(user) {
     canEditMeetings: level >= 5,
     canManageEscalations: level >= 7,
     canCreateProjects: level >= 5,
-    canAccessMaster: level >= 8 || user?.masterAccess,
+    canAccessMaster: level >= 8,
   };
 }
 ```
@@ -517,7 +517,6 @@ function getPerms(user) {
 | Level | Role | Key Permissions |
 |-------|------|-----------------|
 | 1 | Guest User | View only |
-| 2 | Operator | Create actions |
 | 3 | Supervisor | Edit actions, create meetings |
 | 4 | Shift Engineer | Department scope |
 | 5 | HOD | Delete actions, edit meetings, create projects |
