@@ -1324,7 +1324,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
     return null; // no upcoming occurrence found within lookahead
   };
 
-  const upcomingMeetings = (meetings || [])
+  const upcomingMeetings = (isAdmin ? (meetings || []) : (meetings || []).filter(m => user?.plant && user.plant !== "All" ? m.plant === user.plant : true))
     .map(m => {
       const next = getNextOccurrence(m);
       return next ? { ...m, _nextDt: next } : null;
@@ -1874,8 +1874,6 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
   const visibleMeetings = isAdmin ? (meetings || []) : (meetings || []).filter(m => user?.plant && user.plant !== "All" ? m.plant === user.plant : true);
   const visibleProjects = isAdmin ? (projects || []) : (projects || []).filter(p => user?.plant && user.plant !== "All" ? p.plant === user.plant : true);
 
-  const visibleMeetings = isAdmin ? (meetings || []) : (meetings || []).filter(m => user?.plant && user.plant !== "All" ? m.plant === user.plant : true);
-
   if (activeMtg) return <MeetingRoom mtg={activeMtg} plants={plants} depts={depts} users={users} onCommit={rows => { onCommitFinal(rows); }} onCloseMeeting={() => { clearMeetingState && clearMeetingState(); setPage(0); }} onBack={() => setPage(0)} prevActions={actions} relatedActions={actions.filter(a => {
           // Match by specific meeting instance (srcId) when available, else fall back to type match
           const matchesMeeting = activeMtg.id
@@ -1966,7 +1964,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
                     </div>
                   </div>
                 ))}
-              {(allMeetings || []).flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : [])).length === 0 && <div style={{ fontSize: 12, color: T.text2, fontStyle: "italic" }}>No completed meetings</div>}
+              {(visibleMeetings || []).flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : [])).length === 0 && <div style={{ fontSize: 12, color: T.text2, fontStyle: "italic" }}>No completed meetings</div>}
             </div>
           </div>
 
@@ -4221,7 +4219,8 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
   // This ensures actions always appear even if section doesn't match any dept name
   const heatmapRows = visibleDepts.map(d => ({ id: d.id, name: d.name, head: d.head, icon: d.icon || "🏭", fromDept: true }));
 
-  const allSessions = (meetings || []).flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : []).map(s => ({ ...s, type: m.type, plant: m.plant })));
+  const scopedMeetings = isDashAdmin ? (meetings || []) : (meetings || []).filter(m => user?.plant && user.plant !== "All" ? m.plant === user.plant : true);
+  const allSessions = scopedMeetings.flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : []).map(s => ({ ...s, type: m.type, plant: m.plant })));
   const totalMtgMins = allSessions.reduce((s, x) => s + (x.duration || 0), 0);
   // Deduplicate audit for badge (keep highest level per action SN) — scoped to
   // the same action set (fa) the user is allowed to see, not the global audit log.
@@ -4498,7 +4497,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
                 </div>
               ))}
             </div>
-            {meetings.map(m => {
+            {scopedMeetings.map(m => {
               const sessions = m.completedSessions || [];
               const totalMin = sessions.reduce((s, x) => s + (x.duration || 0), 0);
               return (
