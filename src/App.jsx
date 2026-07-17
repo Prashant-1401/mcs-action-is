@@ -4642,7 +4642,7 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
             <button
               onClick={async () => {
                 setSyncingMatrix(true); setMatrixSyncMsg("");
-                try { await apiPost("escalation/sync-matrix-to-sheet", {}); setMatrixSyncMsg("Synced!"); }
+                try { await apiPost("/api/escalation/sync-matrix-to-sheet", {}); setMatrixSyncMsg("Synced!"); }
                 catch (e) { setMatrixSyncMsg("Failed"); }
                 setSyncingMatrix(false);
                 setTimeout(() => setMatrixSyncMsg(""), 3000);
