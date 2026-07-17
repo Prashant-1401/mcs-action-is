@@ -12,6 +12,10 @@ SCOPES = [
 
 SHEET_HEADERS = ["SN", "Text", "Responsible", "Responsible Email", "Responsible Phone", "Due Date", "Status", "Priority", "Plant", "Department", "Created"]
 
+ESCALATION_MATRIX_HEADERS = ["Level", "Label", "From User", "Target User", "From Role", "Target Role", "Overdue Days", "Overdue Hrs", "Notify Method", "Applicable To", "Priorities", "Active", "Description"]
+
+ESCALATED_ACTIONS_HEADERS = ["SN", "Text", "Responsible", "Due Date", "Status", "Priority", "Plant", "Department", "Overdue Hrs", "Escalation Level", "Target User", "Escalation Label"]
+
 
 def _is_configured() -> bool:
     return bool(settings.google_sheets_spreadsheet_id) and (
@@ -40,23 +44,25 @@ def _get_client() -> Optional[gspread.Client]:
         return None
 
 
-def _get_worksheet(client: gspread.Client) -> Optional[gspread.Worksheet]:
+def _get_worksheet(client: gspread.Client, sheet_name: str = None, headers: list = None) -> Optional[gspread.Worksheet]:
+    name = sheet_name or settings.google_sheets_worksheet_name
+    hdrs = headers or SHEET_HEADERS
     try:
         spreadsheet = client.open_by_key(settings.google_sheets_spreadsheet_id)
         try:
-            worksheet = spreadsheet.worksheet(settings.google_sheets_worksheet_name)
+            worksheet = spreadsheet.worksheet(name)
         except gspread.exceptions.WorksheetNotFound:
             worksheet = spreadsheet.add_worksheet(
-                title=settings.google_sheets_worksheet_name,
+                title=name,
                 rows=1000,
-                cols=len(SHEET_HEADERS),
+                cols=len(hdrs),
             )
-            worksheet.update(range_name="A1", values=[SHEET_HEADERS])
-            worksheet.format("A1:K1", {"textFormat": {"bold": True}})
-            print(f"[google-sheets] Created worksheet '{settings.google_sheets_worksheet_name}' with headers")
+            worksheet.update(range_name="A1", values=[hdrs])
+            worksheet.format(f"A1:{chr(64 + len(hdrs))}1", {"textFormat": {"bold": True}})
+            print(f"[google-sheets] Created worksheet '{name}' with headers")
         return worksheet
     except Exception as e:
-        print(f"[google-sheets] Failed to get worksheet: {e}")
+        print(f"[google-sheets] Failed to get worksheet '{name}': {e}")
         return None
 
 
@@ -136,4 +142,94 @@ def sync_all_actions(actions: List[Dict[str, Any]]) -> bool:
         return True
     except Exception as e:
         print(f"[google-sheets] Full sync failed: {e}")
+        return False
+
+
+def _escalation_matrix_to_row(tier: Dict[str, Any]) -> List[str]:
+    priorities = tier.get("priorities", [])
+    if isinstance(priorities, list):
+        priorities = ", ".join(priorities)
+    return [
+        str(tier.get("level", "")),
+        str(tier.get("label", "") or ""),
+        str(tier.get("from_user", "") or ""),
+        str(tier.get("target_user", "") or ""),
+        str(tier.get("from_role", "") or ""),
+        str(tier.get("target_role", "") or ""),
+        str(tier.get("overdue_days", 0)),
+        str(tier.get("overdue_hrs", 0)),
+        str(tier.get("notify_method", "") or ""),
+        str(tier.get("applicable_to", "All") or "All"),
+        str(priorities),
+        str(tier.get("active", True)),
+        str(tier.get("description", "") or ""),
+    ]
+
+
+def sync_escalation_matrix(tiers: List[Dict[str, Any]]) -> bool:
+    if not _is_configured():
+        return False
+    client = _get_client()
+    if not client:
+        return False
+    worksheet = _get_worksheet(client, sheet_name="Escalation Matrix", headers=ESCALATION_MATRIX_HEADERS)
+    if not worksheet:
+        return False
+    try:
+        existing_rows = worksheet.get_all_values()
+        if len(existing_rows) > 1:
+            worksheet.delete_rows(2, len(existing_rows))
+        if not tiers:
+            print("[google-sheets] No escalation tiers to sync")
+            return True
+        rows = [_escalation_matrix_to_row(t) for t in tiers]
+        end_col = chr(64 + len(ESCALATION_MATRIX_HEADERS))
+        worksheet.update(range_name=f"A2:{end_col}{len(rows) + 1}", values=rows)
+        print(f"[google-sheets] Escalation matrix sync completed: {len(rows)} tiers")
+        return True
+    except Exception as e:
+        print(f"[google-sheets] Escalation matrix sync failed: {e}")
+        return False
+
+
+def _escalated_action_to_row(action: Dict[str, Any]) -> List[str]:
+    return [
+        str(action.get("sn", "")),
+        str(action.get("text", "")),
+        str(action.get("responsible", "") or ""),
+        str(action.get("due", "") or ""),
+        str(action.get("status", "")),
+        str(action.get("priority", "")),
+        str(action.get("plant", "") or ""),
+        str(action.get("dept", "") or ""),
+        str(action.get("overdue_hrs", 0)),
+        str(action.get("escalation_level", "")),
+        str(action.get("target_user", "") or ""),
+        str(action.get("escalation_label", "") or ""),
+    ]
+
+
+def sync_escalated_actions(actions: List[Dict[str, Any]]) -> bool:
+    if not _is_configured():
+        return False
+    client = _get_client()
+    if not client:
+        return False
+    worksheet = _get_worksheet(client, sheet_name="Escalated Actions", headers=ESCALATED_ACTIONS_HEADERS)
+    if not worksheet:
+        return False
+    try:
+        existing_rows = worksheet.get_all_values()
+        if len(existing_rows) > 1:
+            worksheet.delete_rows(2, len(existing_rows))
+        if not actions:
+            print("[google-sheets] No escalated actions to sync")
+            return True
+        rows = [_escalated_action_to_row(a) for a in actions]
+        end_col = chr(64 + len(ESCALATED_ACTIONS_HEADERS))
+        worksheet.update(range_name=f"A2:{end_col}{len(rows) + 1}", values=rows)
+        print(f"[google-sheets] Escalated actions sync completed: {len(actions)} actions")
+        return True
+    except Exception as e:
+        print(f"[google-sheets] Escalated actions sync failed: {e}")
         return False

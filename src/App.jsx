@@ -3102,7 +3102,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
         </div>
       </div>
 
-      {showSidePanel && <AddActionPanel users={users} plants={plants} depts={depts} defaultPlant={mtg.plant} defaultSrc={mtg.type} machines={machines} reasons={reasons} onSave={a => { setFastActions(p => Array.isArray(p) ? [...p, { ...a, id: Date.now() }] : [{ ...a, id: Date.now() }]); setShowSidePanel(false); }} onClose={() => setShowSidePanel(false)} />}
+      {showSidePanel && <AddActionPanel users={users} plants={plants} depts={depts} defaultPlant={mtg.plant} defaultSrc={mtg.type} machines={machines} reasons={reasons} currentUser={currentUser} onSave={a => { setFastActions(p => Array.isArray(p) ? [...p, { ...a, id: Date.now() }] : [{ ...a, id: Date.now() }]); setShowSidePanel(false); }} onClose={() => setShowSidePanel(false)} />}
       {selAction && <ActionDetailPanel action={selAction} onClose={() => setSelAction(null)} onUpdate={() => { }} user={currentUser} users={users} allUsers={users} plants={plants} machines={machines} />}
     </div>
   );
@@ -3111,7 +3111,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
 /* ADD ACTION SIDE PANEL */
 function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projects, onSave, onClose, currentUser, machines, reasons: reasonsProp, saving }) {
   useEscClose(onClose);
-  const [f, setF] = useState({ text: "", responsible: "", due: "", section: "General", plant: defaultPlant || "", src: defaultSrc || "", priority: "NORMAL", remarks: "", project: "", reasonOfAction: "", machineName: "", actionPointType: "" });
+  const [f, setF] = useState({ text: "", responsible: "", due: "", section: currentUser?.dept || "General", plant: defaultPlant || (currentUser?.plant && currentUser.plant !== "All" ? currentUser.plant : ""), src: defaultSrc || "", priority: "NORMAL", remarks: "", project: "", reasonOfAction: "", machineName: "", actionPointType: "" });
   // Derive reason suggestions from the reasons state passed in (loaded at app boot)
   const reasonSuggestions = (reasonsProp || []).map(r => r.reason || r.Reason || r.text || r.Text || Object.values(r)[0]).filter(Boolean);
   const up = (k, v) => setF(x => ({ ...x, [k]: v }));
@@ -4561,6 +4561,8 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
   const [editDraft, setEditDraft] = useState(null);
   const [userFilter, setUserFilter] = useState("");
   const [levelFilter, setLevelFilter] = useState("");
+  const [syncingMatrix, setSyncingMatrix] = useState(false);
+  const [matrixSyncMsg, setMatrixSyncMsg] = useState("");
   const upDraft = (k, v) => setEditDraft(d => ({ ...d, [k]: v }));
 
   const checkCanModify = (rowId) => isAdmin || (canModify && canModify("escMatrix", rowId));
@@ -4637,6 +4639,18 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {onSave && <SectionSaveButton onSave={onSave} />}
+            <button
+              onClick={async () => {
+                setSyncingMatrix(true); setMatrixSyncMsg("");
+                try { await apiPost("escalation/sync-matrix-to-sheet", {}); setMatrixSyncMsg("Synced!"); }
+                catch (e) { setMatrixSyncMsg("Failed"); }
+                setSyncingMatrix(false);
+                setTimeout(() => setMatrixSyncMsg(""), 3000);
+              }}
+              disabled={syncingMatrix}
+              style={{ background: "rgba(255,255,255,.2)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700, opacity: syncingMatrix ? 0.6 : 1 }}>
+              {syncingMatrix ? "Syncing…" : matrixSyncMsg || "📊 Sync to Sheets"}
+            </button>
             {(isAdmin || onSave) && <button onClick={addTier} style={{ background: "rgba(255,255,255,.2)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ Add Tier</button>}
           </div>
         </div>

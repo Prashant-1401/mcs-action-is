@@ -166,6 +166,12 @@ async def _bg_check_escalations():
             await _check_and_dispatch_escalations_with_db(db)
     except Exception as e:
         print(f"[escalation-trigger] background check failed: {e}")
+    # Also sync escalated actions to Google Sheets
+    try:
+        from app.routers.escalation import _bg_sync_escalated_actions
+        await _bg_sync_escalated_actions()
+    except Exception as e:
+        print(f"[google-sheets] escalated actions sync trigger failed: {e}")
 
 
 async def _sync_action_bg(action_dict: dict):
