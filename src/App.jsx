@@ -2025,6 +2025,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
   const [showAddProject, setShowAddProject] = useState(false);
   const [charterActionSel, setCharterActionSel] = useState(null);
   const [mtgPlan, setMtgPlan] = useState(null);  // Feature 4: meeting plan view
+  const [selectedBeltDay, setSelectedBeltDay] = useState(() => new Date().toISOString().split("T")[0]);  // combined Weekly Schedule: which day is drilled into
 
   const isAdmin = isUserAdmin(user);
   const userPerms = getPerms(user);
@@ -2119,61 +2120,6 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
             {visibleMeetings.length === 0 && <div style={{ fontSize: 13, color: T.text2, fontStyle: "italic", padding: "24px 0", textAlign: "center" }}>No meetings yet. Click <b>+ Schedule</b> to create one.</div>}
           </div>
 
-          <div style={{ marginTop: 24 }}>
-            <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, fontSize: 15, color: T.navy, display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-              📅 Scheduled Days
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {(visibleMeetings || []).filter(m => m.scheduledDays && m.scheduledDays.length > 0).map((m, i) => (
-                <div key={m.id || `sd-${i}`} className="card" style={{ padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: T.navy }}>{m.type}</div>
-                    <div style={{ fontSize: 11, color: T.text2 }}>{m.time} · {m.facilitator}</div>
-                  </div>
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {ensureArray(m.scheduledDays).map(d => <span key={d} style={{ padding: "2px 8px", borderRadius: 6, background: T.navy + "15", color: T.navy, fontSize: 10, fontWeight: 700 }}>{d}</span>)}
-                  </div>
-                </div>
-              ))}
-              {(visibleMeetings || []).filter(m => m.scheduledDays && m.scheduledDays.length > 0).length === 0 && <div style={{ fontSize: 12, color: T.text2, fontStyle: "italic" }}>No meetings with scheduled days</div>}
-            </div>
-          </div>
-
-          {/* ── Weekly meeting belt: 7 boxes (Mon–Sun) ── */}
-          <div style={{ marginTop: 24 }}>
-            <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, fontSize: 15, color: T.navy, display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              📆 This Week's Meeting Belt
-            </div>
-            <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
-              {buildWeekBelt(visibleMeetings, actions).map(day => {
-                const beltColor = day.color === "green" ? T.green : day.color === "amber" ? T.amber : day.color === "red" ? T.red : null;
-                const bg = beltColor ? beltColor + "18" : "#F5F5FB";
-                const border = beltColor ? beltColor : T.border;
-                return (
-                  <div key={day.dateStr} title={`${day.dayName} ${day.dayNum} — ${day.hasSession ? day.count + " action(s), " + day.done + " done" : "no meeting"}`}
-                    style={{ flex: "1 0 0", minWidth: 64, borderRadius: 10, border: `1.5px solid ${border}`, background: bg, padding: "10px 6px", textAlign: "center", position: "relative" }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: day.isToday ? T.navy : T.text2, textTransform: "uppercase", letterSpacing: .3 }}>{day.dayName}</div>
-                    <div style={{ fontSize: 16, fontWeight: 800, color: T.text, lineHeight: 1.1, margin: "2px 0 6px" }}>{day.dayNum}</div>
-                    {day.hasSession || day.count > 0 ? (
-                      <>
-                        <div style={{ fontFamily: "'Sora',sans-serif", fontSize: 18, fontWeight: 800, color: beltColor || T.text2 }}>{day.count}</div>
-                        <div style={{ fontSize: 9, color: T.text2, fontWeight: 600 }}>{day.done === day.count && day.count > 0 ? "All done" : day.done + " done"}</div>
-                      </>
-                    ) : (
-                      <div style={{ fontSize: 9, color: T.text2, fontWeight: 600, marginTop: 6 }}>—</div>
-                    )}
-                    {beltColor && <div style={{ position: "absolute", top: 6, right: 6, width: 9, height: 9, borderRadius: "50%", background: beltColor }} />}
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 10, color: T.text2 }}>
-              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: T.green }} /> All completed</span>
-              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: T.amber }} /> Partial</span>
-              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: T.red }} /> None done</span>
-            </div>
-          </div>
-
         </div>
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
@@ -2237,6 +2183,99 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
               );
             })}
           </div>
+        </div>
+      </div>
+
+      {/* ── Weekly Schedule: combined belt + scheduled days, with day drill-down showing meeting details & actions ── */}
+      <div style={{ marginTop: 24 }}>
+        <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, fontSize: 15, color: T.navy, display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+          📆 Weekly Schedule
+        </div>
+        <div className="card" style={{ padding: 20 }}>
+          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+            {buildWeekBelt(visibleMeetings, actions).map(day => {
+              const beltColor = day.color === "green" ? T.green : day.color === "amber" ? T.amber : day.color === "red" ? T.red : null;
+              const bg = beltColor ? beltColor + "18" : "#F5F5FB";
+              const border = beltColor ? beltColor : T.border;
+              const isSelected = day.dateStr === selectedBeltDay;
+              return (
+                <div key={day.dateStr} onClick={() => setSelectedBeltDay(day.dateStr)}
+                  title={`${day.dayName} ${day.dayNum} — ${day.hasSession ? day.count + " action(s), " + day.done + " done" : "no meeting"}`}
+                  style={{ flex: "1 0 0", minWidth: 64, borderRadius: 10, border: `1.5px solid ${isSelected ? T.navy : border}`, boxShadow: isSelected ? `0 0 0 2px ${T.navy}30` : "none", background: bg, padding: "10px 6px", textAlign: "center", position: "relative", cursor: "pointer", transition: "all .15s" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: day.isToday ? T.navy : T.text2, textTransform: "uppercase", letterSpacing: .3 }}>{day.dayName}</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: T.text, lineHeight: 1.1, margin: "2px 0 6px" }}>{day.dayNum}</div>
+                  {day.hasSession || day.count > 0 ? (
+                    <>
+                      <div style={{ fontFamily: "'Sora',sans-serif", fontSize: 18, fontWeight: 800, color: beltColor || T.text2 }}>{day.count}</div>
+                      <div style={{ fontSize: 9, color: T.text2, fontWeight: 600 }}>{day.done === day.count && day.count > 0 ? "All done" : day.done + " done"}</div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 9, color: T.text2, fontWeight: 600, marginTop: 6 }}>—</div>
+                  )}
+                  {beltColor && <div style={{ position: "absolute", top: 6, right: 6, width: 9, height: 9, borderRadius: "50%", background: beltColor }} />}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", gap: 14, marginTop: 10, fontSize: 10, color: T.text2 }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: T.green }} /> All completed</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: T.amber }} /> Partial</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: T.red }} /> None done</span>
+          </div>
+
+          {/* ── Selected day drill-down: meetings scheduled that day + actions created on each meeting ── */}
+          {(() => {
+            const beltDays = buildWeekBelt(visibleMeetings, actions);
+            const selDay = beltDays.find(d => d.dateStr === selectedBeltDay) || beltDays.find(d => d.isToday);
+            if (!selDay) return null;
+            const dayMeetings = visibleMeetings.filter(m => ensureArray(m.scheduledDays).includes(selDay.dayName));
+            return (
+              <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: T.navy, marginBottom: 10 }}>
+                  {selDay.dayName} {selDay.dayNum}{selDay.isToday ? " · Today" : ""} — Scheduled Meetings
+                  <span style={{ marginLeft: 8, background: T.navy + "15", color: T.navy, borderRadius: 10, padding: "1px 8px", fontSize: 10, fontWeight: 700 }}>{dayMeetings.length}</span>
+                </div>
+                {dayMeetings.length === 0 && <div style={{ fontSize: 12, color: T.text2, fontStyle: "italic" }}>No meetings scheduled on this day.</div>}
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {dayMeetings.map((m, i) => {
+                    const mtgActions = (actions || []).filter(a => a.srcId ? a.srcId === m.id : a.src === m.type);
+                    const doneCount = mtgActions.filter(a => a.status === "COMPLETED" || a.status === "DROPPED").length;
+                    return (
+                      <div key={m.id || `dm-${i}`} style={{ border: `1px solid ${T.border}`, borderRadius: 10, padding: 14 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 13, color: T.navy, cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted" }} onClick={() => setMtgPlan(m)}>{m.type}</div>
+                            <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{m.time} · {m.plant} · Facilitated by <b style={{ color: T.text }}>{m.facilitator}</b></div>
+                          </div>
+                          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                            {ensureArray(m.scheduledDays).map(d => <span key={d} style={{ padding: "2px 8px", borderRadius: 6, background: d === selDay.dayName ? T.navy : T.navy + "15", color: d === selDay.dayName ? "#fff" : T.navy, fontSize: 10, fontWeight: 700 }}>{d}</span>)}
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${T.border}` }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: T.text2, textTransform: "uppercase", letterSpacing: .3, marginBottom: 6 }}>
+                            Actions created ({mtgActions.length}{mtgActions.length > 0 ? ` · ${doneCount} done` : ""})
+                          </div>
+                          {mtgActions.length === 0 ? (
+                            <div style={{ fontSize: 11, color: T.text2, fontStyle: "italic" }}>No actions created from this meeting yet.</div>
+                          ) : (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              {mtgActions.slice(0, 4).map((a, ai) => (
+                                <div key={a.id || `ma-${ai}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                                  <span style={{ fontSize: 11, color: T.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.sn ? `${a.sn} — ` : ""}{a.text}</span>
+                                  <SBadge s={a.status} />
+                                </div>
+                              ))}
+                              {mtgActions.length > 4 && <div style={{ fontSize: 10, color: T.text2 }}>+{mtgActions.length - 4} more</div>}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
 
