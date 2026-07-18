@@ -82,6 +82,7 @@ const SNAKE_TO_CAMEL = {
   from_role: "fromRole", target_role: "targetRole",
   from_user: "fromUser", target_user: "targetUser",
   applicable_to: "applicableTo",
+  scheduled_days: "scheduledDays", guidelines: "guidelines",
 };
 const CAMEL_TO_SNAKE = Object.fromEntries(
   Object.entries(SNAKE_TO_CAMEL).map(([s, c]) => [c, s])
@@ -1325,7 +1326,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
     return null; // no upcoming occurrence found within lookahead
   };
 
-  const upcomingMeetings = (isAdmin ? (meetings || []) : (meetings || []).filter(m => user?.plant && user.plant !== "All" ? m.plant === user.plant : true))
+  const upcomingMeetings = (isAdmin ? (meetings || []) : (meetings || []).filter(m => !user?.plant || user.plant === "All" ? true : m.plant === user.plant || m.plant === "All" || !m.plant))
     .map(m => {
       const next = getNextOccurrence(m);
       return next ? { ...m, _nextDt: next } : null;
@@ -1872,8 +1873,8 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
   };
 
   const plantFilter = (item) => user?.plant === "All" ? true : item.plant === user?.plant || item.plant === "All" || !item.plant;
-  const visibleMeetings = isAdmin ? (meetings || []) : (meetings || []).filter(m => user?.plant && user.plant !== "All" ? m.plant === user.plant : true);
-  const visibleProjects = isAdmin ? (projects || []) : (projects || []).filter(p => user?.plant && user.plant !== "All" ? p.plant === user.plant : true);
+  const visibleMeetings = isAdmin ? (meetings || []) : (meetings || []).filter(m => !user?.plant || user.plant === "All" ? true : m.plant === user.plant || m.plant === "All" || !m.plant);
+  const visibleProjects = isAdmin ? (projects || []) : (projects || []).filter(p => !user?.plant || user.plant === "All" ? true : p.plant === user.plant || p.plant === "All" || !p.plant);
 
   if (activeMtg) return <MeetingRoom mtg={activeMtg} plants={plants} depts={depts} users={users} onCommit={rows => { onCommitFinal(rows); }} onCloseMeeting={() => { clearMeetingState && clearMeetingState(); setPage(0); }} onBack={() => setPage(0)} prevActions={actions} relatedActions={actions.filter(a => {
           // Match by specific meeting instance (srcId) when available, else fall back to type match
@@ -1943,6 +1944,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
                 </div>
               );
             })}
+            {visibleMeetings.length === 0 && <div style={{ fontSize: 13, color: T.text2, fontStyle: "italic", padding: "24px 0", textAlign: "center" }}>No meetings yet. Click <b>+ Schedule</b> to create one.</div>}
           </div>
 
           <div style={{ marginTop: 24 }}>
@@ -4415,7 +4417,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
   // This ensures actions always appear even if section doesn't match any dept name
   const heatmapRows = visibleDepts.map(d => ({ id: d.id, name: d.name, head: d.head, icon: d.icon || "🏭", fromDept: true }));
 
-  const scopedMeetings = isDashAdmin ? (meetings || []) : (meetings || []).filter(m => user?.plant && user.plant !== "All" ? m.plant === user.plant : true);
+  const scopedMeetings = isDashAdmin ? (meetings || []) : (meetings || []).filter(m => !user?.plant || user.plant === "All" ? true : m.plant === user.plant || m.plant === "All" || !m.plant);
   const allSessions = scopedMeetings.flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : []).map(s => ({ ...s, type: m.type, plant: m.plant })));
   const totalMtgMins = allSessions.reduce((s, x) => s + (x.duration || 0), 0);
   // Deduplicate audit for badge (keep highest level per action SN) — scoped to
