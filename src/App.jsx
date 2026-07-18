@@ -4058,9 +4058,11 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     setFilters(prev => { const next = typeof updater === "function" ? updater(prev) : updater; userFilterPref[userKey] = next; return next; });
   };
 
-  // My Actions / All Actions scoping
+  // My Actions / All Actions scoping.
+  // "My Actions" = actions where THIS user is the responsible person only.
+  // Actions allocated BY the user for someone else must NOT appear here.
   const displayScope = myActionsOnly
-    ? scoped.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower].filter(Boolean)) || a.allocatedBy === user?.name)
+    ? scoped.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower].filter(Boolean)))
     : scoped;
 
   const fa = displayScope.filter(a => {
