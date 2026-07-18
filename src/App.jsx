@@ -3074,7 +3074,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
 
   if (phase !== "live") {
     const { fromFast, txActions } = phase;
-    return <StagingArea staged={[...(fromFast || []), ...(txActions || [])]} mtg={mtg} plants={plants} depts={depts} users={users} txLines={txLines} onCommit={rows => { onCommit(rows); onCloseMeeting(); }} onCloseMeeting={onCloseMeeting} onBack={() => setPhase("live")} elapsedSecs={elapsed} currentUser={user} />;
+    return <StagingArea staged={[...(fromFast || []), ...(txActions || [])]} mtg={mtg} plants={plants} depts={depts} users={users} txLines={txLines} onCommit={rows => { onCommit(rows); onCloseMeeting(); }} onCloseMeeting={onCloseMeeting} onBack={() => setPhase("live")} elapsedSecs={elapsed} currentUser={currentUser} />;
   }
 
   /* ── Paused Meeting Prompt ─────────────────────────────────────── */
