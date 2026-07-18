@@ -269,6 +269,18 @@ function resolveForeignKeys(items, plants, depts, projects) {
   });
 }
 
+/* ─── Plant scoping that tolerates user.plant being an ID OR a name ─
+   resolveForeignKeys turns item.plant_id → item.plant (NAME). But a
+   user's stored plant can be either a plant ID (e.g. "P2") or a name
+   (e.g. "Adroit Driveshaft"). Comparing name===ID hides every meeting
+   for that user, so we match on BOTH forms. ─────────────────────────── */
+function plantVisible(user, item) {
+  const up = user?.plant;
+  if (!up || up === "All") return true;
+  if (!item.plant && !item.plantId) return true;
+  return item.plantId === up || item.plant === up || item.plant === "All";
+}
+
 function ensureArray(val) {
   if (Array.isArray(val)) return val;
   if (typeof val === "string" && val.trim()) {
@@ -466,18 +478,22 @@ const isUserAdmin = (user) => {
 };
 const canAccessMasterSetup = (user) => isUserAdmin(user) || user?.masterAccess === true || user?.master_access === true;
 
-// Plant-scoping helpers: non-admin users only see data from their own plant
+// Plant-scoping helpers: non-admin users only see data from their own plant.
+// user.plant may be a plant ID ("P2") or a plant name ("Adroit Driveshaft").
 const scopedPlants = (user, plants) => {
   if (isUserAdmin(user) || !user?.plant || user.plant === "All") return plants;
-  return (plants || []).filter(p => p.name === user.plant);
+  const up = user.plant;
+  return (plants || []).filter(p => p.name === up || p.id === up);
 };
 const scopedDepts = (user, depts) => {
   if (isUserAdmin(user) || !user?.plant || user.plant === "All") return depts;
-  return (depts || []).filter(d => !d.plant || d.plant === "All Plants" || d.plant === user.plant);
+  const up = user.plant;
+  return (depts || []).filter(d => !d.plant || d.plant === "All Plants" || d.plant === up || d.plant_id === up);
 };
 const scopedUsers = (user, users) => {
   if (isUserAdmin(user) || !user?.plant || user.plant === "All") return users;
-  return (users || []).filter(u => !u.plant || u.plant === "All" || u.plant === user.plant);
+  const up = user.plant;
+  return (users || []).filter(u => !u.plant || u.plant === "All" || u.plant === up || u.plant_id === up);
 };
 
 const SAMPLE_TRANSCRIPT_LINES = [
@@ -814,6 +830,12 @@ function LoginPage({ onLogin }) {
         const { token, user } = res;
         localStorage.setItem("mcs_token", token);
         setAuthToken(token);
+        // Master login also returns plant as an ID — resolve to name for consistency
+        try {
+          const plants = await apiGet("/api/plants/");
+          const pMap = {}; plants.forEach(p => { pMap[p.id] = p.name; });
+          if (user.plant && pMap[user.plant]) user.plant = pMap[user.plant];
+        } catch (e) { /* keep as-is */ }
         onLogin(user);
       } catch (masterErr) {
         setErrMsg(err.message || "Login failed");
@@ -1429,7 +1451,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
     return null; // no upcoming occurrence found within lookahead
   };
 
-  const upcomingMeetings = (isAdmin ? (meetings || []) : (meetings || []).filter(m => !user?.plant || user.plant === "All" ? true : m.plant === user.plant || m.plant === "All" || !m.plant))
+  const upcomingMeetings = (isAdmin ? (meetings || []) : (meetings || []).filter(m => isUserAdmin(user) || plantVisible(user, m)))
     .map(m => {
       const next = getNextOccurrence(m);
       return next ? { ...m, _nextDt: next } : null;
@@ -1975,9 +1997,9 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
     apiRemove("projects", pr.id);
   };
 
-  const plantFilter = (item) => user?.plant === "All" ? true : item.plant === user?.plant || item.plant === "All" || !item.plant;
-  const visibleMeetings = isAdmin ? (meetings || []) : (meetings || []).filter(m => !user?.plant || user.plant === "All" ? true : m.plant === user.plant || m.plant === "All" || !m.plant);
-  const visibleProjects = isAdmin ? (projects || []) : (projects || []).filter(p => !user?.plant || user.plant === "All" ? true : p.plant === user.plant || p.plant === "All" || !p.plant);
+  const plantFilter = (item) => isUserAdmin(user) || plantVisible(user, item);
+  const visibleMeetings = isAdmin ? (meetings || []) : (meetings || []).filter(m => isUserAdmin(user) || plantVisible(user, m));
+  const visibleProjects = isAdmin ? (projects || []) : (projects || []).filter(p => isUserAdmin(user) || plantVisible(user, p));
 
   if (activeMtg) return <MeetingRoom mtg={activeMtg} plants={plants} depts={depts} users={users} onCommit={rows => { onCommitFinal(rows); }} onCloseMeeting={() => { clearMeetingState && clearMeetingState(); setPage(0); }} onBack={() => setPage(0)} prevActions={actions} relatedActions={actions.filter(a => {
           // Match by specific meeting instance (srcId) when available, else fall back to type match
@@ -2333,7 +2355,7 @@ function CompletedMeetingDashboard({ meetings, actions, users, user, plants }) {
       sessionDur: s.duration || 0,
       sessionActionCount: s.actionCount || 0,
     }))
-  ).filter(s => isAdmin || (user?.plant && user.plant !== "All" ? s.plant === user.plant : true));
+  ).filter(s => isAdmin || plantVisible(user, s));
 
   // Enrich sessions with actual action counts from the actions table
   const enrichedSessions = allSessions.map(s => {
@@ -2493,7 +2515,7 @@ function WeeklyMeetingAccountability({ meetings, actions, users, user, plants })
 
   // Flatten all completed sessions within the last 7 days
   const weekSessions = (meetings || [])
-    .filter(m => isAdmin || !user?.plant || user.plant === "All" ? true : (m.plant === user.plant || m.plant === "All" || !m.plant))
+    .filter(m => isAdmin || plantVisible(user, m))
     .flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : [])
       .filter(s => s.date && new Date(s.date) >= weekAgo)
       .map(s => ({ ...s, type: m.type, plant: m.plant, project: m.project }))
@@ -4615,7 +4637,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
   // This ensures actions always appear even if section doesn't match any dept name
   const heatmapRows = visibleDepts.map(d => ({ id: d.id, name: d.name, head: d.head, icon: d.icon || "🏭", fromDept: true }));
 
-  const scopedMeetings = isDashAdmin ? (meetings || []) : (meetings || []).filter(m => !user?.plant || user.plant === "All" ? true : m.plant === user.plant || m.plant === "All" || !m.plant);
+  const scopedMeetings = isDashAdmin ? (meetings || []) : (meetings || []).filter(m => isDashAdmin || plantVisible(user, m));
   const allSessions = scopedMeetings.flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : []).map(s => ({ ...s, type: m.type, plant: m.plant })));
   const totalMtgMins = allSessions.reduce((s, x) => s + (x.duration || 0), 0);
   // Deduplicate audit for badge (keep highest level per action SN) — scoped to
