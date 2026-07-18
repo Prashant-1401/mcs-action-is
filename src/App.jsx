@@ -36,23 +36,94 @@ function apiPost(path, body) { return apiFetch(path, { method: "POST", body: JSO
 function apiPatch(path, body) { return apiFetch(path, { method: "PATCH", body: JSON.stringify(body) }); }
 function apiDelete(path) { return apiFetch(path, { method: "DELETE" }); }
 
+/* ─── Background Autosave Engine ─────────────────────────────
+   - Tracks every create/update as a pending op. On success it is cleared;
+     on failure it stays queued so a background timer can retry it.
+   - Exposes a tiny status emitter (autosaveStatus) so the UI can show
+     "Saving…" / "All changes saved" / "Pending N".
+   - Also drives a periodic localStorage snapshot of core collections.
+*/
+const autosaveListeners = new Set();
+let _autosaveState = { status: "idle", pending: 0, lastSaved: null };
+function emitAutosave() {
+  _autosaveState = { ..._autosaveState, pending: pendingOps.size };
+  autosaveListeners.forEach(fn => { try { fn(_autosaveState); } catch {} });
+}
+export function subscribeAutosave(fn) {
+  autosaveListeners.add(fn);
+  fn(_autosaveState);
+  return () => autosaveListeners.delete(fn);
+}
+function setAutosaveStatus(status) {
+  _autosaveState = { ..._autosaveState, status };
+  emitAutosave();
+}
+
+// Pending operations queue: key → { resource, id, data, op }
+const pendingOps = new Map();
+function opKey(resource, id) { return `${resource}:${id ?? "new"}`; }
+function queueOp(resource, id, data, op) {
+  pendingOps.set(opKey(resource, id), { resource, id, data, op });
+  emitAutosave();
+}
+function clearOp(resource, id) {
+  pendingOps.delete(opKey(resource, id));
+  emitAutosave();
+}
+
+let _flushing = false;
+async function flushPendingSaves() {
+  if (_flushing || pendingOps.size === 0) return;
+  _flushing = true;
+  setAutosaveStatus("saving");
+  const entries = [...pendingOps.values()];
+  for (const op of entries) {
+    try {
+      if (op.op === "create") {
+        const saved = await apiPost(`/api/${op.resource}/`, normKeys(op.data));
+        if (saved && saved.id) clearOp(op.resource, op.id || "new");
+      } else {
+        const id = op.id || (op.data && op.data.id);
+        if (!id) { clearOp(op.resource, op.id || "new"); continue; }
+        await apiPatch(`/api/${op.resource}/${id}`, normKeys(op.data));
+        clearOp(op.resource, id);
+      }
+    } catch (e) {
+      // keep in queue for next retry
+      console.warn(`[autosave] retry pending ${op.resource}:${op.id || "new"} —`, e.message);
+    }
+  }
+  _flushing = false;
+  if (pendingOps.size === 0) {
+    _autosaveState = { ..._autosaveState, status: "saved", lastSaved: Date.now() };
+  } else {
+    _autosaveState = { ..._autosaveState, status: "pending", lastSaved: Date.now() };
+  }
+  emitAutosave();
+}
+
 /* ─── API Persistence Sync (fire-and-forget with error log) ── */
-async function apiCreate(resource, data) {
+async function apiCreate(resource, data, { track = true } = {}) {
+  const id = data && (data.id || "new");
+  if (track) queueOp(resource, id, data, "create");
   try {
     const result = await apiPost(`/api/${resource}/`, normKeys(data));
+    if (track) clearOp(resource, id);
     return result;
   } catch (e) {
     console.error(`POST /api/${resource}/ failed:`, e.message);
-    throw e;
+    throw e; // leave in queue for background retry
   }
 }
-async function apiUpdate(resource, id, data) {
+async function apiUpdate(resource, id, data, { track = true } = {}) {
+  if (track) queueOp(resource, id, data, "update");
   try {
     const result = await apiPatch(`/api/${resource}/${id}`, normKeys(data));
+    if (track) clearOp(resource, id);
     return result;
   } catch (e) {
     console.error(`PATCH /api/${resource}/${id} failed:`, e.message);
-    throw e;
+    throw e; // leave in queue for background retry
   }
 }
 async function apiRemove(resource, id) {
@@ -63,6 +134,29 @@ async function apiRemove(resource, id) {
     console.error(`DELETE /api/${resource}/${id} failed:`, e.message);
     throw e;
   }
+}
+
+// LocalStorage snapshot backup of core editable collections.
+const SNAPSHOT_KEY = "mcs_autosave_snapshot";
+function snapshotLocal(state) {
+  try {
+    const payload = {
+      ts: Date.now(),
+      actions: state.actions || [],
+      meetings: state.meetings || [],
+      projects: state.projects || [],
+      machines: state.machines || [],
+    };
+    localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(payload));
+  } catch (e) {
+    console.warn("[autosave] snapshot skipped:", e.message);
+  }
+}
+function loadSnapshot() {
+  try {
+    const s = localStorage.getItem(SNAPSHOT_KEY);
+    return s ? JSON.parse(s) : null;
+  } catch { return null; }
 }
 
 /* ─── Key transforms (snake_case ↔ camelCase) ─────────────── */
@@ -1036,6 +1130,8 @@ function AdminNotifManager({ users, onClose }) {
 function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCount, auditCount, activeMtg, onResumeActiveMtg, mtgRunning, mtgElapsed, notifications, onMarkAllRead, unreadCount, users, actions, onShowSupport, onShowProfile, onShowAdminNotifs }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
+  const [autoStatus, setAutoStatus] = useState(_autosaveState);
+  useEffect(() => subscribeAutosave(setAutoStatus), []);
   const isAdmin = isUserAdmin(user);
   const userPerms = getPerms(user);
   const canAccessPage = (id) => {
@@ -1131,6 +1227,13 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
                 <button onClick={() => { setShowUserMenu(false); onLogout(); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", border: "none", background: "transparent", cursor: "pointer", color: T.red, fontSize: 13, fontWeight: 600, borderRadius: 8 }}>🚪 Sign Out</button>
               </div>
             )}
+          </div>
+          {/* Background autosave status */}
+          <div style={{ padding: "8px 18px 14px", borderTop: "1px solid rgba(255,255,255,.1)", display: "flex", alignItems: "center", gap: 8 }}>
+            {autoStatus.status === "saving" && <><span style={{ width: 8, height: 8, borderRadius: "50%", background: T.amber, animation: "blink 1s infinite" }} /><span style={{ fontSize: 10, color: "rgba(255,255,255,.6)" }}>Saving…</span></>}
+            {autoStatus.status === "saved" && <><span style={{ width: 8, height: 8, borderRadius: "50%", background: T.green }} /><span style={{ fontSize: 10, color: "rgba(255,255,255,.6)" }}>All changes saved</span></>}
+            {autoStatus.status === "pending" && <><span style={{ width: 8, height: 8, borderRadius: "50%", background: T.amber }} /><span style={{ fontSize: 10, color: "rgba(255,255,255,.6)" }}>Pending {autoStatus.pending} save{autoStatus.pending !== 1 ? "s" : ""}</span></>}
+            {autoStatus.status === "idle" && <><span style={{ width: 8, height: 8, borderRadius: "50%", background: "rgba(255,255,255,.3)" }} /><span style={{ fontSize: 10, color: "rgba(255,255,255,.4)" }}>Autosave on</span></>}
           </div>
         </div>
       </aside>
@@ -2036,6 +2139,9 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
       {/* ── Completed Meeting Dashboard ── */}
       <CompletedMeetingDashboard meetings={meetings} actions={actions} users={users} user={user} plants={plants} />
 
+      {/* ── Weekly Meeting Accountability ── */}
+      <WeeklyMeetingAccountability meetings={meetings} actions={actions} users={users} user={user} plants={plants} />
+
       {charter && <ProjectCharterModal pr={charter} onClose={() => { setCharter(null); setCharterActionSel(null); }} actions={actions} meetings={meetings} user={user} users={users} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); onProjectUpdate(updated); }} onActionSelect={a => setCharterActionSel(a)} />}
       {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={(id, patch) => { setActions(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); apiUpdate("actions", id, patch); setCharterActionSel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} machines={machines} />}
       {showAddMtg && <AddMeetingModal plants={plants} users={users} projects={projects} onSave={m => { const mtg = { ...m, id: "M" + Date.now(), completedSessions: [] }; setMeetings(p => [...p, mtg]); apiCreate("meetings", resolveRecordIds(mtg, plants, depts, machines, projects)); setShowAddMtg(false); }} onClose={() => setShowAddMtg(false)} currentUser={user} />}
@@ -2379,21 +2485,118 @@ function CompletedMeetingDashboard({ meetings, actions, users, user, plants }) {
   );
 }
 
+/* ===================== WEEKLY MEETING ACCOUNTABILITY ===================== */
+function WeeklyMeetingAccountability({ meetings, actions, users, user, plants }) {
+  const isAdmin = isUserAdmin(user);
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
+
+  // Flatten all completed sessions within the last 7 days
+  const weekSessions = (meetings || [])
+    .filter(m => isAdmin || !user?.plant || user.plant === "All" ? true : (m.plant === user.plant || m.plant === "All" || !m.plant))
+    .flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : [])
+      .filter(s => s.date && new Date(s.date) >= weekAgo)
+      .map(s => ({ ...s, type: m.type, plant: m.plant, project: m.project }))
+    );
+
+  // Match real actions for a given session (same logic as CompletedMeetingDashboard)
+  const countActionsFor = (session) => (actions || []).filter(a => {
+    const matchType = session.id ? (a.srcId === session.id || (!a.srcId && a.src === session.type)) : a.src === session.type;
+    const matchDate = session.date ? (a.dateOfAction === session.date || a.created === session.date) : true;
+    return matchType && matchDate;
+  }).length;
+
+  // Group by meeting type
+  const byType = {};
+  weekSessions.forEach(s => {
+    if (!byType[s.type]) byType[s.type] = { type: s.type, sessions: [], attendees: new Set(), totalMins: 0 };
+    byType[s.type].sessions.push(s);
+    byType[s.type].totalMins += (s.duration || 0);
+    ensureArray(s.attendees).forEach(a => byType[s.type].attendees.add(a));
+  });
+  const rows = Object.values(byType)
+    .map(g => ({
+      type: g.type,
+      count: g.sessions.length,
+      actions: g.sessions.reduce((sum, s) => sum + countActionsFor(s), 0),
+      attendees: [...g.attendees],
+      totalMins: g.totalMins,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const totalSessions = rows.reduce((s, r) => s + r.count, 0);
+  const totalActions = rows.reduce((s, r) => s + r.actions, 0);
+
+  if (weekSessions.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 28 }}>
+      <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 16, color: T.navy, display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+        📊 Weekly Meeting Accountability
+        <span style={{ background: T.navy + "15", color: T.navy, borderRadius: 10, padding: "3px 12px", fontSize: 11, fontWeight: 700 }}>Last 7 days</span>
+      </div>
+
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: T.bg }}>
+                <th style={{ textAlign: "left", padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5 }}>Meeting</th>
+                <th style={{ textAlign: "center", padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5 }}>Times Done</th>
+                <th style={{ textAlign: "center", padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5 }}>Actions Generated</th>
+                <th style={{ textAlign: "center", padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5 }}>Total Mins</th>
+                <th style={{ textAlign: "left", padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5 }}>Attendees</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.type} style={{ borderTop: `1px solid ${T.border}`, background: i % 2 === 0 ? "#fff" : T.bg + "60" }}>
+                  <td style={{ padding: "10px 14px", fontWeight: 700, color: T.navy }}>{r.type}</td>
+                  <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                    <span style={{ background: T.navy + "15", color: T.navy, borderRadius: 8, padding: "2px 10px", fontWeight: 700, fontSize: 11 }}>{r.count}</span>
+                  </td>
+                  <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                    <span style={{ background: T.green + "18", color: T.green, borderRadius: 8, padding: "2px 10px", fontWeight: 700, fontSize: 11 }}>{r.actions}</span>
+                  </td>
+                  <td style={{ padding: "10px 14px", textAlign: "center", fontWeight: 600 }}>{r.totalMins}m</td>
+                  <td style={{ padding: "10px 14px" }}>
+                    <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+                      {r.attendees.slice(0, 5).map((name, j) => <Avatar key={j} name={name} size={20} users={users} />)}
+                      {r.attendees.length > 5 && <span style={{ fontSize: 10, color: T.text2 }}>+{r.attendees.length - 5}</span>}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ display: "flex", gap: 16, padding: "12px 16px", borderTop: `1px solid ${T.border}`, fontSize: 12, color: T.text2 }}>
+          <span>📅 <b style={{ color: T.navy }}>{totalSessions}</b> sessions this week</span>
+          <span>⚡ <b style={{ color: T.green }}>{totalActions}</b> actions generated</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ADD MEETING MODAL */
 function AddMeetingModal({ plants, users, projects, onSave, onClose, currentUser }) {
   useEscClose(onClose);
   const [f, setF] = useState({ name: "", type: "Custom", plant: "", time: "09:00", dur: 60, facilitator: "", recurring: false, recurrence: "daily", project: null, scheduledDays: [] });
   const [usePreset, setUsePreset] = useState(false);
   const up = (k, v) => setF(x => ({ ...x, [k]: v }));
-  const RECURRENCE_OPTS = [
-    { v: "daily", l: "Daily" },
-    { v: "shift", l: "Per Shift" },
-    { v: "weekly", l: "Weekly" },
-    { v: "monthly", l: "Monthly" },
-    { v: "quarterly", l: "Quarterly" },
-    { v: "yearly", l: "Yearly" },
+  const FREQ_OPTS = [
+    { v: "anyday", l: "Any Day", sub: "One-time meeting", icon: "📅" },
+    { v: "everyday", l: "Every Day", sub: "Repeats daily", icon: "🔁" },
+    { v: "selective", l: "Selective Days", sub: "Pick specific days", icon: "📆" },
   ];
-  const DAY_OPTS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const DAY_OPTS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const freqMode = f.recurring ? (f.scheduledDays.length > 0 ? "selective" : "everyday") : "anyday";
+  const setFreq = (mode) => {
+    if (mode === "anyday") up("recurring", false);
+    else if (mode === "everyday") { up("recurring", true); up("scheduledDays", []); }
+    else { up("recurring", true); up("scheduledDays", f.scheduledDays.length ? f.scheduledDays : ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]); }
+  };
   const canSave = f.name.trim() && f.plant && f.facilitator && f.time && f.project;
   const submit = () => { if (canSave) onSave({ ...f, type: f.name }); };
   return (
@@ -2404,12 +2607,10 @@ function AddMeetingModal({ plants, users, projects, onSave, onClose, currentUser
           <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 22, color: T.text2 }}>×</button>
         </div>
         <div style={{ display: "grid", gap: 12 }}>
-          {/* Meeting name — free text */}
           <div>
             <Lbl t="Meeting Name" req />
             <input value={f.name} onChange={e => up("name", e.target.value)} placeholder="e.g. Furnace Daily Review, Safety Briefing…" />
           </div>
-          {/* Optional: pick from preset types */}
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input type="checkbox" checked={usePreset} onChange={e => setUsePreset(e.target.checked)} id="usePreset" style={{ width: 14, cursor: "pointer" }} />
             <label htmlFor="usePreset" style={{ fontSize: 12, cursor: "pointer", color: T.text2 }}>Or choose from standard meeting types:</label>
@@ -2425,7 +2626,6 @@ function AddMeetingModal({ plants, users, projects, onSave, onClose, currentUser
             <div><Lbl t="Duration (min)" /><input type="number" value={f.dur} onChange={e => up("dur", +e.target.value)} min={15} max={360} /></div>
             <div><Lbl t="Facilitator" req /><select value={f.facilitator} onChange={e => up("facilitator", e.target.value)}><option value="">Select</option>{scopedUsers(currentUser, users).map(u => <option key={u.id} value={u.name}>{u.name}</option>)}</select></div>
           </div>
-          {/* Link to Project — mandatory with star */}
           <div>
             <Lbl t="Link to Project" req />
             <select value={f.project || ""} onChange={e => up("project", e.target.value || null)} style={{ borderColor: !f.project ? T.red : T.border }}>
@@ -2434,34 +2634,32 @@ function AddMeetingModal({ plants, users, projects, onSave, onClose, currentUser
             </select>
             {!f.project && <div style={{ fontSize: 11, color: T.red, marginTop: 3 }}>Project is required to schedule a meeting.</div>}
           </div>
-          {/* Recurring toggle + cadence */}
           <div style={{ background: T.bg, borderRadius: 8, padding: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: f.recurring ? 10 : 0 }}>
-              <input type="checkbox" checked={f.recurring} onChange={e => up("recurring", e.target.checked)} id="rec2" style={{ width: 16, cursor: "pointer" }} />
-              <label htmlFor="rec2" style={{ fontSize: 13, cursor: "pointer", fontWeight: 600 }}>Recurring meeting</label>
+            <div style={{ fontSize: 12, fontWeight: 700, color: T.navy, marginBottom: 8 }}>Meeting Frequency</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+              {FREQ_OPTS.map(o => {
+                const active = freqMode === o.v;
+                return (
+                  <button key={o.v} onClick={() => setFreq(o.v)} style={{ padding: "10px 8px", borderRadius: 8, border: `2px solid ${active ? T.navy : T.border}`, background: active ? T.navy : "#fff", color: active ? "#fff" : T.text, cursor: "pointer", textAlign: "center", transition: "all .15s" }}>
+                    <div style={{ fontSize: 16, marginBottom: 4 }}>{o.icon}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700 }}>{o.l}</div>
+                    <div style={{ fontSize: 10, opacity: .7, marginTop: 2 }}>{o.sub}</div>
+                  </button>
+                );
+              })}
             </div>
-            {f.recurring && (
-              <div>
-                <Lbl t="Recurrence Frequency" />
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
-                  {RECURRENCE_OPTS.map(o => (
-                    <button key={o.v} onClick={() => up("recurrence", o.v)} style={{ padding: "5px 12px", borderRadius: 6, border: `1.5px solid ${f.recurrence === o.v ? T.navy : T.border}`, background: f.recurrence === o.v ? T.navy : "transparent", color: f.recurrence === o.v ? "#fff" : T.text, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                      {o.l}
-                    </button>
-                  ))}
-                </div>
-                <div style={{ marginTop: 10 }}>
-                  <Lbl t="Scheduled Days" />
-                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 4 }}>
-                    {DAY_OPTS.map(d => {
-                      const active = f.scheduledDays.includes(d);
-                      return (
-                        <button key={d} onClick={() => up("scheduledDays", active ? f.scheduledDays.filter(x => x !== d) : [...f.scheduledDays, d])} style={{ padding: "5px 10px", borderRadius: 6, border: `1.5px solid ${active ? T.navy : T.border}`, background: active ? T.navy : "transparent", color: active ? "#fff" : T.text, fontSize: 11, fontWeight: 600, cursor: "pointer", minWidth: 36 }}>
-                          {d}
-                        </button>
-                      );
-                    })}
-                  </div>
+            {freqMode === "selective" && (
+              <div style={{ marginTop: 10, padding: "8px 10px", background: "#fff", borderRadius: 8, border: `1px solid ${T.border}` }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: T.text2, marginBottom: 6 }}>Select days (Mon – Sat)</div>
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                  {DAY_OPTS.map(d => {
+                    const active = f.scheduledDays.includes(d);
+                    return (
+                      <button key={d} onClick={() => up("scheduledDays", active ? f.scheduledDays.filter(x => x !== d) : [...f.scheduledDays, d])} style={{ padding: "5px 10px", borderRadius: 6, border: `1.5px solid ${active ? T.navy : T.border}`, background: active ? T.navy : "transparent", color: active ? "#fff" : T.text, fontSize: 11, fontWeight: 600, cursor: "pointer", minWidth: 36 }}>
+                        {d}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -6128,6 +6326,41 @@ export default function App() {
     return () => clearInterval(mtgTimerRef.current);
   }, [mtgRunning, globalActiveMtg]);
 
+  // ── Background Autosave ──
+  // 1) Periodically flush any pending (failed) saves to the backend.
+  // 2) Periodically snapshot core collections to localStorage as a backup.
+  useEffect(() => {
+    const flushTimer = setInterval(() => { flushPendingSaves(); }, 15000);
+    const snapTimer = setInterval(() => {
+      snapshotLocal({ actions, meetings, projects, machines });
+      if (pendingOps.size === 0) { _autosaveState = { ..._autosaveState, status: "saved", lastSaved: Date.now() }; emitAutosave(); }
+    }, 30000);
+    // flush once shortly after load to recover anything queued
+    const kick = setTimeout(() => flushPendingSaves(), 4000);
+    return () => { clearInterval(flushTimer); clearInterval(snapTimer); clearTimeout(kick); };
+  }, [actions, meetings, projects, machines]);
+
+  // ── Live meeting draft autosave ──
+  // While a meeting is actively running, push the live transcript / fast
+  // actions / insights to the backend so an in-progress meeting is never lost
+  // if the tab crashes or is closed before the final commit.
+  useEffect(() => {
+    if (!mtgRunning || !globalActiveMtg || !globalActiveMtg.id) return;
+    const draftTimer = setInterval(() => {
+      const draft = {
+        txLines: mtgTxLines || [],
+        fastActions: mtgFastActions || [],
+        insights: mtgInsights || [],
+        elapsed: mtgElapsed || 0,
+        ts: Date.now(),
+      };
+      apiUpdate("meetings", globalActiveMtg.id, { live_draft: draft }, { track: false })
+        .then(() => { _autosaveState = { ..._autosaveState, status: "saved", lastSaved: Date.now() }; emitAutosave(); })
+        .catch(() => { /* will retry next tick */ });
+    }, 15000);
+    return () => clearInterval(draftTimer);
+  }, [mtgRunning, globalActiveMtg, mtgTxLines, mtgFastActions, mtgInsights, mtgElapsed]);
+
   // Reset meeting state when meeting ends
   const clearMeetingState = () => {
     setGlobalActiveMtg(null); setMtgRunning(false); setMtgElapsed(0);
@@ -6192,7 +6425,8 @@ export default function App() {
     if (globalActiveMtg && globalActiveMtg.id) {
       const sessionEntry = { date: todayStr(), duration: mtgElapsed || 0, actionCount: rows.length, attendees: ensureArray(globalActiveMtg.attendees || []), facilitator: globalActiveMtg.facilitator || "" };
       setMeetings(p => (p || []).map(m => m.id === globalActiveMtg.id ? { ...m, completedSessions: [...ensureArray(m.completedSessions), sessionEntry] } : m));
-      apiUpdate("meetings", globalActiveMtg.id, { completedSessions: [...ensureArray(globalActiveMtg.completedSessions), sessionEntry] });
+      // Persist the completed session AND clear the live draft in one update.
+      apiUpdate("meetings", globalActiveMtg.id, { completedSessions: [...ensureArray(globalActiveMtg.completedSessions), sessionEntry], live_draft: {} }, { track: false });
     }
   };
   const updateAction = async (id, patch) => {

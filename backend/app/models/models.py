@@ -146,6 +146,7 @@ class Meeting(Base):
     completed_sessions = Column(JSONB, default=list)
     guidelines = Column(JSONB, default=list)
     scheduled_days = Column(JSONB, default=list)
+    live_draft = Column(JSONB, default=dict)
     plant = relationship("Plant", back_populates="meetings")
     project = relationship("Project", back_populates="meetings")
 

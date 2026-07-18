@@ -222,6 +222,7 @@ class MeetingUpdate(BaseModel):
     completed_sessions: Optional[List[Any]] = None
     guidelines: Optional[List[Any]] = None
     scheduled_days: Optional[List[str]] = None
+    live_draft: Optional[dict] = None
 
 
 class MeetingPresetCreate(BaseModel):

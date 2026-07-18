@@ -165,6 +165,14 @@ def migrate_schema(conn):
                 conn.execute(text(
                     "ALTER TABLE meetings ADD COLUMN guidelines JSONB DEFAULT '[]'::jsonb"
                 ))
+            if "scheduled_days" not in mtg_cols:
+                conn.execute(text(
+                    "ALTER TABLE meetings ADD COLUMN scheduled_days JSONB DEFAULT '[]'::jsonb"
+                ))
+            if "live_draft" not in mtg_cols:
+                conn.execute(text(
+                    "ALTER TABLE meetings ADD COLUMN live_draft JSONB DEFAULT '{}'::jsonb"
+                ))
         except Exception as e:
             print(f"[migrate] meetings column migration skipped: {e}")
 
