@@ -296,6 +296,53 @@ function ensureArray(val) {
   return [];
 }
 
+/* ─── Weekly meeting belt ──────────────────────────────────────────
+   Returns the 7 days (Mon–Sun) of the current week with, for each day:
+   - hasSession: a visible meeting ran a completed session that day
+   - count / done: actions created that day (dateOfAction) and how many
+     are COMPLETED
+   - color: green = all done, amber = partial, red = session but none
+     done, null = no session / no actions (neutral)
+*/
+const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+function startOfWeekMonday(d) {
+  const x = new Date(d);
+  const day = x.getDay(); // 0=Sun..6=Sat
+  const diff = (day === 0 ? -6 : 1 - day); // back to Monday
+  x.setDate(x.getDate() + diff);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+function buildWeekBelt(meetings, actions) {
+  const monday = startOfWeekMonday(new Date());
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const dateStr = d.toISOString().split("T")[0];
+    const sessionDates = new Set();
+    (meetings || []).forEach(m => (m.completedSessions || []).forEach(s => {
+      if (s.date === dateStr) sessionDates.add(s.date);
+    }));
+    const hasSession = sessionDates.size > 0;
+    const dayActions = (actions || []).filter(a => a.dateOfAction === dateStr || a.created === dateStr);
+    const count = dayActions.length;
+    const done = dayActions.filter(a => a.status === "COMPLETED" || a.status === "DROPPED").length;
+    let color = null;
+    if (hasSession || count > 0) {
+      if (count > 0 && done === count) color = "green";
+      else if (done > 0) color = "amber";
+      else color = "red";
+    }
+    days.push({
+      dateStr, dayName: WEEKDAY_NAMES[i], dayNum: d.getDate(),
+      hasSession, count, done, color,
+      isToday: dateStr === new Date().toISOString().split("T")[0],
+    });
+  }
+  return days;
+}
+
 /* ─── usePostgresDB hook ───────────────────────────────────────────────── */
 function usePostgresDB({ defaultUsers, defaultPlants, defaultDepts,
   defaultActions, defaultMeetings, defaultProjects, defaultEscMatrix, defaultPresets, defaultMachines, defaultRoles }) {
@@ -2089,6 +2136,41 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
                 </div>
               ))}
               {(visibleMeetings || []).filter(m => m.scheduledDays && m.scheduledDays.length > 0).length === 0 && <div style={{ fontSize: 12, color: T.text2, fontStyle: "italic" }}>No meetings with scheduled days</div>}
+            </div>
+          </div>
+
+          {/* ── Weekly meeting belt: 7 boxes (Mon–Sun) ── */}
+          <div style={{ marginTop: 24 }}>
+            <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, fontSize: 15, color: T.navy, display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              📆 This Week's Meeting Belt
+            </div>
+            <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+              {buildWeekBelt(visibleMeetings, actions).map(day => {
+                const beltColor = day.color === "green" ? T.green : day.color === "amber" ? T.amber : day.color === "red" ? T.red : null;
+                const bg = beltColor ? beltColor + "18" : "#F5F5FB";
+                const border = beltColor ? beltColor : T.border;
+                return (
+                  <div key={day.dateStr} title={`${day.dayName} ${day.dayNum} — ${day.hasSession ? day.count + " action(s), " + day.done + " done" : "no meeting"}`}
+                    style={{ flex: "1 0 0", minWidth: 64, borderRadius: 10, border: `1.5px solid ${border}`, background: bg, padding: "10px 6px", textAlign: "center", position: "relative" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: day.isToday ? T.navy : T.text2, textTransform: "uppercase", letterSpacing: .3 }}>{day.dayName}</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: T.text, lineHeight: 1.1, margin: "2px 0 6px" }}>{day.dayNum}</div>
+                    {day.hasSession || day.count > 0 ? (
+                      <>
+                        <div style={{ fontFamily: "'Sora',sans-serif", fontSize: 18, fontWeight: 800, color: beltColor || T.text2 }}>{day.count}</div>
+                        <div style={{ fontSize: 9, color: T.text2, fontWeight: 600 }}>{day.done === day.count && day.count > 0 ? "All done" : day.done + " done"}</div>
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 9, color: T.text2, fontWeight: 600, marginTop: 6 }}>—</div>
+                    )}
+                    {beltColor && <div style={{ position: "absolute", top: 6, right: 6, width: 9, height: 9, borderRadius: "50%", background: beltColor }} />}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 10, color: T.text2 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: T.green }} /> All completed</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: T.amber }} /> Partial</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: T.red }} /> None done</span>
             </div>
           </div>
 
