@@ -198,6 +198,7 @@ class MeetingCreate(BaseModel):
     project_id: Optional[str] = None
     completed_sessions: Optional[List[Any]] = None
     guidelines: Optional[List[Any]] = None
+    scheduled_days: Optional[List[str]] = None
 
 
 class MeetingUpdate(BaseModel):
@@ -220,6 +221,7 @@ class MeetingUpdate(BaseModel):
     project_id: Optional[str] = None
     completed_sessions: Optional[List[Any]] = None
     guidelines: Optional[List[Any]] = None
+    scheduled_days: Optional[List[str]] = None
 
 
 class MeetingPresetCreate(BaseModel):

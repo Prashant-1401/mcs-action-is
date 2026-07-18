@@ -145,6 +145,7 @@ class Meeting(Base):
     project_id = Column(String, ForeignKey("projects.id", onupdate="CASCADE", ondelete="SET NULL"))
     completed_sessions = Column(JSONB, default=list)
     guidelines = Column(JSONB, default=list)
+    scheduled_days = Column(JSONB, default=list)
     plant = relationship("Plant", back_populates="meetings")
     project = relationship("Project", back_populates="meetings")
 

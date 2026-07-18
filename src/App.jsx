@@ -1202,7 +1202,7 @@ function ActionSidePanel({ action, onClose, onUpdate, users, plants, depts, curr
         <div style={{ padding: "16px 22px", overflowY: "auto", flex: 1, maxHeight: "calc(100vh - 200px)" }}>
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: T.text2, textTransform: "uppercase", letterSpacing: .4, marginBottom: 3 }}>Responsible</div>
-            <MultiUserSelect value={action.responsible} users={(users || []).filter(u => { if (action.plant && action.plant !== "All") return !u.plant || u.plant === "All" || u.plant === action.plant; if (!isUserAdmin(user) && user?.plant && user.plant !== "All") return !u.plant || u.plant === "All" || u.plant === user.plant; return true; })} onChange={v => onUpdate && onUpdate(action.id, { responsible: v })} />
+            <MultiUserSelect value={action.responsible} users={(users || []).filter(u => { if (action.plant && action.plant !== "All") return !u.plant || u.plant === "All" || u.plant === action.plant; if (!isUserAdmin(user) && user?.plant && user.plant !== "All") return !u.plant || u.plant === "All" || u.plant === user.plant; return true; })} onChange={v => { const patch = { responsible: v }; const firstName = (v || "").split(",").map(s => s.trim()).filter(Boolean)[0]; if (firstName) { const u = (users || []).find(x => x.name === firstName); if (u) { if (u.plant) patch.plant = u.plant; if (u.dept) patch.section = u.dept; } } onUpdate && onUpdate(action.id, patch); }} />
           </div>
           <InlineField label="Due Date" k="due" value={action.due} type="date" />
           <InlineField label="Status" k="status" value={action.status} opts={["NOT STARTED", "IN PROCESS", "COMPLETED", "DROPPED"]} />
@@ -1256,9 +1256,9 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   const scopedActions = isAdmin
     ? actions
     : actions.filter(a => {
-    // Non-admin: scope by plant first, then only show actions where user is responsible
+    // Non-admin: scope by plant first, then show actions where user is responsible OR allocated by user
     if (user?.plant !== "All" && a.plant && a.plant !== user?.plant) return false;
-    return responsibleMatchesUsers(a.responsible, [...subNamesLower, userName].filter(Boolean));
+    return responsibleMatchesUsers(a.responsible, [...subNamesLower, userName].filter(Boolean)) || (a.allocatedBy || "").trim().toLowerCase() === userName;
   });
 
   const total = scopedActions.length;
@@ -1268,8 +1268,8 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   const over = scopedActions.filter(isOverdue).length;
   const crit = scopedActions.filter(a => a.priority === "CRITICAL" && a.status !== "COMPLETED" && a.status !== "DROPPED").length;
 
-  // Fix 2 & 4: My open actions as Responsible — clickable, opens side panel
-  const myOwn = actions.filter(a => responsibleMatchesUsers(a.responsible, [userName].filter(Boolean)) && userName && a.status !== "COMPLETED" && a.status !== "DROPPED")
+  // Fix 2 & 4: My open actions as Responsible or Allocator — clickable, opens side panel
+  const myOwn = actions.filter(a => (responsibleMatchesUsers(a.responsible, [userName].filter(Boolean)) || (a.allocatedBy || "").trim().toLowerCase() === userName) && userName && a.status !== "COMPLETED" && a.status !== "DROPPED")
     .sort((a, b) => {
       if (!a.due && !b.due) return 0;
       if (!a.due) return 1;
@@ -1922,6 +1922,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
                         <Chip label={m.plant} color={T.navy} />
                         {m.recurring && <Chip label="Recurring" color={T.slate} />}
+                        {m.scheduledDays && m.scheduledDays.length > 0 && <Chip label={m.scheduledDays.join(", ")} color={T.amber} />}
                       </div>
                       <div style={{ fontSize: 11, color: T.text2, marginBottom: 6 }}>Facilitated by <b style={{ color: T.text }}>{m.facilitator}</b></div>
                       {attendees.length > 0 && (
@@ -1946,26 +1947,21 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
 
           <div style={{ marginTop: 24 }}>
             <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, fontSize: 15, color: T.navy, display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-              ✅ Completed Meetings
+              📅 Scheduled Days
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {(meetings || []).flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : []).map(s => ({ ...m, sessionDate: s.date, sessionDur: s.duration })))
-                .filter(m => isAdmin || (user?.plant && user.plant !== "All" ? m.plant === user.plant : true))
-                .sort((a, b) => (b.sessionDate || "").localeCompare(a.sessionDate || ""))
-                .slice(0, 5)
-                .map((m, i) => (
-                  <div key={m.id + "_" + i} className="card" style={{ padding: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 13, color: T.navy }}>{m.type}</div>
-                      <div style={{ fontSize: 11, color: T.text2 }}>{m.plant} · {m.facilitator}</div>
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 11, fontWeight: 600 }}>{m.sessionDate}</div>
-                      <div style={{ fontSize: 10, color: T.text2 }}>{m.sessionDur} min</div>
-                    </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {(visibleMeetings || []).filter(m => m.scheduledDays && m.scheduledDays.length > 0).map((m, i) => (
+                <div key={m.id || `sd-${i}`} className="card" style={{ padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: T.navy }}>{m.type}</div>
+                    <div style={{ fontSize: 11, color: T.text2 }}>{m.time} · {m.facilitator}</div>
                   </div>
-                ))}
-              {(visibleMeetings || []).flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : [])).length === 0 && <div style={{ fontSize: 12, color: T.text2, fontStyle: "italic" }}>No completed meetings</div>}
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {ensureArray(m.scheduledDays).map(d => <span key={d} style={{ padding: "2px 8px", borderRadius: 6, background: T.navy + "15", color: T.navy, fontSize: 10, fontWeight: 700 }}>{d}</span>)}
+                  </div>
+                </div>
+              ))}
+              {(visibleMeetings || []).filter(m => m.scheduledDays && m.scheduledDays.length > 0).length === 0 && <div style={{ fontSize: 12, color: T.text2, fontStyle: "italic" }}>No meetings with scheduled days</div>}
             </div>
           </div>
 
@@ -2034,13 +2030,17 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
           </div>
         </div>
       </div>
+
+      {/* ── Completed Meeting Dashboard ── */}
+      <CompletedMeetingDashboard meetings={meetings} actions={actions} users={users} user={user} plants={plants} />
+
       {charter && <ProjectCharterModal pr={charter} onClose={() => { setCharter(null); setCharterActionSel(null); }} actions={actions} meetings={meetings} user={user} users={users} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); onProjectUpdate(updated); }} onActionSelect={a => setCharterActionSel(a)} />}
       {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={(id, patch) => { setActions(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); apiUpdate("actions", id, patch); setCharterActionSel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} machines={machines} />}
       {showAddMtg && <AddMeetingModal plants={plants} users={users} projects={projects} onSave={m => { const mtg = { ...m, id: "M" + Date.now(), completedSessions: [] }; setMeetings(p => [...p, mtg]); apiCreate("meetings", resolveRecordIds(mtg, plants, depts, machines, projects)); setShowAddMtg(false); }} onClose={() => setShowAddMtg(false)} currentUser={user} />}
       {/* Feature 3: Add Project Modal */}
       {showAddProject && <AddProjectModal plants={plants} users={users} onSave={p => { const pr = { ...p, id: "PR" + Date.now(), milestones: [], risks: [], team: [], budget: p.budget ? Number(p.budget) || 0 : 0 }; setProjects(prev => [...prev, pr]); apiCreate("projects", pr); showAddProject && setShowAddProject(false); }} onClose={() => setShowAddProject(false)} currentUser={user} />}
       {/* Feature 4: Meeting Plan Side Panel */}
-      {mtgPlan && <MeetingPlanPanel key={mtgPlan.id} mtg={mtgPlan} canEdit={canEditMeetings} projects={projects} users={users} plants={plants} onSave={updated => { setMeetings(p => p.map(m => m.id === updated.id ? updated : m)); setMtgPlan(updated); apiUpdate("meetings", updated.id, resolveRecordIds(updated, plants, depts, machines, projects)); }} onClose={() => setMtgPlan(null)} mtgPresets={mtgPresets} />}
+      {mtgPlan && <MeetingPlanPanel key={mtgPlan.id} mtg={mtgPlan} canEdit={canEditMeetings} projects={projects} users={users} plants={plants} onSave={updated => { setMeetings(p => p.map(m => m.id === updated.id ? updated : m)); setMtgPlan(updated); apiUpdate("meetings", updated.id, resolveRecordIds(updated, plants, depts, machines, projects)); }} onClose={() => setMtgPlan(null)} mtgPresets={mtgPresets} currentUser={user} />}
     </div>
   );
 }
@@ -2087,7 +2087,7 @@ function AddProjectModal({ plants, users, onSave, onClose, currentUser }) {
 }
 
 /* Feature 4: Meeting Plan Side Panel */
-function MeetingPlanPanel({ mtg, canEdit, projects, users, plants, onSave, onClose, mtgPresets }) {
+function MeetingPlanPanel({ mtg, canEdit, projects, users, plants, onSave, onClose, mtgPresets, currentUser }) {
   useEscClose(onClose);
   const [editMode, setEditMode] = useState(false);
   const defaultInstructions = ensureArray(mtgPresets?.instructions?.[mtg.type] || ["Follow meeting agenda", "Capture all action points", "Assign clear owners and due dates", "Confirm previous actions before closing"]);
@@ -2138,6 +2138,21 @@ function MeetingPlanPanel({ mtg, canEdit, projects, users, plants, onSave, onClo
               <select value={draft.project || ""} onChange={e => up("project", e.target.value || null)}><option value="">None</option>{projects.map(p => <option key={p.id}>{p.name}</option>)}</select>
             </div>
           )}
+          {(mtg.scheduledDays && mtg.scheduledDays.length > 0) || editMode ? (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.text2, textTransform: "uppercase", letterSpacing: .4, marginBottom: 4 }}>Scheduled Days</div>
+              {editMode
+                ? <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                  {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => {
+                    const days = ensureArray(draft.scheduledDays || []);
+                    const active = days.includes(d);
+                    return <button key={d} onClick={() => up("scheduledDays", active ? days.filter(x => x !== d) : [...days, d])} style={{ padding: "4px 10px", borderRadius: 6, border: `1.5px solid ${active ? T.navy : T.border}`, background: active ? T.navy : "transparent", color: active ? "#fff" : T.text, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{d}</button>;
+                  })}
+                </div>
+                : <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{ensureArray(mtg.scheduledDays || []).map(d => <span key={d} style={{ padding: "3px 10px", borderRadius: 6, background: T.navy + "15", color: T.navy, fontSize: 11, fontWeight: 600 }}>{d}</span>)}</div>
+              }
+            </div>
+          ) : null}
           <div style={{ marginBottom: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: T.navy }}>📌 Meeting Guidelines</div>
@@ -2196,10 +2211,176 @@ function MeetingPlanPanel({ mtg, canEdit, projects, users, plants, onSave, onClo
   );
 }
 
+/* ── COMPLETED MEETING DASHBOARD ── */
+function CompletedMeetingDashboard({ meetings, actions, users, user, plants }) {
+  const isAdmin = isUserAdmin(user);
+  const [dashFilter, setDashFilter] = useState("all");
+  const [dashSearch, setDashSearch] = useState("");
+
+  // Flatten all completed sessions with their parent meeting data
+  const allSessions = (meetings || []).flatMap(m =>
+    (Array.isArray(m.completedSessions) ? m.completedSessions : []).map(s => ({
+      ...m,
+      sessionDate: s.date,
+      sessionDur: s.duration || 0,
+      sessionActionCount: s.actionCount || 0,
+    }))
+  ).filter(s => isAdmin || (user?.plant && user.plant !== "All" ? s.plant === user.plant : true));
+
+  // Enrich sessions with actual action counts from the actions table
+  const enrichedSessions = allSessions.map(s => {
+    const matchedActions = (actions || []).filter(a => {
+      const matchType = s.id ? (a.srcId === s.id || (!a.srcId && a.src === s.type)) : a.src === s.type;
+      const matchDate = s.sessionDate ? (a.dateOfAction === s.sessionDate || a.created === s.sessionDate) : true;
+      return matchType && matchDate;
+    });
+    return { ...s, liveActionCount: matchedActions.length, matchedActions };
+  });
+
+  // Filter & search
+  const filtered = enrichedSessions
+    .filter(s => {
+      if (dashSearch) {
+        const q = dashSearch.toLowerCase();
+        return (s.type || "").toLowerCase().includes(q) || (s.plant || "").toLowerCase().includes(q) || (s.facilitator || "").toLowerCase().includes(q);
+      }
+      if (dashFilter === "week") {
+        const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+        return s.sessionDate && new Date(s.sessionDate) >= weekAgo;
+      }
+      if (dashFilter === "month") {
+        const monthAgo = new Date(); monthAgo.setMonth(monthAgo.getMonth() - 1);
+        return s.sessionDate && new Date(s.sessionDate) >= monthAgo;
+      }
+      return true;
+    })
+    .sort((a, b) => (b.sessionDate || "").localeCompare(a.sessionDate || ""));
+
+  // Summary stats
+  const totalSessions = filtered.length;
+  const totalMinutes = filtered.reduce((sum, s) => sum + (s.sessionDur || 0), 0);
+  const totalActions = filtered.reduce((sum, s) => sum + (s.liveActionCount || s.sessionActionCount || 0), 0);
+  const avgDuration = totalSessions > 0 ? Math.round(totalMinutes / totalSessions) : 0;
+  const uniquePlants = [...new Set(filtered.map(s => s.plant).filter(Boolean))];
+  const uniqueFacilitators = [...new Set(filtered.map(s => s.facilitator).filter(Boolean))];
+
+  // Per-meeting-type breakdown
+  const typeBreakdown = {};
+  filtered.forEach(s => {
+    if (!typeBreakdown[s.type]) typeBreakdown[s.type] = { count: 0, totalMin: 0, totalActions: 0 };
+    typeBreakdown[s.type].count++;
+    typeBreakdown[s.type].totalMin += s.sessionDur || 0;
+    typeBreakdown[s.type].totalActions += s.liveActionCount || s.sessionActionCount || 0;
+  });
+
+  if (allSessions.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 28 }}>
+      <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 16, color: T.navy, display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+        ✅ Completed Meeting Dashboard
+        <span style={{ background: T.green + "18", color: T.green, borderRadius: 10, padding: "3px 12px", fontSize: 11, fontWeight: 700 }}>{totalSessions} sessions</span>
+      </div>
+
+      {/* KPI Row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+        {[
+          { label: "Total Sessions", value: totalSessions, icon: "📊", color: T.navy },
+          { label: "Total Duration", value: totalMinutes >= 60 ? `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m` : `${totalMinutes}m`, icon: "⏱", color: T.amber },
+          { label: "Actions Generated", value: totalActions, icon: "⚡", color: T.green },
+          { label: "Avg Duration", value: `${avgDuration}m`, icon: "📈", color: T.slate },
+        ].map(k => (
+          <div key={k.label} style={{ background: k.color + "08", border: `1.5px solid ${k.color}25`, borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ fontSize: 22 }}>{k.icon}</div>
+            <div>
+              <div style={{ fontFamily: "'Sora',sans-serif", fontSize: 20, fontWeight: 800, color: k.color }}>{k.value}</div>
+              <div style={{ fontSize: 10, color: T.text2, textTransform: "uppercase", letterSpacing: .4, marginTop: 2 }}>{k.label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters & Search */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+        <input value={dashSearch} onChange={e => setDashSearch(e.target.value)} placeholder="🔍 Search meetings…" style={{ width: 220, fontSize: 12, padding: "6px 12px", border: `1px solid ${T.border}`, borderRadius: 8, outline: "none" }} />
+        {[
+          { v: "all", l: "All Time" },
+          { v: "week", l: "Last 7 Days" },
+          { v: "month", l: "Last 30 Days" },
+        ].map(o => (
+          <button key={o.v} onClick={() => setDashFilter(o.v)} style={{ padding: "5px 14px", borderRadius: 8, border: `1.5px solid ${dashFilter === o.v ? T.navy : T.border}`, background: dashFilter === o.v ? T.navy : "transparent", color: dashFilter === o.v ? "#fff" : T.text, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{o.l}</button>
+        ))}
+        <div style={{ marginLeft: "auto", fontSize: 11, color: T.text2 }}>
+          {uniquePlants.length} plant{uniquePlants.length !== 1 ? "s" : ""} · {uniqueFacilitators.length} facilitator{uniqueFacilitators.length !== 1 ? "s" : ""}
+        </div>
+      </div>
+
+      {/* Type Breakdown Cards */}
+      {Object.keys(typeBreakdown).length > 0 && (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 20 }}>
+          {Object.entries(typeBreakdown).sort((a, b) => b[1].count - a[1].count).map(([type, data]) => (
+            <div key={type} className="card" style={{ padding: "10px 16px", minWidth: 160, borderLeft: `4px solid ${T.navy}` }}>
+              <div style={{ fontWeight: 700, fontSize: 12, color: T.navy, marginBottom: 4 }}>{type}</div>
+              <div style={{ fontSize: 11, color: T.text2 }}>{data.count} sessions · {data.totalMin}m · {data.totalActions} actions</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Sessions Table */}
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: T.bg }}>
+                <th style={{ textAlign: "left", padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5 }}>Meeting</th>
+                <th style={{ textAlign: "left", padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5 }}>Plant</th>
+                <th style={{ textAlign: "left", padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5 }}>Facilitator</th>
+                <th style={{ textAlign: "left", padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5 }}>Date</th>
+                <th style={{ textAlign: "center", padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5 }}>Duration</th>
+                <th style={{ textAlign: "center", padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5 }}>Actions</th>
+                <th style={{ textAlign: "center", padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5 }}>Attendees</th>
+                <th style={{ textAlign: "left", padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5 }}>Project</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((s, i) => {
+                const attendees = ensureArray(s.attendees || []);
+                return (
+                  <tr key={`${s.id}_${i}`} style={{ borderTop: `1px solid ${T.border}`, background: i % 2 === 0 ? "#fff" : T.bg + "60" }}>
+                    <td style={{ padding: "10px 14px", fontWeight: 600, color: T.navy }}>{s.type}</td>
+                    <td style={{ padding: "10px 14px" }}><Chip label={s.plant} color={T.navy} /></td>
+                    <td style={{ padding: "10px 14px", color: T.text }}>{s.facilitator}</td>
+                    <td style={{ padding: "10px 14px", color: T.text2 }}>{fmt(s.sessionDate)}</td>
+                    <td style={{ padding: "10px 14px", textAlign: "center", fontWeight: 600 }}>{s.sessionDur}m</td>
+                    <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                      <span style={{ background: T.green + "18", color: T.green, borderRadius: 8, padding: "2px 10px", fontWeight: 700, fontSize: 11 }}>{s.liveActionCount || s.sessionActionCount || 0}</span>
+                    </td>
+                    <td style={{ padding: "10px 14px" }}>
+                      <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+                        {attendees.slice(0, 3).map((name, j) => <Avatar key={j} name={name} size={18} users={users} />)}
+                        {attendees.length > 3 && <span style={{ fontSize: 10, color: T.text2 }}>+{attendees.length - 3}</span>}
+                      </div>
+                    </td>
+                    <td style={{ padding: "10px 14px", color: T.amber, fontWeight: 600 }}>{s.project || "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {filtered.length === 0 && (
+          <div style={{ padding: 30, textAlign: "center", color: T.text2, fontSize: 13 }}>No completed meetings match your filters.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ADD MEETING MODAL */
 function AddMeetingModal({ plants, users, projects, onSave, onClose, currentUser }) {
   useEscClose(onClose);
-  const [f, setF] = useState({ name: "", type: "Custom", plant: "", time: "09:00", dur: 60, facilitator: "", recurring: false, recurrence: "daily", project: null });
+  const [f, setF] = useState({ name: "", type: "Custom", plant: "", time: "09:00", dur: 60, facilitator: "", recurring: false, recurrence: "daily", project: null, scheduledDays: [] });
   const [usePreset, setUsePreset] = useState(false);
   const up = (k, v) => setF(x => ({ ...x, [k]: v }));
   const RECURRENCE_OPTS = [
@@ -2210,6 +2391,7 @@ function AddMeetingModal({ plants, users, projects, onSave, onClose, currentUser
     { v: "quarterly", l: "Quarterly" },
     { v: "yearly", l: "Yearly" },
   ];
+  const DAY_OPTS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const canSave = f.name.trim() && f.plant && f.facilitator && f.time && f.project;
   const submit = () => { if (canSave) onSave({ ...f, type: f.name }); };
   return (
@@ -2265,6 +2447,19 @@ function AddMeetingModal({ plants, users, projects, onSave, onClose, currentUser
                       {o.l}
                     </button>
                   ))}
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <Lbl t="Scheduled Days" />
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 4 }}>
+                    {DAY_OPTS.map(d => {
+                      const active = f.scheduledDays.includes(d);
+                      return (
+                        <button key={d} onClick={() => up("scheduledDays", active ? f.scheduledDays.filter(x => x !== d) : [...f.scheduledDays, d])} style={{ padding: "5px 10px", borderRadius: 6, border: `1.5px solid ${active ? T.navy : T.border}`, background: active ? T.navy : "transparent", color: active ? "#fff" : T.text, fontSize: 11, fontWeight: 600, cursor: "pointer", minWidth: 36 }}>
+                          {d}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             )}
@@ -3127,7 +3322,7 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projec
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div><Lbl t="Action Point Type" req /><select value={f.actionPointType} onChange={e => up("actionPointType", e.target.value)}><option value="">Select type…</option>{["Corrective Action","Preventive Action","Improvement","Safety","Maintenance","Quality","Compliance","Other"].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
           <div><Lbl t="Action Point" req /><textarea value={f.text} onChange={e => up("text", e.target.value)} style={{ height: 72, resize: "none" }} placeholder="Describe the action…" /></div>
-          <div><Lbl t="Responsible Person(s)" req /><MultiUserSelect value={f.responsible} users={users.filter(u => { if (f.plant && f.plant !== "All") return !u.plant || u.plant === "All" || u.plant === f.plant; if (!isUserAdmin(currentUser) && currentUser?.plant && currentUser.plant !== "All") return !u.plant || u.plant === "All" || u.plant === currentUser.plant; return true; })} onChange={v => up("responsible", v)} /></div>
+          <div><Lbl t="Responsible Person(s)" req /><MultiUserSelect value={f.responsible} users={users.filter(u => { if (f.plant && f.plant !== "All") return !u.plant || u.plant === "All" || u.plant === f.plant; if (!isUserAdmin(currentUser) && currentUser?.plant && currentUser.plant !== "All") return !u.plant || u.plant === "All" || u.plant === currentUser.plant; return true; })} onChange={v => { up("responsible", v); const firstName = (v || "").split(",").map(s => s.trim()).filter(Boolean)[0]; if (firstName) { const u = users.find(x => x.name === firstName); if (u) { if (u.plant) up("plant", u.plant); if (u.dept) up("section", u.dept); } } }} /></div>
           <div><Lbl t="Due Date" req /><input type="date" value={f.due} onChange={e => up("due", e.target.value)} /></div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div><Lbl t="Department" /><select value={f.section} onChange={e => up("section", e.target.value)}><option value="General">General</option>{scopedDepts(currentUser, depts).filter(d => !f.plant || f.plant === "All" || !d.plant || d.plant === "All Plants" || d.plant === f.plant).map(d => <option key={d.id} value={d.name}>{d.name}</option>)}{SECTIONS.filter(s => s !== "General" && !scopedDepts(currentUser, depts).filter(d => !f.plant || f.plant === "All" || !d.plant || d.plant === "All Plants" || d.plant === f.plant).find(d => d.name === s)).map(s => <option key={s}>{s}</option>)}</select></div>
@@ -3294,7 +3489,7 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
                 </div>
                 <div style={{ marginBottom: 10 }}><Lbl t="Action Point" req /><textarea value={r.text || ""} onChange={e => up(r.id, "text", e.target.value)} style={{ resize: "none", height: 52, fontSize: 12 }} /></div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-                  <div><Lbl t="Responsible" /><MultiUserSelect value={r.responsible || ""} users={users.filter(u => { if (r.plant && r.plant !== "All") return !u.plant || u.plant === "All" || u.plant === r.plant; if (!isUserAdmin(currentUser) && currentUser?.plant && currentUser.plant !== "All") return !u.plant || u.plant === "All" || u.plant === currentUser.plant; return true; })} onChange={v => up(r.id, "responsible", v)} placeholder="Leave Unassigned" /></div>
+                  <div><Lbl t="Responsible" /><MultiUserSelect value={r.responsible || ""} users={users.filter(u => { if (r.plant && r.plant !== "All") return !u.plant || u.plant === "All" || u.plant === r.plant; if (!isUserAdmin(currentUser) && currentUser?.plant && currentUser.plant !== "All") return !u.plant || u.plant === "All" || u.plant === currentUser.plant; return true; })} onChange={v => { up(r.id, "responsible", v); const firstName = (v || "").split(",").map(s => s.trim()).filter(Boolean)[0]; if (firstName) { const u = users.find(x => x.name === firstName); if (u) { setDraft(d => d.map(a => a.id === r.id ? { ...a, plant: u.plant || a.plant, section: u.dept || a.section } : a)); } } }} placeholder="Leave Unassigned" /></div>
                   <div><Lbl t="Due Date" /><input type="date" value={r.due || ""} onChange={e => up(r.id, "due", e.target.value)} style={{ borderColor: !r.due ? T.amber : T.border }} /></div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
@@ -3460,7 +3655,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
               <InlineField label="Plant" field="plant" value={action.plant} type="select" opts={scopedPlants(user, panelPlants || DEFAULT_PLANTS).map(p => p.name)} />
               <div>
                 <div style={{ fontSize: 10, color: T.text2, fontWeight: 700, textTransform: "uppercase", letterSpacing: .4, marginBottom: 3 }}>Responsible</div>
-                <MultiUserSelect value={action.responsible} users={(allUsers || []).filter(u => { if (action.plant && action.plant !== "All") return !u.plant || u.plant === "All" || u.plant === action.plant; if (!isUserAdmin(user) && user?.plant && user.plant !== "All") return !u.plant || u.plant === "All" || u.plant === user.plant; return true; })} onChange={v => onUpdate(action.id, { responsible: v })} />
+                <MultiUserSelect value={action.responsible} users={(allUsers || []).filter(u => { if (action.plant && action.plant !== "All") return !u.plant || u.plant === "All" || u.plant === action.plant; if (!isUserAdmin(user) && user?.plant && user.plant !== "All") return !u.plant || u.plant === "All" || u.plant === user.plant; return true; })} onChange={v => { const patch = { responsible: v }; const firstName = (v || "").split(",").map(s => s.trim()).filter(Boolean)[0]; if (firstName) { const u = (allUsers || []).find(x => x.name === firstName); if (u) { if (u.plant) patch.plant = u.plant; if (u.dept) patch.section = u.dept; } } onUpdate(action.id, patch); }} />
               </div>
               <InlineField label="Due Date" field="due" value={action.due} type="date" />
               <div><div style={{ fontSize: 10, color: T.text2, fontWeight: 700, textTransform: "uppercase", letterSpacing: .4, marginBottom: 3 }}>Closed On</div><div style={{ fontSize: 12, padding: "3px 6px" }}>{fmt(action.closedOn)}</div></div>
@@ -3626,7 +3821,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   const userNameLower = (user?.name || "").trim().toLowerCase();
   const scoped = isAdmin
     ? actions
-    : actions.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower].filter(Boolean)));
+    : actions.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower].filter(Boolean)) || (a.allocatedBy || "").trim().toLowerCase() === userNameLower);
 
   const toggleFilter = (key, val) => {
     setFiltersPersist(f => {
@@ -4197,7 +4392,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
   const userNameLower = (user?.name || "").trim().toLowerCase();
   let fa = isDashAdmin
     ? actions
-    : actions.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower].filter(Boolean)));
+    : actions.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower].filter(Boolean)) || (a.allocatedBy || "").trim().toLowerCase() === userNameLower);
   if (plantF !== "All") fa = fa.filter(a => a.plant === plantF);
   if (deptF !== "All") fa = fa.filter(a => String(a.section ?? "").toLowerCase().trim() === String(deptF ?? "").toLowerCase().trim() || String(a.dept ?? "").toLowerCase().trim() === String(deptF ?? "").toLowerCase().trim());
 
@@ -4963,10 +5158,10 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
 
   const getActionEscalationState = (action, matrix) => resolveEscalationState(action, matrix, users);
 
-  const scopedActions = isEscAdmin ? actions : actions.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower]));
+  const scopedActions = isEscAdmin ? actions : actions.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower]) || (a.allocatedBy || "").trim().toLowerCase() === userNameLower);
   const scopedAudit = isEscAdmin ? audit : audit.filter(log => {
     const action = actions.find(a => a.sn === log.sn);
-    return action && responsibleMatchesUsers(action.responsible, [userNameLower]);
+    return action && (responsibleMatchesUsers(action.responsible, [userNameLower]) || (action.allocatedBy || "").trim().toLowerCase() === userNameLower);
   });
 
   const activeEscalations = scopedActions.map(a => {
@@ -5239,7 +5434,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
     };
     if (modal.mode === "edit") { setUsers(p => p.map(x => x.id === u.id ? u : x)); apiUpdate("users", u.id, u); } else { setUsers(p => [...p, u]); apiCreate("users", u); } close();
   };
-  const ALL_TABS = [["users", "👥 Users"], ["plants", "🏭 Plants"], ["depts", "🗂 Depts"], ["machines", "⚙ Machines"], ["roles", "🎭 Roles"], ["org", "🌳 Org"], ["team", "🧑‍🤝‍🧑 Team"], ["escmatrix", "🚨 Escalation"], ["presets", "🎙 Presets"]];
+  const ALL_TABS = [["users", "👥 Users"], ["plants", "🏭 Plants"], ["depts", "🗂 Depts"], ["machines", "⚙ Machines"], ["roles", "🎭 Roles"], ["team", "🧑‍🤝‍🧑 Team"], ["escmatrix", "🚨 Escalation"], ["presets", "🎙 Presets"]];
   const TABS = isMasterOnly ? ALL_TABS.filter(([id]) => ["users", "machines", "escmatrix", "presets", "depts"].includes(id)) : ALL_TABS;
 
   const BULK_ENDPOINTS = {
@@ -5279,75 +5474,6 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
     }
   };
 
-  function OrgNode({ name, allUsers, depth, visitedPath }) {
-    // Cycle guard: if this name is already an ancestor of itself in the current
-    // branch (bad data — e.g. A's superior is B and B's superior is A), stop
-    // instead of looping forever. This replaces the old hard "depth > 6" cutoff,
-    // which was silently chopping off — and hiding — anyone deeper than 6 levels.
-    const path = visitedPath || new Set();
-    if (path.has(name)) return null;
-    const nextPath = new Set(path); nextPath.add(name);
-    const u = allUsers.find(x => x.name === name);
-    const reports = allUsers.filter(x => x.superior === name);
-    const color = u?.color || T.slate;
-    const GAP = 12;
-    return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-        <div className="org-node-card" style={{ background: "#fff", border: `2px solid ${color}`, borderRadius: 12, padding: "10px 14px", textAlign: "center", boxShadow: "0 2px 8px rgba(0,0,0,.08)", flexShrink: 0 }}>
-          <div className="org-avatar" style={{ width: 36, height: 36, borderRadius: "50%", background: color + "20", color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, margin: "0 auto 6px" }}>{u?.initials || (name || "?").slice(0, 2).toUpperCase()}</div>
-          <div className="org-name" style={{ fontWeight: 700, fontSize: 11, color: T.text, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
-          <div className="org-role" style={{ fontSize: 10, color: T.text2, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u?.role}</div>
-          {u?.dept && u.dept !== "Management" && <div style={{ fontSize: 9, color: T.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.dept}</div>}
-        </div>
-        {reports.length > 0 && (
-          <>
-            <div style={{ width: 2, height: 18, background: T.border }} />
-            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", position: "relative" }}>
-              {reports.map(r => (
-                <div key={r.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: `0 ${GAP / 2}px` }}>
-                  <div style={{ width: 2, height: 18, background: T.border }} />
-                  <OrgNode name={r.name} allUsers={allUsers} depth={depth + 1} visitedPath={nextPath} />
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    );
-  }
-
-  // Org chart is auto-generated purely from users' role + superior fields —
-  // never manually edited. Admin-Access (plant-scoped) users only get their
-  // own plant's slice; Master/true-Admin get the full org.
-  const orgUsers = users;
-  // True roots: users with no superior at all.
-  const rootlessUsers = orgUsers.filter(u => !u.superior);
-  // Orphans: users whose stated superior doesn't match any real user in the DB
-  // (e.g. "Admin", the built-in owner account, which isn't itself a row in `users`).
-  // Group these by the missing-superior label so they render as ONE tree instead
-  // of N disconnected flat roots.
-  const missingSuperiorLabels = Array.from(new Set(
-    orgUsers.filter(u => u.superior && !orgUsers.find(x => x.name === u.superior)).map(u => u.superior)
-  ));
-  // Dedupe: two rootless users sharing an identical name would otherwise
-  // collide on the same React key below and one would silently vanish.
-  const roots = Array.from(new Set([...rootlessUsers.map(u => u.name), ...missingSuperiorLabels]));
-
-  // Belt-and-suspenders visibility check: walk the tree the same way OrgNode
-  // does (name-based, cycle-safe) and record which user IDs actually get
-  // placed. The `superior` field is a free-text name, so duplicate names,
-  // typos, or a reporting cycle (A→B→A) can leave a real user unreachable
-  // from any root even though they exist in `users`. Anyone left over is
-  // still shown, in a flagged section, instead of silently disappearing.
-  const reachedIds = new Set();
-  const walkOrg = (name, path) => {
-    if (path.has(name)) return;
-    const nextPath = new Set(path); nextPath.add(name);
-    orgUsers.filter(u => u.superior === name).forEach(u => { reachedIds.add(u.id); walkOrg(u.name, nextPath); });
-  };
-  roots.forEach(r => walkOrg(r, new Set()));
-  orgUsers.filter(u => roots.includes(u.name)).forEach(u => reachedIds.add(u.id));
-  const unplacedUsers = orgUsers.filter(u => !reachedIds.has(u.id));
 
   /* ── Section header with Save button ── */
   const SectionHeader = ({ title, sub, onSave, addLabel, onAdd }) => (
@@ -5556,31 +5682,6 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
           {roles.length === 0 && <Empty icon="🎭" title="No roles" sub="Click + Add to register a role." />}
         </div>
       </>}
-
-      {/* ── ORG CHART ── */}
-      {tab === "org" && <div className="card" style={{ padding: 24, overflowX: "auto", overflowY: "auto", maxHeight: "calc(100vh - 160px)" }}>
-        <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 32, alignItems: "center" }}>
-          {roots.map(name => <div key={name} style={{ width: "100%", display: "flex", justifyContent: "center" }}><OrgNode name={name} allUsers={orgUsers} depth={0} /></div>)}
-          {roots.length === 0 && <Empty icon="🌳" title="No org structure" sub="Add users with superior relationships to build the organogram." />}
-        </div>
-        {unplacedUsers.length > 0 && (
-          <div style={{ marginTop: 32, paddingTop: 24, borderTop: `1.5px dashed ${T.border}` }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: T.amber, marginBottom: 12, textAlign: "center" }}>
-              ⚠ {unplacedUsers.length} user{unplacedUsers.length !== 1 ? "s" : ""} couldn't be placed in the hierarchy — check their "Superior" field for a typo or reporting loop
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center" }}>
-              {unplacedUsers.map(u => (
-                <div key={u.id} className="org-node-card" style={{ background: "#fff", border: `2px dashed ${T.amber}`, borderRadius: 12, padding: "10px 14px", textAlign: "center" }}>
-                  <div style={{ width: 36, height: 36, borderRadius: "50%", background: (u.color || T.slate) + "20", color: u.color || T.slate, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, margin: "0 auto 6px" }}>{u.initials || (u.name || "?").slice(0, 2).toUpperCase()}</div>
-                  <div style={{ fontWeight: 700, fontSize: 11, color: T.text }}>{u.name}</div>
-                  <div style={{ fontSize: 10, color: T.text2, marginTop: 2 }}>{u.role}</div>
-                  <div style={{ fontSize: 9, color: T.amber, marginTop: 3 }}>Superior: "{u.superior || "—"}"</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>}
 
       {/* ── TEAM ── */}
       {tab === "team" && <TeamPage users={users} actions={actions} escMatrix={escMatrix} plants={plants} depts={depts} user={user} isAdmin={isAdmin} setActions={setActions} />}
@@ -5932,14 +6033,35 @@ export default function App() {
     ]
   });
 
-  // Global active meeting — persists across page navigation
-  const [globalActiveMtg, setGlobalActiveMtg] = useState(null);
-  // Global meeting runtime state — persists when user navigates away from Work page
-  const [mtgRunning, setMtgRunning] = useState(false);
-  const [mtgElapsed, setMtgElapsed] = useState(0);
-  const [mtgTxLines, setMtgTxLines] = useState([]);
-  const [mtgFastActions, setMtgFastActions] = useState([]);
-  const [mtgInsights, setMtgInsights] = useState([]);
+  // Global active meeting — persists across page navigation + browser refresh
+  const [globalActiveMtg, setGlobalActiveMtg] = useState(() => {
+    try { const s = localStorage.getItem("mcs_mtg_active"); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
+  const [mtgRunning, setMtgRunning] = useState(() => {
+    try { return localStorage.getItem("mcs_mtg_running") === "true"; } catch { return false; }
+  });
+  const [mtgElapsed, setMtgElapsed] = useState(() => {
+    try {
+      const saved = parseInt(localStorage.getItem("mcs_mtg_elapsed") || "0", 10);
+      const savedTs = parseInt(localStorage.getItem("mcs_mtg_timestamp") || "0", 10);
+      // If meeting was running, add elapsed wall-clock time since last save
+      const running = localStorage.getItem("mcs_mtg_running") === "true";
+      if (running && savedTs > 0) {
+        const diff = Math.floor((Date.now() - savedTs) / 1000);
+        return saved + diff;
+      }
+      return saved;
+    } catch { return 0; }
+  });
+  const [mtgTxLines, setMtgTxLines] = useState(() => {
+    try { const s = localStorage.getItem("mcs_mtg_txlines"); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
+  const [mtgFastActions, setMtgFastActions] = useState(() => {
+    try { const s = localStorage.getItem("mcs_mtg_fastactions"); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
+  const [mtgInsights, setMtgInsights] = useState(() => {
+    try { const s = localStorage.getItem("mcs_mtg_insights"); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
   const mtgTxLineNo = useRef(0);
   const mtgTimerRef = useRef(null);
   const mtgTxRef = useRef(null);
@@ -5952,6 +6074,31 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("mcs_session_page", page);
   }, [page]);
+
+  // Persist meeting room state to localStorage so it survives browser refresh
+  useEffect(() => {
+    if (globalActiveMtg) localStorage.setItem("mcs_mtg_active", JSON.stringify(globalActiveMtg));
+    else localStorage.removeItem("mcs_mtg_active");
+  }, [globalActiveMtg]);
+  useEffect(() => {
+    localStorage.setItem("mcs_mtg_running", String(mtgRunning));
+  }, [mtgRunning]);
+  useEffect(() => {
+    localStorage.setItem("mcs_mtg_elapsed", String(mtgElapsed));
+    localStorage.setItem("mcs_mtg_timestamp", String(Date.now()));
+  }, [mtgElapsed]);
+  useEffect(() => {
+    if (mtgTxLines.length > 0) localStorage.setItem("mcs_mtg_txlines", JSON.stringify(mtgTxLines));
+    else localStorage.removeItem("mcs_mtg_txlines");
+  }, [mtgTxLines]);
+  useEffect(() => {
+    if (mtgFastActions.length > 0) localStorage.setItem("mcs_mtg_fastactions", JSON.stringify(mtgFastActions));
+    else localStorage.removeItem("mcs_mtg_fastactions");
+  }, [mtgFastActions]);
+  useEffect(() => {
+    if (mtgInsights.length > 0) localStorage.setItem("mcs_mtg_insights", JSON.stringify(mtgInsights));
+    else localStorage.removeItem("mcs_mtg_insights");
+  }, [mtgInsights]);
 
   // Seed in-memory audit from persisted audit data on first load.
   // Dependency is intentionally dbReady only — running on persistedAudit would create a sync loop.
@@ -5983,6 +6130,7 @@ export default function App() {
   const clearMeetingState = () => {
     setGlobalActiveMtg(null); setMtgRunning(false); setMtgElapsed(0);
     setMtgTxLines([]); setMtgFastActions([]); setMtgInsights([]); mtgTxLineNo.current = 0;
+    ["mcs_mtg_active","mcs_mtg_running","mcs_mtg_elapsed","mcs_mtg_timestamp","mcs_mtg_txlines","mcs_mtg_fastactions","mcs_mtg_insights"].forEach(k => localStorage.removeItem(k));
   };
 
   useAPIBridge(actions, setActions, projects, plants, depts, machines);
@@ -6040,7 +6188,7 @@ export default function App() {
       }
     });
     if (globalActiveMtg && globalActiveMtg.id) {
-      const sessionEntry = { date: todayStr(), duration: mtgElapsed || 0, actionCount: rows.length };
+      const sessionEntry = { date: todayStr(), duration: mtgElapsed || 0, actionCount: rows.length, attendees: ensureArray(globalActiveMtg.attendees || []), facilitator: globalActiveMtg.facilitator || "" };
       setMeetings(p => (p || []).map(m => m.id === globalActiveMtg.id ? { ...m, completedSessions: [...ensureArray(m.completedSessions), sessionEntry] } : m));
       apiUpdate("meetings", globalActiveMtg.id, { completedSessions: [...ensureArray(globalActiveMtg.completedSessions), sessionEntry] });
     }
