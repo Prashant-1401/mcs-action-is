@@ -4142,7 +4142,7 @@ const userViewPref = {};
 const userSortPref = {};  // persist sort across page changes
 const userFilterPref = {}; // persist filters across page changes
 
-function ActionsPage({ actions, setActions, plants, depts, users, user, projects, machines }) {
+function ActionsPage({ actions, setActions, plants, depts, users, user, projects, machines, meetings }) {
   const userKey = user?.id || "guest";
   const [view, setView] = useState(userViewPref[userKey] || "table");
   // Multi-select filters: persistent across page changes
@@ -4209,6 +4209,8 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     if (filters.priority.length && !filters.priority.includes(a.priority)) return false;
     const aProj = a.projectName || a.project || "None";
     if (filters.project.length && !filters.project.includes(aProj)) return false;
+    const aMtg = (a.srcId && (meetings || []).find(m => m.id === a.srcId)) ? (meetings.find(m => m.id === a.srcId).type) : (a.src || "None");
+    if (filters.meeting.length && !filters.meeting.includes(aMtg)) return false;
     if (q && ![a.text, a.responsible, a.sn, a.src, a.section].join(" ").toLowerCase().includes(q.toLowerCase())) return false;
     return true;
   });
@@ -4243,8 +4245,8 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
 
   // Feature 7: Export functions
   const exportCSV = () => {
-    const headers = ["SN", "Source", "Department", "Plant", "Date", "Action", "Responsible", "Due Date", "Status", "Priority", "Revisions"];
-    const rows = fa.map(a => [a.sn, a.src, a.section, a.plant, a.dateOfAction, `"${a.text.replace(/"/g, '""')}"`, a.responsible, a.due, a.status, a.priority, a.revisions || 0]);
+    const headers = ["SN", "Source", "Meeting", "Department", "Plant", "Date", "Action", "Responsible", "Due Date", "Status", "Priority", "Revisions"];
+    const rows = fa.map(a => { const m = a.srcId && (meetings || []).find(x => x.id === a.srcId) ? (meetings.find(x => x.id === a.srcId).type + (meetings.find(x => x.id === a.srcId).plant ? " · " + meetings.find(x => x.id === a.srcId).plant : "")) : (a.src || ""); return [a.sn, a.src, m, a.section, a.plant, a.dateOfAction, `"${a.text.replace(/"/g, '""')}"`, a.responsible, a.due, a.status, a.priority, a.revisions || 0]; });
     const csv = [headers, ...rows].map(r => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -4265,8 +4267,8 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
       <h2>Management Control System — Actions Register</h2>
       <p>Exported on ${new Date().toLocaleDateString("en-IN")} · ${fa.length} actions</p>
       <table>
-        <tr><th>SN</th><th>Action</th><th>Responsible</th><th>Due Date</th><th>Status</th><th>Priority</th><th>Plant</th></tr>
-        ${fa.map(a => `<tr><td>${a.sn}</td><td>${a.text}</td><td>${a.responsible}</td><td>${a.due || "—"}</td><td>${a.status}</td><td>${a.priority}</td><td>${a.plant}</td></tr>`).join("")}
+        <tr><th>SN</th><th>Action</th><th>Responsible</th><th>Due Date</th><th>Status</th><th>Priority</th><th>Plant</th><th>Meeting</th></tr>
+        ${fa.map(a => { const m = a.srcId && (meetings || []).find(x => x.id === a.srcId) ? (meetings.find(x => x.id === a.srcId).type + (meetings.find(x => x.id === a.srcId).plant ? " · " + meetings.find(x => x.id === a.srcId).plant : "")) : (a.src || "—"); return `<tr><td>${a.sn}</td><td>${a.text}</td><td>${a.responsible}</td><td>${a.due || "—"}</td><td>${a.status}</td><td>${a.priority}</td><td>${a.plant}</td><td>${m}</td></tr>`; }).join("")}
       </table>
       </body></html>`;
     const w = window.open("", "_blank"); w.document.write(content); w.document.close(); w.print();
@@ -4299,6 +4301,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
             { label: "Status", key: "status", opts: [...STATUS_LIST, "PENDING CONFIRM"] },
             { label: "Priority", key: "priority", opts: PRIORITY_LIST },
             { label: "Project", key: "project", opts: ["None", ...allProjects] },
+            { label: "Meeting", key: "meeting", opts: ["None", ...(meetings || []).map(m => m.type)] },
           ].map(({ label, key, opts }) => {
             const sel2 = filters[key];
             const isOpen = openFilter === key;
@@ -4352,7 +4355,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
         </div>
       </div>
       {openFilter && <div style={{ position: "fixed", inset: 0, zIndex: 599 }} onClick={() => setOpenFilter(null)} />}
-      {view === "table" && <TableView fa={fa} upStatus={upStatus} setSel={a => { setSel(a); }} canEdit={canEdit} upAction={upAction} sortState={userSortPref[userKey]} onSortChange={s => { userSortPref[userKey] = s; }} users={users} />}
+      {view === "table" && <TableView fa={fa} upStatus={upStatus} setSel={a => { setSel(a); }} canEdit={canEdit} upAction={upAction} sortState={userSortPref[userKey]} onSortChange={s => { userSortPref[userKey] = s; }} users={users} meetings={meetings} />}
       {view === "board" && <BoardView fa={fa} setSel={setSel} users={users} />}
       {view === "kanban" && <KanbanView
   fa={fa}
@@ -4418,7 +4421,8 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   );
 }
 
-function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortChange, users }) {
+function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortChange, users, meetings }) {
+  const meetingMap = {}; (meetings || []).forEach(m => { meetingMap[m.id] = m; });
   // Use externally-provided sort state if available (for persistence), else local
   const [localSortKey, setLocalSortKey] = useState(sortState?.key || "dateOfAction");
   const [localSortDir, setLocalSortDir] = useState(sortState?.dir || "desc");
@@ -4444,6 +4448,7 @@ function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortC
   );
   const sorted = [...fa].sort((a, b) => {
     let av = a[sortKey] ?? "", bv = b[sortKey] ?? "";
+    if (sortKey === "meeting") { av = (a.srcId && meetingMap[a.srcId]) ? meetingMap[a.srcId].type : (a.src || ""); bv = (b.srcId && meetingMap[b.srcId]) ? meetingMap[b.srcId].type : (b.src || ""); }
     if (sortKey === "due" || sortKey === "dateOfAction" || sortKey === "created") {
       av = av ? new Date(av).getTime() : 0; bv = bv ? new Date(bv).getTime() : 0;
     } else if (sortKey === "revisions") { av = a.revisions || 0; bv = b.revisions || 0; }
@@ -4457,6 +4462,7 @@ function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortC
           <thead><tr>
             <TH k="sn" label="SN" minWidth={70} />
             <TH k="src" label="Source" minWidth={150} />
+            <TH k="meeting" label="Meeting" minWidth={160} />
             <TH k="section" label="Department" minWidth={100} />
             <TH k="plant" label="Plant" minWidth={90} />
             <TH k="dateOfAction" label="Date" minWidth={100} />
@@ -4471,6 +4477,7 @@ function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortC
               <tr key={a.id || `act-${idx}`} style={{ cursor: "pointer", background: a.pendingConfirmation ? "#FEF9E7" : "" }} onClick={() => setSel(a)}>
                 <td style={{ fontFamily: "monospace", fontSize: 11, color: T.text2 }}>{a.sn}</td>
                 <td style={{ fontSize: 12, maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.src}</td>
+                <td style={{ fontSize: 12, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.srcId ? (meetingMap[a.srcId] ? `${meetingMap[a.srcId].type}${meetingMap[a.srcId].plant ? " · " + meetingMap[a.srcId].plant : ""}` : a.src) : "—"}</td>
                 <td style={{ fontSize: 12 }}>{a.section}</td>
                 <td style={{ fontSize: 11 }}>{a.plant}</td>
                 <td style={{ fontSize: 11, color: T.text2, whiteSpace: "nowrap" }}>{fmt(a.dateOfAction)}</td>
@@ -4485,7 +4492,7 @@ function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortC
                 <td style={{ textAlign: "center" }}>{(a.revisions || 0) > 0 ? <span style={{ fontWeight: 700, color: T.amber, fontSize: 12 }}>{a.revisions}</span> : <span style={{ color: T.text2, fontSize: 12 }}>—</span>}</td>
               </tr>
             ))}
-            {sorted.length === 0 && <tr><td colSpan={10}><Empty icon="📭" title="No actions found" sub="Adjust filters or add actions via Work." /></td></tr>}
+            {sorted.length === 0 && <tr><td colSpan={11}><Empty icon="📭" title="No actions found" sub="Adjust filters or add actions via Work." /></td></tr>}
           </tbody>
         </table>
       </div>
@@ -6647,7 +6654,7 @@ export default function App() {
       <Shell page={page} setPage={setPage} user={user} onLogout={() => { setUser(null); setPage(0); clearMeetingState(); }} onQuickAdd={() => setShowQuickAdd(true)} pendingCount={pendingForMe} auditCount={audit.length} activeMtg={globalActiveMtg} onResumeActiveMtg={() => setPage(1)} mtgRunning={mtgRunning} mtgElapsed={mtgElapsed} notifications={notifs} unreadCount={unreadNotifs} onMarkAllRead={markAllRead} users={users} actions={actions} onShowSupport={() => setShowSupport(true)} onShowProfile={() => setShowProfile(true)} onShowAdminNotifs={() => setShowAdminNotifs(true)}>
         {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} plants={plants} depts={depts} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} machines={machines} projects={projects} />}
         {page === 1 && <WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows => { commitFinal(rows); clearMeetingState(); }} actions={actions} setActions={setActions} user={user} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); apiUpdate("projects", updated.id, updated); }} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); }} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState} mtgPresets={mtgPresets} machines={machines} reasons={reasons} />}
-        {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} machines={machines} />}
+        {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} machines={machines} meetings={meetings} />}
         {page === 3 && <DashboardPage actions={actions} plants={plants} depts={depts} users={users} audit={audit} user={user} meetings={meetings} onViewEscalations={() => setPage(4)} refreshData={fetchData} setActions={setActions} />}
         {page === 4 && <EscalationsPage actions={actions} setActions={setActions} audit={audit} users={users} escMatrix={escMatrix} plants={plants} depts={depts} user={user} />}
         {page === 99 && canAccessMasterSetup(user) && <MasterPage user={user} plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets} machines={machines} setMachines={setMachines} refreshMaster={fetchData} roles={roles} setRoles={setRoles} actions={actions} setActions={setActions} />}
