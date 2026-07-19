@@ -206,6 +206,7 @@ class Action(Base):
     project_id = Column(String, ForeignKey("projects.id", onupdate="CASCADE", ondelete="SET NULL"))
     project_name = Column(String(100))
     src = Column(String(50))
+    src_id = Column(String, ForeignKey("meetings.id", onupdate="CASCADE", ondelete="SET NULL"))
     revisions = Column(Integer, default=0)
     revision_history = Column(JSONB, default=list)
     pending_confirmation = Column(Boolean, default=False)

@@ -308,6 +308,7 @@ class ActionCreate(BaseModel):
     project_id: Optional[str] = None
     project: Optional[str] = None
     src: Optional[str] = None
+    src_id: Optional[str] = None
     pending_confirmation: Optional[bool] = False
 
 
@@ -338,6 +339,7 @@ class ActionUpdate(BaseModel):
     project_id: Optional[str] = None
     project: Optional[str] = None
     src: Optional[str] = None
+    src_id: Optional[str] = None
     pending_confirmation: Optional[bool] = None
     revisions: Optional[int] = None
     revision_history: Optional[List[Any]] = None

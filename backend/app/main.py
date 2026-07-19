@@ -184,6 +184,10 @@ def migrate_schema(conn):
                 conn.execute(text(
                     "ALTER TABLE actions ADD COLUMN version INTEGER DEFAULT 1"
                 ))
+            if "src_id" not in action_cols:
+                conn.execute(text(
+                    "ALTER TABLE actions ADD COLUMN src_id TEXT REFERENCES meetings(id) ON UPDATE CASCADE ON DELETE SET NULL"
+                ))
         except Exception as e:
             print(f"[migrate] actions column migration skipped: {e}")
 

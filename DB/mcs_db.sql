@@ -211,6 +211,7 @@ CREATE TABLE actions (
     project_id            TEXT REFERENCES projects(id)     ON UPDATE CASCADE ON DELETE SET NULL,
     project               TEXT,                -- original 'project' string
     src                   TEXT,                -- legacy 'src' field
+    src_id                TEXT REFERENCES meetings(id)     ON UPDATE CASCADE ON DELETE SET NULL,
     revisions             INTEGER DEFAULT 0,
     revision_history      JSONB DEFAULT '[]'::jsonb,
     pending_confirmation  BOOLEAN DEFAULT FALSE
