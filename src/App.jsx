@@ -1746,7 +1746,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
       </div>
 
       {/* Unified action detail panel — same as Actions page */}
-      {actionPanel && <ActionDetailPanel action={actionPanel} onClose={() => setActionPanel(null)} onUpdate={(id, patch) => { upAction(id, patch); setActionPanel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} />}
+      {actionPanel && <ActionDetailPanel action={actionPanel} onClose={() => setActionPanel(null)} onUpdate={(id, patch) => { upAction(id, patch); setActionPanel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} meetings={meetings} />}
 
       {/* Fix 6: Team sub modal */}
       {subModal && (
@@ -2286,7 +2286,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
       <WeeklyMeetingAccountability meetings={meetings} actions={actions} users={users} user={user} plants={plants} />
 
       {charter && <ProjectCharterModal pr={charter} onClose={() => { setCharter(null); setCharterActionSel(null); }} actions={actions} meetings={meetings} user={user} users={users} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); onProjectUpdate(updated); }} onActionSelect={a => setCharterActionSel(a)} />}
-      {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={(id, patch) => { setActions(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); apiUpdate("actions", id, patch); setCharterActionSel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} machines={machines} />}
+      {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={(id, patch) => { setActions(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); apiUpdate("actions", id, patch); setCharterActionSel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} machines={machines} meetings={meetings} />}
       {showAddMtg && <AddMeetingModal plants={plants} users={users} projects={projects} onSave={m => { const mtg = { ...m, id: "M" + Date.now(), completedSessions: [] }; setMeetings(p => [...p, mtg]); apiCreate("meetings", resolveRecordIds(mtg, plants, depts, machines, projects)); setShowAddMtg(false); }} onClose={() => setShowAddMtg(false)} currentUser={user} />}
       {/* Feature 3: Add Project Modal */}
       {showAddProject && <AddProjectModal plants={plants} users={users} onSave={p => { const pr = { ...p, id: "PR" + Date.now(), milestones: [], risks: [], team: [], budget: p.budget ? Number(p.budget) || 0 : 0 }; setProjects(prev => [...prev, pr]); apiCreate("projects", pr); showAddProject && setShowAddProject(false); }} onClose={() => setShowAddProject(false)} currentUser={user} />}
@@ -3640,16 +3640,18 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
         </div>
       </div>
 
-      {showSidePanel && <AddActionPanel users={users} plants={plants} depts={depts} defaultPlant={mtg.plant} defaultSrc={mtg.type} machines={machines} reasons={reasons} currentUser={currentUser} onSave={a => { setFastActions(p => Array.isArray(p) ? [...p, { ...a, id: Date.now() }] : [{ ...a, id: Date.now() }]); setShowSidePanel(false); }} onClose={() => setShowSidePanel(false)} />}
+      {showSidePanel && <AddActionPanel users={users} plants={plants} depts={depts} defaultPlant={mtg.plant} defaultSrc={mtg.type} machines={machines} meetings={[mtg]} reasons={reasons} currentUser={currentUser} onSave={a => { setFastActions(p => Array.isArray(p) ? [...p, { ...a, id: Date.now() }] : [{ ...a, id: Date.now() }]); setShowSidePanel(false); }} onClose={() => setShowSidePanel(false)} />}
       {selAction && <ActionDetailPanel action={selAction} onClose={() => setSelAction(null)} onUpdate={() => { }} user={currentUser} users={users} allUsers={users} plants={plants} machines={machines} />}
     </div>
   );
 }
 
 /* ADD ACTION SIDE PANEL */
-function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projects, onSave, onClose, currentUser, machines, reasons: reasonsProp, saving }) {
+function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projects, meetings, onSave, onClose, currentUser, machines, reasons: reasonsProp, saving }) {
   useEscClose(onClose);
-  const [f, setF] = useState({ text: "", responsible: "", due: "", section: currentUser?.dept || "General", plant: defaultPlant || (currentUser?.plant && currentUser.plant !== "All" ? currentUser.plant : ""), src: defaultSrc || "", priority: "NORMAL", remarks: "", project: "", reasonOfAction: "", machineName: "", actionPointType: "" });
+  const [f, setF] = useState({ text: "", responsible: "", due: "", section: currentUser?.dept || "General", plant: defaultPlant || (currentUser?.plant && currentUser.plant !== "All" ? currentUser.plant : ""), src: defaultSrc || "", priority: "NORMAL", remarks: "", project: "", meeting: "", reasonOfAction: "", machineName: "", actionPointType: "" });
+  // Meetings that the current user can see (admin sees all, others only visible plants)
+  const meetingOpts = (meetings || []).filter(m => isUserAdmin(currentUser) || plantVisible(currentUser, m)).map(m => ({ id: m.id, label: `${m.type}${m.plant ? " · " + m.plant : ""}${m.project ? " · " + m.project : ""}` }));
   // Derive reason suggestions from the reasons state passed in (loaded at app boot)
   const reasonSuggestions = (reasonsProp || []).map(r => r.reason || r.Reason || r.text || r.Text || Object.values(r)[0]).filter(Boolean);
   const up = (k, v) => setF(x => ({ ...x, [k]: v }));
@@ -3675,6 +3677,11 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projec
             <div><Lbl t="Priority" /><select value={f.priority} onChange={e => up("priority", e.target.value)}>{PRIORITY_LIST.map(p => <option key={p}>{p}</option>)}</select></div>
             {projects && <div><Lbl t="Link to Project" /><select value={f.project} onChange={e => up("project", e.target.value)}><option value="">None</option>{projects.map(p => <option key={p.id}>{p.name}</option>)}</select></div>}
           </div>
+          {(projects || meetings) && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {meetings && <div><Lbl t="Link to Meeting" /><select value={f.meeting} onChange={e => up("meeting", e.target.value)}><option value="">None</option>{meetingOpts.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></div>}
+            </div>
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div><Lbl t="Machine Name" /><select value={f.machineName} onChange={e => up("machineName", e.target.value)}><option value="">Select machine…</option>{machineOpts.map(m => <option key={m} value={m}>{m}</option>)}{f.machineName && !machineOpts.includes(f.machineName) && <option value={f.machineName}>{f.machineName}</option>}</select></div>
             <div><Lbl t="Remarks" /><input value={f.remarks} onChange={e => up("remarks", e.target.value)} placeholder="Optional notes…" /></div>
@@ -3682,7 +3689,13 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projec
         </div>
         <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
           <button className="btn btn-ghost" style={{ flex: 1, justifyContent: "center" }} onClick={onClose}>Cancel</button>
-          <button className="btn btn-navy" style={{ flex: 2, justifyContent: "center" }} onClick={() => { if (f.text.trim() && f.responsible && f.due) onSave(f); }} disabled={saving}>
+          <button className="btn btn-navy" style={{ flex: 2, justifyContent: "center" }} onClick={() => {
+            if (!(f.text.trim() && f.responsible && f.due)) return;
+            const linkedMtg = (meetings || []).find(m => m.id === f.meeting);
+            const enriched = { ...f };
+            if (linkedMtg) { enriched.srcId = linkedMtg.id; enriched.src = linkedMtg.type; }
+            onSave(enriched);
+          }} disabled={saving}>
             {saving ? <><Spin /> Saving…</> : "Save Action"}
           </button>
         </div>
@@ -3851,7 +3864,7 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
 
 /* ===================== ACTION DETAIL SIDE PANEL ===================== */
 /* Completion workflow: assignee marks done → goes to allocatedBy + their superior for confirmation */
-function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, plants: panelPlants, machines: panelMachines }) {
+function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, plants: panelPlants, machines: panelMachines, meetings: panelMeetings }) {
   useEscClose(onClose);
   const [msgText, setMsgText] = useState("");
   const messagesEndRef = useRef(null);
@@ -3958,6 +3971,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <SBadge s={displayStatus(action)} /><PBadge p={action.priority} />
             {(action.projectName || action.project) && <Chip label={"🔗 " + (action.projectName || action.project)} color={T.amber} />}
+            {action.srcId && (() => { const m = (panelMeetings || []).find(x => x.id === action.srcId); if (!m) return null; return <Chip label={"📅 " + m.type + (m.plant ? " · " + m.plant : "")} color={T.navy} />; })()}
           </div>
           {isPendingConfirm && (
             <div className="confirm-banner" style={{ marginTop: 12 }}>
@@ -5084,7 +5098,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
           </div>
         );
       })()}
-      {actionDetail && <ActionDetailPanel action={actionDetail} onClose={() => setActionDetail(null)} onUpdate={(id, patch) => { if (setActionsUp) setActionsUp(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); setActionDetail(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} />}
+      {actionDetail && <ActionDetailPanel action={actionDetail} onClose={() => setActionDetail(null)} onUpdate={(id, patch) => { if (setActionsUp) setActionsUp(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); setActionDetail(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} meetings={meetings} />}
     </div>
   );
 }
@@ -6647,6 +6661,7 @@ export default function App() {
           defaultPlant={user?.plant === "All" ? "" : user?.plant}
           defaultSrc="Quick Add"
           projects={projects}
+          meetings={meetings}
           machines={machines}
           reasons={reasons}
           currentUser={user}
