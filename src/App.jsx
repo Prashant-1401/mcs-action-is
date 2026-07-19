@@ -4151,7 +4151,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     plant: user?.plant && user.plant !== "All" ? [user.plant] : [], 
     section: [], 
     responsible: [], 
-    status: [], priority: [], project: [] 
+    status: [], priority: [], project: [], meeting: [] 
   });
   const [myActionsOnly, setMyActionsOnly] = useState(false);
   const [q, setQ] = useState("");
@@ -4187,7 +4187,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     });
   };
   const clearFilter = (key) => setFiltersPersist(f => ({ ...f, [key]: [] }));
-  const clearAll = () => { const empty = { plant: [], section: [], responsible: [], status: [], priority: [], project: [] }; setFilters(empty); userFilterPref[userKey] = empty; };
+  const clearAll = () => { const empty = { plant: [], section: [], responsible: [], status: [], priority: [], project: [], meeting: [] }; setFilters(empty); userFilterPref[userKey] = empty; };
   // Save filters to persistent store on each change
   const setFiltersPersist = (updater) => {
     setFilters(prev => { const next = typeof updater === "function" ? updater(prev) : updater; userFilterPref[userKey] = next; return next; });
@@ -4210,7 +4210,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     const aProj = a.projectName || a.project || "None";
     if (filters.project.length && !filters.project.includes(aProj)) return false;
     const aMtg = (a.srcId && (meetings || []).find(m => m.id === a.srcId)) ? (meetings.find(m => m.id === a.srcId).type) : (a.src || "None");
-    if (filters.meeting.length && !filters.meeting.includes(aMtg)) return false;
+    if ((filters.meeting || []).length && !filters.meeting.includes(aMtg)) return false;
     if (q && ![a.text, a.responsible, a.sn, a.src, a.section].join(" ").toLowerCase().includes(q.toLowerCase())) return false;
     return true;
   });
