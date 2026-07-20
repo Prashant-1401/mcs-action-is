@@ -102,6 +102,39 @@ async function flushPendingSaves() {
   emitAutosave();
 }
 
+/* ─── Reconcile pending ops with live server data ──────────────
+   After a real-time poll refetches server data, any optimistic
+   create that has already been persisted shows up in the server
+   response. Clear those pending ops so the "Saving… / Pending N"
+   indicator hides once the change is live, and the local temp-id
+   echo is replaced by the authoritative server record. ──────── */
+function reconcilePendingWithServer(resource, serverItems) {
+  if (pendingOps.size === 0) return;
+  const serverKeys = new Set(
+    (serverItems || []).map(it => {
+      const t = (it.text || it.name || "").trim().toLowerCase();
+      const r = (it.responsible || it.facilitator || "").trim().toLowerCase();
+      const c = (it.created || it.date || "").toString().slice(0, 10);
+      return `${t}|${r}|${c}`;
+    })
+  );
+  let changed = false;
+  for (const op of [...pendingOps.values()]) {
+    if (op.resource !== resource || op.op !== "create") continue;
+    const d = op.data || {};
+    const key = `${(d.text || d.name || "").trim().toLowerCase()}|${(d.responsible || d.facilitator || "").trim().toLowerCase()}|${(d.created || "").toString().slice(0, 10)}`;
+    if (serverKeys.has(key)) {
+      clearOp(resource, op.id);
+      changed = true;
+    }
+  }
+  if (changed && pendingOps.size === 0) {
+    _autosaveState = { ..._autosaveState, status: "saved", lastSaved: Date.now() };
+    emitAutosave();
+  }
+}
+
+
 /* ─── API Persistence Sync (fire-and-forget with error log) ── */
 async function apiCreate(resource, data, { track = true } = {}) {
   const id = data && (data.id || "new");
@@ -415,8 +448,8 @@ function usePostgresDB({ defaultUsers, defaultPlants, defaultDepts,
       if (pDenorm.length) setPlantsRaw(pDenorm);
       if (dDenorm.length) setDeptsRaw(dDenorm);
       if (resolvedU.length) setUsersRaw(resolvedU);
-      if (resolvedA.length) setActionsRaw(resolvedA);
-      if (resolvedM.length) setMeetingsRaw(resolvedM);
+      if (resolvedA.length) { setActionsRaw(resolvedA); reconcilePendingWithServer("actions", resolvedA); }
+      if (resolvedM.length) { setMeetingsRaw(resolvedM); reconcilePendingWithServer("meetings", resolvedM); }
       if (resolvedPr.length) setProjectsRaw(resolvedPr);
       if (emDenorm.length) setEscRaw(emDenorm);
       if (rsDenorm.length) setReasonsRaw(rsDenorm);
@@ -2028,7 +2061,9 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
               <div style={{ fontSize: 11, opacity: .6, marginBottom: 4, letterSpacing: 1, textTransform: "uppercase" }}>Project Charter</div>
-              <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 22, fontWeight: 800, marginBottom: 6 }}>{pr.name}</h2>
+              {editMode
+                ? <input value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} style={{ fontFamily: "'Sora',sans-serif", fontSize: 22, fontWeight: 800, color: "#fff", background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.4)", borderRadius: 8, padding: "4px 10px", width: "100%", marginBottom: 6 }} />
+                : <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 22, fontWeight: 800, marginBottom: 6 }}>{pr.name}</h2>}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ padding: "3px 10px", borderRadius: 20, background: "rgba(255,255,255,.15)", fontSize: 11, fontWeight: 600 }}>{pr.plant}</span>
                 <span style={{ padding: "3px 10px", borderRadius: 20, background: pr.priority === "CRITICAL" ? T.red + "80" : pr.priority === "WARNING" ? T.amber + "80" : "rgba(255,255,255,.15)", fontSize: 11, fontWeight: 600 }}>{pr.priority}</span>
@@ -2524,7 +2559,9 @@ function MeetingPlanPanel({ mtg, canEdit, projects, users, plants, onSave, onClo
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
               <div style={{ fontSize: 10, opacity: .6, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>Meeting Plan</div>
-              <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 17, fontWeight: 800, marginBottom: 4 }}>{editMode ? draft.type : mtg.type}</h2>
+              {editMode
+                ? <input value={draft.name || draft.type || ""} onChange={e => { up("name", e.target.value); up("type", e.target.value); }} placeholder="Meeting name" style={{ fontFamily: "'Sora',sans-serif", fontSize: 17, fontWeight: 800, color: "#fff", background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.4)", borderRadius: 8, padding: "4px 10px", width: "100%", marginBottom: 4 }} />
+                : <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 17, fontWeight: 800, marginBottom: 4 }}>{mtg.name || mtg.type}</h2>}
               <div style={{ fontSize: 12, opacity: .8 }}>{mtg.plant} · {mtg.time} · {mtg.dur}min</div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
