@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.database import get_db
 from app.models.models import User
 from app.schemas.schemas import LoginRequest
-from app.middleware.auth import create_token
+from app.middleware.auth import create_token, decode_token
+from app.routers.sessions import register_session, revoke_session
 from app.services.password import verify_password
 from app.config import settings
 
@@ -12,7 +13,7 @@ router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
 
 @router.post("/login")
-async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(User).where(func.lower(User.username) == req.username.strip().lower())
     )
@@ -35,4 +36,20 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
         "masterAccess": getattr(user, 'master_access', False),
     }
     token = create_token({"sub": user.username, "role": user.role, "id": user.id})
+    # Register this device session (best-effort, never block login)
+    try:
+        await register_session(request, token, user.username)
+    except Exception as e:
+        print(f"[sessions] register failed: {e}")
     return {"token": token, "user": user_data}
+
+
+@router.post("/logout")
+async def logout(request: Request):
+    auth = request.headers.get("authorization", "")
+    token = auth.replace("Bearer ", "") if auth.lower().startswith("bearer ") else None
+    try:
+        await revoke_session(token)
+    except Exception as e:
+        print(f"[sessions] revoke failed: {e}")
+    return {"ok": True}

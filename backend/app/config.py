@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     team_email: str = "team@adroit.in"
     wacrm_alert_url: str = ""
     frontend_url: str = "https://mcs-control-management.vercel.app"
+    master_user: str = ""
+    master_password: str = ""
     google_sheets_credentials_path: str = ""
     google_sheets_spreadsheet_id: str = ""
     google_sheets_worksheet_name: str = "Actions"

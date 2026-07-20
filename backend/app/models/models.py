@@ -233,6 +233,20 @@ class ActionMessage(Base):
     action = relationship("Action", back_populates="messages")
 
 
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", onupdate="CASCADE", ondelete="CASCADE"), nullable=False)
+    token_jti = Column(String, nullable=False, unique=True)
+    device = Column(String(120))
+    browser = Column(String(120))
+    ip = Column(String(64))
+    location = Column(String(120))
+    created_at = Column(TIMESTAMP(timezone=True), default=datetime.datetime.now(datetime.timezone.utc))
+    last_seen = Column(TIMESTAMP(timezone=True), default=datetime.datetime.now(datetime.timezone.utc))
+    is_current = Column(Boolean, default=False)
+
+
 class Audit(Base):
     __tablename__ = "audit"
     __table_args__ = (UniqueConstraint("action_sn", "level"),)

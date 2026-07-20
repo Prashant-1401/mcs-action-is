@@ -8,7 +8,7 @@ from app.database import engine, Base
 from app.routers import (
     auth, plants, departments, roles, users, machines, reasons,
     actions, projects, meetings, escalation, audit, meetings_ai,
-    translate, email_share,
+    translate, email_share, sessions,
 )
 
 
@@ -210,6 +210,25 @@ def migrate_schema(conn):
         except Exception as e:
             print(f"[migrate] users master_access migration skipped: {e}")
 
+    # User sessions table (multi-device / session management)
+    if "user_sessions" not in existing_tables:
+        try:
+            conn.execute(text(
+                "CREATE TABLE user_sessions ("
+                "id VARCHAR PRIMARY KEY, "
+                "user_id VARCHAR NOT NULL REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE, "
+                "token_jti VARCHAR NOT NULL UNIQUE, "
+                "device VARCHAR(120), "
+                "browser VARCHAR(120), "
+                "ip VARCHAR(64), "
+                "location VARCHAR(120), "
+                "created_at TIMESTAMPTZ DEFAULT now(), "
+                "last_seen TIMESTAMPTZ DEFAULT now(), "
+                "is_current BOOLEAN DEFAULT FALSE)"
+            ))
+        except Exception as e:
+            print(f"[migrate] user_sessions table creation skipped: {e}")
+
 
 app = FastAPI(
     title="MCS Backend API",
@@ -293,3 +312,4 @@ app.include_router(audit.router)
 app.include_router(meetings_ai.router)
 app.include_router(translate.router)
 app.include_router(email_share.router)
+app.include_router(sessions.router)

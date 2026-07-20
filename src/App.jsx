@@ -467,6 +467,66 @@ function usePostgresDB({ defaultUsers, defaultPlants, defaultDepts,
   };
 }
 
+/* ─── Real-time polling sync ──────────────────────────────────────
+   Problem: the app only loaded data once on mount, so when another user
+   (e.g. N) added/edited an action, the current user (M) never saw it
+   until they manually refreshed the page.
+
+   Fix: poll the backend on a fixed interval AND immediately whenever the
+   tab regains focus / becomes visible. This keeps every logged-in browser
+   in sync without WebSockets. A session heartbeat is also sent so the
+   backend knows the user is actively online (session management). ───── */
+function useRealtimeSync({ fetchData, user, enabled = true, intervalMs = 15000 }) {
+  const fetchRef = useRef(fetchData);
+  useEffect(() => { fetchRef.current = fetchData; }, [fetchData]);
+
+  const [lastSync, setLastSync] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const inFlight = useRef(false);
+
+  const sync = useCallback(async () => {
+    if (inFlight.current || !enabled) return;
+    inFlight.current = true;
+    setSyncing(true);
+    try {
+      await fetchRef.current();
+      setLastSync(Date.now());
+    } catch (e) { /* keep previous data; will retry next tick */ }
+    finally {
+      inFlight.current = false;
+      setSyncing(false);
+    }
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled || !user) return;
+    // Initial sync shortly after mount
+    const kick = setTimeout(sync, 3000);
+    // Periodic polling
+    const poll = setInterval(sync, intervalMs);
+    // Session heartbeat (keeps the session "current" / online)
+    const beat = setInterval(() => {
+      if (API_BASE_URL && (AUTH_TOKEN || localStorage.getItem("mcs_token"))) {
+        apiPost("/api/sessions/heartbeat", {}).catch(() => {});
+      }
+    }, 30000);
+    // Re-sync when tab becomes visible / focused
+    const onVisible = () => { if (document.visibilityState === "visible") sync(); };
+    const onFocus = () => sync();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearTimeout(kick);
+      clearInterval(poll);
+      clearInterval(beat);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [enabled, user, intervalMs, sync]);
+
+  return { lastSync, syncing, sync };
+}
+
 /* ===================== DATA LAYER ===================== */
 const DEFAULT_PLANTS = [];
 const DEFAULT_DEPTS = [];
@@ -1204,7 +1264,99 @@ function AdminNotifManager({ users, onClose }) {
     </div>
   );
 }
-function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCount, auditCount, activeMtg, onResumeActiveMtg, mtgRunning, mtgElapsed, notifications, onMarkAllRead, unreadCount, users, actions, onShowSupport, onShowProfile, onShowAdminNotifs }) {
+
+/* ===================== SESSIONS MANAGER MODAL ===================== */
+/* Lists every device/browser currently logged in as this user, shows which
+   one is "This device", and lets the user revoke any other session (or all
+   others at once). Addresses the "multiple users login from different
+   systems" requirement by making concurrent sessions visible & manageable. */
+function SessionsManagerModal({ user, onClose }) {
+  useEscClose(onClose);
+  const [sessions, setSessions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    apiGet("/api/sessions/mine").then(setSessions).catch(() => setSessions([])).finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const revoke = async (id) => {
+    setBusy(id);
+    try { await apiDelete(`/api/sessions/${id}`); load(); }
+    catch (e) { alert("Could not revoke session: " + e.message); }
+    finally { setBusy(null); }
+  };
+  const revokeOthers = async () => {
+    if (!confirm("Sign out all other devices? This device stays signed in.")) return;
+    setBusy("others");
+    try { await apiDelete("/api/sessions/all/others"); load(); }
+    catch (e) { alert("Could not revoke sessions: " + e.message); }
+    finally { setBusy(null); }
+  };
+
+  const fmtAgo = (iso) => {
+    if (!iso) return "—";
+    const t = new Date(iso.replace(" ", "T") + (iso.includes("+") || iso.includes("Z") ? "" : "Z"));
+    const s = Math.floor((Date.now() - t.getTime()) / 1000);
+    if (s < 60) return "just now";
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+    return `${Math.floor(s / 86400)}d ago`;
+  };
+
+  return (
+    <>
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", zIndex: 340 }} onClick={onClose} />
+      <div className="side-panel" style={{ width: 420, padding: 0 }}>
+        <div style={{ background: `linear-gradient(135deg,${T.navy},${T.navyD})`, padding: "20px 20px", color: "#fff" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ fontSize: 10, opacity: .6, letterSpacing: 1, textTransform: "uppercase" }}>Active Sessions</div>
+            <button onClick={onClose} style={{ background: "rgba(255,255,255,.15)", border: "none", color: "#fff", borderRadius: 8, width: 28, height: 28, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+          </div>
+          <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 18, lineHeight: 1.1 }}>{sessions.length} device{sessions.length !== 1 ? "s" : ""} signed in</div>
+          <div style={{ fontSize: 12, opacity: .7, marginTop: 3 }}>These are all places where you are currently logged in.</div>
+        </div>
+        <div style={{ padding: 16, overflowY: "auto", maxHeight: "calc(100vh - 140px)" }}>
+          {loading && <div style={{ padding: 24, textAlign: "center", color: T.text2 }}><Spin /> Loading sessions…</div>}
+          {!loading && sessions.length === 0 && <Empty icon="🔒" title="No active sessions" sub="We couldn't find any active login sessions." />}
+          {!loading && sessions.map(s => (
+            <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", border: `1.5px solid ${s.is_current ? T.green : T.border}`, borderRadius: 12, marginBottom: 10, background: s.is_current ? T.greenL : "#fff" }}>
+              <div style={{ width: 38, height: 38, borderRadius: 10, background: T.navy + "14", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>
+                {s.device === "Mobile" ? "📱" : s.device === "Tablet" ? "📟" : "🖥️"}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: T.text, display: "flex", alignItems: "center", gap: 6 }}>
+                  {s.browser} · {s.device}
+                  {s.is_current && <span style={{ background: T.green, color: "#fff", fontSize: 9, fontWeight: 700, padding: "1px 7px", borderRadius: 20 }}>THIS DEVICE</span>}
+                </div>
+                <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>
+                  {s.ip ? `${s.ip} · ` : ""}active {fmtAgo(s.last_seen)}
+                </div>
+              </div>
+              {!s.is_current && (
+                <button className="btn btn-sm btn-ghost" style={{ color: T.red, borderColor: T.red + "40" }} disabled={busy === s.id} onClick={() => revoke(s.id)}>
+                  {busy === s.id ? <Spin /> : "Revoke"}
+                </button>
+              )}
+            </div>
+          ))}
+          {!loading && sessions.length > 1 && (
+            <button className="btn btn-red" style={{ width: "100%", justifyContent: "center", marginTop: 6 }} disabled={busy === "others"} onClick={revokeOthers}>
+              {busy === "others" ? <><Spin /> Signing out others…</> : "Sign out all other devices"}
+            </button>
+          )}
+          <div style={{ fontSize: 11, color: T.text2, marginTop: 14, lineHeight: 1.5 }}>
+            Tip: if you see a session you don't recognise, revoke it and change your password. Sessions auto-expire after 7 days of inactivity.
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCount, auditCount, activeMtg, onResumeActiveMtg, mtgRunning, mtgElapsed, notifications, onMarkAllRead, unreadCount, users, actions, onShowSupport, onShowProfile, onShowAdminNotifs, onShowSessions, onlineCount, lastSync, syncing }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [autoStatus, setAutoStatus] = useState(_autosaveState);
@@ -1299,18 +1451,23 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
                   <div style={{ fontSize: 11, color: T.text2 }}>{user?.role} — {user?.plant}</div>
                 </div>
                 {!isGuestRole(user?.role) && <button onClick={() => { setShowUserMenu(false); onShowProfile && onShowProfile(); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", border: "none", background: "transparent", cursor: "pointer", color: T.text, fontSize: 13, fontWeight: 600, borderRadius: 8 }}>👤 My Profile</button>}
+                {!isGuestRole(user?.role) && <button onClick={() => { setShowUserMenu(false); onShowSessions && onShowSessions(); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", border: "none", background: "transparent", cursor: "pointer", color: T.text, fontSize: 13, fontWeight: 600, borderRadius: 8 }}>🖥️ My Sessions{onlineCount ? <span style={{ marginLeft: "auto", background: T.green, color: "#fff", borderRadius: 20, fontSize: 10, fontWeight: 700, padding: "1px 8px" }}>{onlineCount}</span> : null}</button>}
                 {!isGuestRole(user?.role) && user?.role !== "Admin" && Number(page) !== 3 && Number(page) !== 4 && <button onClick={() => { setShowUserMenu(false); onShowSupport && onShowSupport(); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", border: "none", background: "transparent", cursor: "pointer", color: T.navy, fontSize: 13, fontWeight: 600, borderRadius: 8 }}>💬 Get Support</button>}
                 {isAdmin && Number(page) !== 3 && Number(page) !== 4 && <button onClick={() => { setShowUserMenu(false); onShowAdminNotifs && onShowAdminNotifs(); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", border: "none", background: "transparent", cursor: "pointer", color: T.amber, fontSize: 13, fontWeight: 600, borderRadius: 8 }}>🔔 Notification Rules</button>}
                 <button onClick={() => { setShowUserMenu(false); onLogout(); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", border: "none", background: "transparent", cursor: "pointer", color: T.red, fontSize: 13, fontWeight: 600, borderRadius: 8 }}>🚪 Sign Out</button>
               </div>
             )}
           </div>
-          {/* Background autosave status */}
+           {/* Background autosave status + live sync indicator */}
           <div style={{ padding: "8px 18px 14px", borderTop: "1px solid rgba(255,255,255,.1)", display: "flex", alignItems: "center", gap: 8 }}>
             {autoStatus.status === "saving" && <><span style={{ width: 8, height: 8, borderRadius: "50%", background: T.amber, animation: "blink 1s infinite" }} /><span style={{ fontSize: 10, color: "rgba(255,255,255,.6)" }}>Saving…</span></>}
             {autoStatus.status === "saved" && <><span style={{ width: 8, height: 8, borderRadius: "50%", background: T.green }} /><span style={{ fontSize: 10, color: "rgba(255,255,255,.6)" }}>All changes saved</span></>}
             {autoStatus.status === "pending" && <><span style={{ width: 8, height: 8, borderRadius: "50%", background: T.amber }} /><span style={{ fontSize: 10, color: "rgba(255,255,255,.6)" }}>Pending {autoStatus.pending} save{autoStatus.pending !== 1 ? "s" : ""}</span></>}
             {autoStatus.status === "idle" && <><span style={{ width: 8, height: 8, borderRadius: "50%", background: "rgba(255,255,255,.3)" }} /><span style={{ fontSize: 10, color: "rgba(255,255,255,.4)" }}>Autosave on</span></>}
+            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "rgba(255,255,255,.5)" }} title={lastSync ? "Last synced " + new Date(lastSync).toLocaleTimeString() : "Live sync"}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: syncing ? T.amber : T.green, animation: syncing ? "blink 1s infinite" : "none" }} />
+              {syncing ? "Syncing" : "Live"}
+            </span>
           </div>
         </div>
       </aside>
@@ -6562,6 +6719,9 @@ export default function App() {
 
   useAPIBridge(actions, setActions, projects, plants, depts, machines);
 
+  // Real-time polling: keep this browser in sync with other users' changes
+  const { lastSync, syncing } = useRealtimeSync({ fetchData, user, enabled: !!user });
+
   useEffect(() => {
     const t = setTimeout(() => runEscalation(actions, (updater) => {
       setAudit(updater);
@@ -6655,7 +6815,20 @@ export default function App() {
   // UI modals/panels
   const [showSupport, setShowSupport] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showSessions, setShowSessions] = useState(false);
   const [showAdminNotifs, setShowAdminNotifs] = useState(false);
+
+  // Active-session count (for the "My Sessions" badge in the user menu)
+  const [onlineCount, setOnlineCount] = useState(0);
+  useEffect(() => {
+    if (!user) { setOnlineCount(0); return; }
+    const loadCount = () => {
+      apiGet("/api/sessions/mine").then(s => setOnlineCount(Array.isArray(s) ? s.length : 0)).catch(() => {});
+    };
+    loadCount();
+    const t = setInterval(loadCount, 60000);
+    return () => clearInterval(t);
+  }, [user]);
 
   // Loading screen while data loads
   if (!dbReady) return (
@@ -6677,7 +6850,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <style>{CSS}</style>
-      <Shell page={page} setPage={setPage} user={user} onLogout={() => { setUser(null); setPage(0); clearMeetingState(); }} onQuickAdd={() => setShowQuickAdd(true)} pendingCount={pendingForMe} auditCount={audit.length} activeMtg={globalActiveMtg} onResumeActiveMtg={() => setPage(1)} mtgRunning={mtgRunning} mtgElapsed={mtgElapsed} notifications={notifs} unreadCount={unreadNotifs} onMarkAllRead={markAllRead} users={users} actions={actions} onShowSupport={() => setShowSupport(true)} onShowProfile={() => setShowProfile(true)} onShowAdminNotifs={() => setShowAdminNotifs(true)}>
+      <Shell page={page} setPage={setPage} user={user} onLogout={() => { try { apiPost("/api/auth/logout", {}).catch(() => {}); } finally { setUser(null); setPage(0); clearMeetingState(); } }} onQuickAdd={() => setShowQuickAdd(true)} pendingCount={pendingForMe} auditCount={audit.length} activeMtg={globalActiveMtg} onResumeActiveMtg={() => setPage(1)} mtgRunning={mtgRunning} mtgElapsed={mtgElapsed} notifications={notifs} unreadCount={unreadNotifs} onMarkAllRead={markAllRead} users={users} actions={actions} onShowSupport={() => setShowSupport(true)} onShowProfile={() => setShowProfile(true)} onShowAdminNotifs={() => setShowAdminNotifs(true)} onShowSessions={() => setShowSessions(true)} onlineCount={onlineCount} lastSync={lastSync} syncing={syncing}>
         {page === 0 && <HomePage actions={actions} setActions={setActions} user={user} setPage={setPage} users={users} meetings={meetings} plants={plants} depts={depts} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); setMtgRunning(true); }} machines={machines} projects={projects} />}
         {page === 1 && <WorkPage plants={plants} depts={depts} users={users} onCommitFinal={rows => { commitFinal(rows); clearMeetingState(); }} actions={actions} setActions={setActions} user={user} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); apiUpdate("projects", updated.id, updated); }} allProjects={projects} setProjects={setProjects} allMeetings={meetings} setMeetings={setMeetings} setPage={setPage} globalActiveMtg={globalActiveMtg} setGlobalActiveMtg={m => { setGlobalActiveMtg(m); if (m) setMtgRunning(true); }} mtgRunning={mtgRunning} setMtgRunning={setMtgRunning} mtgElapsed={mtgElapsed} mtgTxLines={mtgTxLines} setMtgTxLines={setMtgTxLines} mtgFastActions={mtgFastActions} setMtgFastActions={setMtgFastActions} mtgInsights={mtgInsights} setMtgInsights={setMtgInsights} clearMeetingState={clearMeetingState} mtgPresets={mtgPresets} machines={machines} reasons={reasons} />}
         {page === 2 && <ActionsPage actions={actions} setActions={setActions} plants={plants} depts={depts} users={users} user={user} projects={projects} machines={machines} meetings={meetings} />}
@@ -6687,6 +6860,7 @@ export default function App() {
       </Shell>
       {showSupport && <SupportModal user={user} onClose={() => setShowSupport(false)} />}
       {showProfile && <UserProfilePanel user={user} users={users} actions={actions} onClose={() => setShowProfile(false)} />}
+      {showSessions && <SessionsManagerModal user={user} onClose={() => setShowSessions(false)} />}
       {showAdminNotifs && isUserAdmin(user) && <AdminNotifManager users={users} onClose={() => setShowAdminNotifs(false)} />}
       {showQuickAdd && (
         <AddActionPanel

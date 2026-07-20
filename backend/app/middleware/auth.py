@@ -2,6 +2,7 @@ from fastapi import Depends, HTTPException, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 import jwt
+import uuid as _uuid
 from app.config import settings
 
 security = HTTPBearer(auto_error=False)
@@ -11,7 +12,7 @@ def create_token(payload: dict) -> str:
     import datetime
     to_encode = payload.copy()
     expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=settings.jwt_expire_minutes)
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "jti": str(_uuid.uuid4())})
     return jwt.encode(to_encode, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 
