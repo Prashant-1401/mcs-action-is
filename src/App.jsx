@@ -1745,7 +1745,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   };
 
   // Fix 4: Meeting popup modal
-  const MeetingPopup = ({ mtg, onClose, onStart }) => (
+  const MeetingPopup = ({ mtg, onClose, onStart, canAttend }) => (
     <div className="overlay" onClick={onClose}>
       <div className="modal" style={{ width: 480, padding: 0 }} onClick={e => e.stopPropagation()}>
         <div style={{ background: `linear-gradient(135deg,${T.navy},#3D378C)`, borderRadius: "18px 18px 0 0", padding: "20px 24px", color: "#fff" }}>
@@ -1771,7 +1771,11 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
           {(mtg.completedSessions || []).length > 0 && <div style={{ marginBottom: 14 }}><div style={{ fontSize: 11, fontWeight: 700, color: T.navy, marginBottom: 6 }}>📊 Past Sessions</div>{(mtg.completedSessions || []).map((s, i) => <div key={i} style={{ display: "flex", justifyContent: "space-between", background: T.bg, borderRadius: 6, padding: "6px 10px", fontSize: 12, marginBottom: 4 }}><span>{fmt(s.date)}</span><span style={{ fontWeight: 600 }}>{s.duration} min</span></div>)}</div>}
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
             <button onClick={onClose} className="btn btn-ghost">Close</button>
-            <button onClick={() => { onStart && onStart(mtg); onClose(); }} className="btn btn-navy">▶ Start Meeting</button>
+            {canAttend ? (
+              <button onClick={() => { onStart && onStart(mtg); onClose(); }} className="btn btn-navy">▶ Start Meeting</button>
+            ) : (
+              <button className="btn btn-ghost" disabled title="Only listed attendees can start this meeting" style={{ opacity: .6, cursor: "not-allowed" }}>🔒 Locked</button>
+            )}
           </div>
         </div>
       </div>
@@ -2024,7 +2028,12 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
       )}
 
       {/* Fix 4: Meeting popup */}
-      {mtgModal && <MeetingPopup mtg={mtgModal} onClose={() => setMtgModal(null)} onStart={(m) => { setGlobalActiveMtg && setGlobalActiveMtg(m); setPage(1); }} />}
+      {mtgModal && (() => {
+        const _att = ensureArray(mtgModal.attendees);
+        const _my = (user?.name || "").trim().toLowerCase();
+        const _canAttend = isUserAdmin(user) || _att.some(a => (a || "").toString().trim().toLowerCase() === _my) || (mtgModal.facilitator || "").toString().trim().toLowerCase() === _my;
+        return <MeetingPopup mtg={mtgModal} canAttend={_canAttend} onClose={() => setMtgModal(null)} onStart={(m) => { setGlobalActiveMtg && setGlobalActiveMtg(m); setPage(1); }} />;
+      })()}
     </div>
   );
 }
@@ -2274,6 +2283,10 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
             {visibleMeetings.map((m, idx) => {
               const attendees = ensureArray(m.attendees || mtgPresets?.attendeeMap?.[m.type]);
               const linkedProject = (projects || []).find(p => p.name === m.project);
+              const myName = (user?.name || "").trim().toLowerCase();
+              const amAttendee = attendees.some(a => (a || "").toString().trim().toLowerCase() === myName);
+              const amFacilitator = (m.facilitator || "").toString().trim().toLowerCase() === myName;
+              const canAttend = isUserAdmin(user) || canEditMeetings || amFacilitator || (amAttendee && !isGuestRole(user?.role));
               return (
                 <div key={m.id || `mtg-list-${idx}`} className="card" style={{ padding: 18 }}>
                   {m.project && linkedProject && (
@@ -2310,7 +2323,11 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
                     <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
                       {/* Feature 4: View Plan button */}
                       <button className="btn btn-ghost btn-sm" onClick={() => setMtgPlan(m)}>📋 Plan</button>
-                      {!isGuestRole(user?.role) && <button className="btn btn-green btn-sm" onClick={() => setActiveMtg(m)}>▶ Start</button>}
+                      {canAttend ? (
+                        <button className="btn btn-green btn-sm" onClick={() => setActiveMtg(m)}>▶ Start</button>
+                      ) : (
+                        <button className="btn btn-ghost btn-sm" disabled title="Only listed attendees can start this meeting" style={{ opacity: .6, cursor: "not-allowed" }}>🔒 Locked</button>
+                      )}
                       {canEditMeetings && <button className="btn btn-ghost btn-sm" style={{ color: T.red }} onClick={() => deleteMeeting(m)}>🗑 Delete</button>}
                     </div>
                   </div>
