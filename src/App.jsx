@@ -6198,7 +6198,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
           {(mDepts || []).map(d => <div key={d.id} className="card" style={{ padding: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>{d.icon || "🗂"}</span>{canModify("depts", d.id) && <div><button className="btn btn-ghost btn-sm" onClick={() => openEdit("depts", d)}>Edit</button><button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove department "${d.name}"?`)) { setDepts(prev => prev.filter(x => x.id !== d.id)); apiRemove("departments", d.id); } }}>✕</button></div>}</div>
             <div style={{ fontWeight: 700, fontSize: 14 }}>{d.name}</div>
-            <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>HOD: {d.head || "—"}</div>
+            <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>Section: {d.head || "—"}</div>
             {d.plant && <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>Plant: {d.plant}</div>}
           </div>)}
           {mDepts.length === 0 && <Empty icon="🗂" title="No departments" sub="Click + Add to create a department." />}
@@ -6388,7 +6388,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
             {modal.type === "plants" && <div style={{ display: "grid", gap: 12 }}>
               <div><Lbl t="Plant Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
               <div><Lbl t="Location" /><input value={form.location || ""} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} /></div>
-              <div><Lbl t="Plant Head" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
+              <div><Lbl t="Section" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} placeholder="e.g. Production, Maintenance" /></div>
               {plantSaveStatus && plantSaveStatus !== "saving" && plantSaveStatus !== "ok" && (
                 <div style={{ padding: "8px 12px", background: "#FEF3CD", border: "1px solid #F5C842", borderRadius: 8, fontSize: 12, color: "#7D4E00" }}>
                   ⚠ Save failed: {plantSaveStatus}. Data kept locally — use "Save to Server" to retry.
@@ -6406,7 +6406,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
               <div><Lbl t="Plant" /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value }))}><option value="">All Plants</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
               <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 10 }}>
                 <div><Lbl t="Icon" /><input value={form.icon || ""} onChange={e => setForm(f => ({ ...f, icon: e.target.value }))} /></div>
-                <div><Lbl t="HOD" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} /></div>
+                <div><Lbl t="Section" /><input value={form.head || ""} onChange={e => setForm(f => ({ ...f, head: e.target.value }))} placeholder="e.g. Production, Maintenance" /></div>
               </div>
               {deptSaveStatus && deptSaveStatus !== "saving" && deptSaveStatus !== "ok" && (
                 <div style={{ padding: "8px 12px", background: "#FEF3CD", border: "1px solid #F5C842", borderRadius: 8, fontSize: 12, color: "#7D4E00" }}>
