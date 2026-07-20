@@ -200,7 +200,7 @@ function normKeys(obj) {
 }
 
 /* ─── Resolve display names → FK IDs for actions & meetings ────── */
-function resolveRecordIds(record, plants, depts, machines, projects) {
+function resolveRecordIds(record, plants, depts, machines, projects, meetings) {
   const r = { ...record };
   // Action: plant name → plant_id
   if (r.plant && !r.plant_id) {
@@ -221,6 +221,14 @@ function resolveRecordIds(record, plants, depts, machines, projects) {
   if (r.project && !r.project_id) {
     const match = (projects || []).find(p => p.name === r.project || p.id === r.project);
     if (match) { r.project_id = match.id; }
+  }
+  // Action: meeting id → meetingid + denormalized meeting_name
+  if (r.meeting && !r.meetingid) {
+    const mtg = (meetings || []).find(m => m.id === r.meeting || m.name === r.meeting);
+    if (mtg) {
+      r.meetingid = mtg.id;
+      r.meeting_name = mtg.name || mtg.type || null;
+    }
   }
   return r;
 }
@@ -1514,7 +1522,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
       if (patch.due && patch.due !== a.due) { const rev = { date: todayStr(), from: a.due, to: patch.due, by: user?.name || "Unknown" }; return { ...a, ...patch, revisions: (a.revisions || 0) + 1, revisionHistory: [...(a.revisionHistory || []), rev] }; }
       return { ...a, ...patch };
     }));
-    apiUpdate("actions", id, resolveRecordIds(patch, plants, depts, machines, projects));
+    apiUpdate("actions", id, resolveRecordIds(patch, plants, depts, machines, projects, meetings));
   };
 
   // State — single unified action detail panel
@@ -3640,16 +3648,16 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
         </div>
       </div>
 
-      {showSidePanel && <AddActionPanel users={users} plants={plants} depts={depts} defaultPlant={mtg.plant} defaultSrc={mtg.type} machines={machines} meetings={[mtg]} reasons={reasons} currentUser={currentUser} onSave={a => { setFastActions(p => Array.isArray(p) ? [...p, { ...a, id: Date.now() }] : [{ ...a, id: Date.now() }]); setShowSidePanel(false); }} onClose={() => setShowSidePanel(false)} />}
+      {showSidePanel && <AddActionPanel users={users} plants={plants} depts={depts} defaultPlant={mtg.plant} defaultSrc={mtg.type} defaultMeeting={mtg.id} defaultProject={mtg.project} machines={machines} meetings={[mtg]} reasons={reasons} currentUser={currentUser} onSave={a => { setFastActions(p => Array.isArray(p) ? [...p, { ...a, id: Date.now() }] : [{ ...a, id: Date.now() }]); setShowSidePanel(false); }} onClose={() => setShowSidePanel(false)} />}
       {selAction && <ActionDetailPanel action={selAction} onClose={() => setSelAction(null)} onUpdate={() => { }} user={currentUser} users={users} allUsers={users} plants={plants} machines={machines} />}
     </div>
   );
 }
 
 /* ADD ACTION SIDE PANEL */
-function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projects, meetings, onSave, onClose, currentUser, machines, reasons: reasonsProp, saving }) {
+function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaultMeeting, defaultProject, projects, meetings, onSave, onClose, currentUser, machines, reasons: reasonsProp, saving }) {
   useEscClose(onClose);
-  const [f, setF] = useState({ text: "", responsible: "", due: "", section: currentUser?.dept || "General", plant: defaultPlant || (currentUser?.plant && currentUser.plant !== "All" ? currentUser.plant : ""), src: defaultSrc || "", priority: "NORMAL", remarks: "", project: "", meeting: "", reasonOfAction: "", machineName: "", actionPointType: "" });
+  const [f, setF] = useState({ text: "", responsible: "", due: "", section: currentUser?.dept || "General", plant: defaultPlant || (currentUser?.plant && currentUser.plant !== "All" ? currentUser.plant : ""), src: defaultSrc || "", priority: "NORMAL", remarks: "", project: defaultProject || "", meeting: defaultMeeting || "", reasonOfAction: "", machineName: "", actionPointType: "" });
   // Meetings that the current user can see (admin sees all, others only visible plants)
   const meetingOpts = (meetings || []).filter(m => isUserAdmin(currentUser) || plantVisible(currentUser, m)).map(m => ({ id: m.id, label: `${m.type}${m.plant ? " · " + m.plant : ""}${m.project ? " · " + m.project : ""}` }));
   // Derive reason suggestions from the reasons state passed in (loaded at app boot)
@@ -3679,7 +3687,15 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, projec
           </div>
           {(projects || meetings) && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              {meetings && <div><Lbl t="Link to Meeting" /><select value={f.meeting} onChange={e => up("meeting", e.target.value)}><option value="">None</option>{meetingOpts.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></div>}
+              {meetings && <div><Lbl t="Link to Meeting" /><select value={f.meeting} onChange={e => {
+                const mid = e.target.value;
+                up("meeting", mid);
+                const selMtg = (meetings || []).find(m => m.id === mid);
+                if (selMtg && selMtg.project) {
+                  const projMatch = (projects || []).find(p => p.name === selMtg.project);
+                  up("project", projMatch ? projMatch.name : selMtg.project);
+                }
+              }}><option value="">None</option>{meetingOpts.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></div>}
             </div>
           )}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -4140,7 +4156,17 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
 /* Persists last view per user in memory */
 const userViewPref = {};
 const userSortPref = {};  // persist sort across page changes
-const userFilterPref = {}; // persist filters across page changes
+// Persist filters across page changes AND browser refreshes via localStorage
+const FILTER_STORE_KEY = "mcs_action_filters";
+const userFilterPref = (() => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FILTER_STORE_KEY) || "{}");
+    return raw && typeof raw === "object" ? raw : {};
+  } catch (e) { return {}; }
+})();
+const saveFilterPref = () => {
+  try { localStorage.setItem(FILTER_STORE_KEY, JSON.stringify(userFilterPref)); } catch (e) { /* ignore */ }
+};
 
 function ActionsPage({ actions, setActions, plants, depts, users, user, projects, machines, meetings }) {
   const userKey = user?.id || "guest";
@@ -4187,10 +4213,10 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
     });
   };
   const clearFilter = (key) => setFiltersPersist(f => ({ ...f, [key]: [] }));
-  const clearAll = () => { const empty = { plant: [], section: [], responsible: [], status: [], priority: [], project: [], meeting: [] }; setFilters(empty); userFilterPref[userKey] = empty; };
+  const clearAll = () => { const empty = { plant: [], section: [], responsible: [], status: [], priority: [], project: [], meeting: [] }; setFilters(empty); userFilterPref[userKey] = empty; saveFilterPref(); };
   // Save filters to persistent store on each change
   const setFiltersPersist = (updater) => {
-    setFilters(prev => { const next = typeof updater === "function" ? updater(prev) : updater; userFilterPref[userKey] = next; return next; });
+    setFilters(prev => { const next = typeof updater === "function" ? updater(prev) : updater; userFilterPref[userKey] = next; saveFilterPref(); return next; });
   };
 
   // My Actions / All Actions scoping.
@@ -4224,7 +4250,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
       }
       return { ...a, ...patch };
     }));
-    apiUpdate("actions", id, resolveRecordIds(patch, plants, depts, machines, projects));
+    apiUpdate("actions", id, resolveRecordIds(patch, plants, depts, machines, projects, meetings));
   };
   const upStatus = (id, status) => {
     if (status === "COMPLETED") {
@@ -5721,7 +5747,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
           onUpdate={(id, patch) => {
             setActions(p => p.map(a => a.id === id ? { ...a, ...patch } : a));
             setSelectedAction(p => p ? { ...p, ...patch } : p);
-            apiUpdate("actions", id, resolveRecordIds(patch, plants, depts, machines, projects));
+    apiUpdate("actions", id, resolveRecordIds(patch, plants, depts, machines, projects, meetings));
           }}
           user={user}
           users={users}
@@ -6126,8 +6152,8 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Full Name" req /><input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Username" req={!isGuestRole(form.role)} /><input value={form.username || ""} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} placeholder="Login username" /></div>
               <div><Lbl t="Role" req /><select value={form.role || ""} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}><option value="">Select</option>{roles.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}</select></div>
-              <div><Lbl t="Plant" req /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value }))}><option value="">Select</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
-              <div><Lbl t="Dept" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select</option>{depts.filter(d => !form.plant || form.plant === "All" || !d.plant || d.plant === "All Plants" || d.plant === form.plant).map(d => <option key={d.id}>{d.name}</option>)}</select></div>
+              <div><Lbl t="Plant" req /><select value={form.plant || ""} onChange={e => setForm(f => ({ ...f, plant: e.target.value, dept: "" }))}><option value="">Select</option>{plants.map(p => <option key={p.id}>{p.name}</option>)}</select></div>
+              <div><Lbl t="Dept" /><select value={form.dept || ""} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}><option value="">Select</option>{depts.filter(d => !form.plant || !d.plant || d.plant === "All Plants" || d.plant === form.plant).map(d => <option key={d.id}>{d.name}</option>)}</select></div>
               <div><Lbl t="Superior (Reports To)" /><select value={form.superior || ""} onChange={e => setForm(f => ({ ...f, superior: e.target.value }))}><option value="">None (Top level)</option>{users.filter(u => u.id !== form.id).map(u => <option key={u.id} value={u.name}>{u.name} ({u.role})</option>)}</select></div>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Phone Number" /><input value={form.phone || ""} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+91-98000-00000" /></div>
               <div style={{ gridColumn: "1/-1" }}><Lbl t="Email Address" /><input type="email" value={form.email || ""} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@company.com" /></div>
@@ -6277,7 +6303,7 @@ function useAPIBridge(actions, setActions, projects, plants, depts, machines) {
             addAction: async (action) => {
               const localId = String(Date.now());
               const n = { ...action, id: localId, created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false };
-              const resolved = resolveRecordIds(n, plants, depts, machines, projects);
+              const resolved = resolveRecordIds(n, plants, depts, machines, projects, meetings);
               setActions(p => [...p, resolved]);
               try {
                 const saved = await apiCreate("actions", resolved);
@@ -6306,7 +6332,7 @@ function useAPIBridge(actions, setActions, projects, plants, depts, machines) {
         case "MCS_ADD_ACTION": {
           const localId = String(Date.now());
           const newA = { ...e.data.action, id: localId, created: todayStr(), revisionHistory: [], messages: [], pendingConfirmation: false };
-          const resolved = resolveRecordIds(newA, plants, depts, machines, projects);
+          const resolved = resolveRecordIds(newA, plants, depts, machines, projects, meetings);
           setActions(p => [...p, resolved]);
           apiCreate("actions", resolved).then(saved => {
             if (saved && saved.id) setActions(p => p.map(x => x.id === localId ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
@@ -6567,7 +6593,7 @@ export default function App() {
       const localId = String(Date.now() + i);
       localIds.push(localId);
       const base = { ...r, id: localId, messages: r.messages || [], revisionHistory: r.revisionHistory || [], pendingConfirmation: false, allocatedBy: r.allocatedBy || user?.name || "" };
-      return resolveRecordIds(base, plants, depts, machines, projects);
+      return resolveRecordIds(base, plants, depts, machines, projects, meetings);
     });
     setActions(p => [...p, ...resolvedRows]);
     resolvedRows.forEach(async (r, i) => {
@@ -6605,7 +6631,7 @@ export default function App() {
       return { ...a, ...patch };
     }));
     try {
-      const saved = await apiUpdate("actions", id, resolveRecordIds(patch, plants, depts, machines, projects));
+      const saved = await apiUpdate("actions", id, resolveRecordIds(patch, plants, depts, machines, projects, meetings));
       if (saved && saved.id) {
         setActions(p => p.map(a => a.id === id ? { ...a, version: saved.version, revisions: saved.revisions } : a));
       }
@@ -6679,7 +6705,7 @@ export default function App() {
             setQuickSaving(true);
             const localId = String(Date.now());
             const newAction = { ...a, id: localId, dateOfAction: todayStr(), revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null, status: "IN PROCESS", messages: [], pendingConfirmation: false, allocatedBy: user?.name || "" };
-            const resolved = resolveRecordIds(newAction, plants, depts, machines, projects);
+            const resolved = resolveRecordIds(newAction, plants, depts, machines, projects, meetings);
             setActions(p => [...p, resolved]);
             try {
               const saved = await apiCreate("actions", resolved);
