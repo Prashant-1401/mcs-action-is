@@ -322,6 +322,22 @@ function plantVisible(user, item) {
   return item.plantId === up || item.plant === up || item.plant === "All";
 }
 
+// A meeting is accessible only to its attendees + facilitator (admins always)
+function meetingAccessNames(m, mtgPresets) {
+  const list = ensureArray(m.attendees || (mtgPresets?.attendeeMap?.[m.type]) || []);
+  const names = list.map(a => (a || "").toString().trim().toLowerCase()).filter(Boolean);
+  const fac = (m.facilitator || "").toString().trim().toLowerCase();
+  if (fac) names.push(fac);
+  return names;
+}
+function canAccessMeeting(user, m, mtgPresets) {
+  if (!m || !user) return false;
+  if (isUserAdmin(user)) return true;
+  const myName = (user.name || "").trim().toLowerCase();
+  if (!myName) return false;
+  return meetingAccessNames(m, mtgPresets).includes(myName);
+}
+
 function ensureArray(val) {
   if (Array.isArray(val)) return val;
   if (typeof val === "string" && val.trim()) {
@@ -1775,7 +1791,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
     return null; // no upcoming occurrence found within lookahead
   };
 
-  const upcomingMeetings = (isAdmin ? (meetings || []) : (meetings || []).filter(m => isUserAdmin(user) || plantVisible(user, m)))
+  const upcomingMeetings = (meetings || []).filter(m => canAccessMeeting(user, m, null))
     .map(m => {
       const next = getNextOccurrence(m);
       return next ? { ...m, _nextDt: next } : null;
@@ -2334,7 +2350,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
   };
 
   const plantFilter = (item) => isUserAdmin(user) || plantVisible(user, item);
-  const visibleMeetings = isAdmin ? (meetings || []) : (meetings || []).filter(m => isUserAdmin(user) || plantVisible(user, m));
+  const visibleMeetings = (meetings || []).filter(m => canAccessMeeting(user, m, mtgPresets));
   const visibleProjects = isAdmin ? (projects || []) : (projects || []).filter(p => isUserAdmin(user) || plantVisible(user, p));
 
   if (activeMtg) return <MeetingRoom mtg={activeMtg} plants={plants} depts={depts} users={users} onCommit={rows => { onCommitFinal(rows); }} onCloseMeeting={() => { clearMeetingState && clearMeetingState(); setPage(0); }} onBack={() => setPage(0)} prevActions={actions} relatedActions={actions.filter(a => {
@@ -2576,10 +2592,10 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
       </div>
 
       {/* ── Completed Meeting Dashboard ── */}
-      <CompletedMeetingDashboard meetings={meetings} actions={actions} users={users} user={user} plants={plants} />
+      <CompletedMeetingDashboard meetings={visibleMeetings} actions={actions} users={users} user={user} plants={plants} />
 
       {/* ── Weekly Meeting Accountability ── */}
-      <WeeklyMeetingAccountability meetings={meetings} actions={actions} users={users} user={user} plants={plants} />
+      <WeeklyMeetingAccountability meetings={visibleMeetings} actions={actions} users={users} user={user} plants={plants} />
 
       {charter && <ProjectCharterModal pr={charter} onClose={() => { setCharter(null); setCharterActionSel(null); }} actions={actions} meetings={meetings} user={user} users={users} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); if (charter && charter.id === updated.id) setCharter(updated); onProjectUpdate(updated); }} onActionSelect={a => setCharterActionSel(a)} />}
       {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={(id, patch) => { setActions(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); apiUpdate("actions", id, patch); setCharterActionSel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} machines={machines} meetings={meetings} />}
@@ -2774,7 +2790,7 @@ function CompletedMeetingDashboard({ meetings, actions, users, user, plants }) {
       sessionDur: s.duration || 0,
       sessionActionCount: s.actionCount || 0,
     }))
-  ).filter(s => isAdmin || plantVisible(user, s));
+  ).filter(s => canAccessMeeting(user, s, null));
 
   // Enrich sessions with actual action counts from the actions table
   const enrichedSessions = allSessions.map(s => {
@@ -2934,7 +2950,7 @@ function WeeklyMeetingAccountability({ meetings, actions, users, user, plants })
 
   // Flatten all completed sessions within the last 7 days
   const weekSessions = (meetings || [])
-    .filter(m => isAdmin || plantVisible(user, m))
+    .filter(m => canAccessMeeting(user, m, null))
     .flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : [])
       .filter(s => s.date && new Date(s.date) >= weekAgo)
       .map(s => ({ ...s, type: m.type, plant: m.plant, project: m.project }))
@@ -3949,7 +3965,7 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaul
   useEscClose(onClose);
   const [f, setF] = useState({ text: "", responsible: "", due: "", section: currentUser?.dept || "General", plant: defaultPlant || (currentUser?.plant && currentUser.plant !== "All" ? currentUser.plant : ""), src: defaultSrc || "", priority: "NORMAL", remarks: "", project: defaultProject || "", meeting: defaultMeeting || "", reasonOfAction: "", machineName: "", actionPointType: "" });
   // Meetings that the current user can see (admin sees all, others only visible plants)
-  const meetingOpts = (meetings || []).filter(m => isUserAdmin(currentUser) || plantVisible(currentUser, m)).map(m => ({ id: m.id, label: `${m.type}${m.plant ? " · " + m.plant : ""}${m.project ? " · " + m.project : ""}` }));
+  const meetingOpts = (meetings || []).filter(m => canAccessMeeting(currentUser, m, null)).map(m => ({ id: m.id, label: `${m.type}${m.plant ? " · " + m.plant : ""}${m.project ? " · " + m.project : ""}` }));
   // Derive reason suggestions from the reasons state passed in (loaded at app boot)
   const reasonSuggestions = (reasonsProp || []).map(r => r.reason || r.Reason || r.text || r.Text || Object.values(r)[0]).filter(Boolean);
   const up = (k, v) => setF(x => ({ ...x, [k]: v }));
@@ -5097,7 +5113,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
   // This ensures actions always appear even if section doesn't match any dept name
   const heatmapRows = visibleDepts.map(d => ({ id: d.id, name: d.name, head: d.head, icon: d.icon || "🏭", fromDept: true }));
 
-  const scopedMeetings = isDashAdmin ? (meetings || []) : (meetings || []).filter(m => isDashAdmin || plantVisible(user, m));
+  const scopedMeetings = isDashAdmin ? (meetings || []) : (meetings || []).filter(m => canAccessMeeting(user, m, null));
   const allSessions = scopedMeetings.flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : []).map(s => ({ ...s, type: m.type, plant: m.plant })));
   const totalMtgMins = allSessions.reduce((s, x) => s + (x.duration || 0), 0);
   // Deduplicate audit for badge (keep highest level per action SN) — scoped to
