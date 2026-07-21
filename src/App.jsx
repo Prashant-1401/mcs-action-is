@@ -5195,10 +5195,9 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
   // matches the same scoping already used on the Actions Register page.
   const isDashAdmin = isUserAdmin(user);
   const userNameLower = (user?.name || "").trim().toLowerCase();
-  const dashUserPlant = user?.plant;
-  let fa = isDashAdmin || !dashUserPlant || dashUserPlant === "All"
+  let fa = isDashAdmin
     ? actions
-    : actions.filter(a => !a.plant || a.plant === "All" || a.plant === dashUserPlant);
+    : actions.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower].filter(Boolean)) || (a.allocatedBy || "").trim().toLowerCase() === userNameLower);
   if (plantF !== "All") fa = fa.filter(a => a.plant === plantF);
   if (deptF !== "All") fa = fa.filter(a => String(a.section ?? "").toLowerCase().trim() === String(deptF ?? "").toLowerCase().trim() || String(a.dept ?? "").toLowerCase().trim() === String(deptF ?? "").toLowerCase().trim());
 
