@@ -4355,7 +4355,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
                       onClick={async (e) => {
                         e.stopPropagation();
                         try {
-                        const resp = await fetch(`${API_BASE_URL}/api/download-attachment/${action.id}/${att.id}`, {
+                        const resp = await fetch(`${API_BASE_URL}/api/actions/${action.id}/attachments/${att.id}`, {
                           headers: { "x-api-key": API_KEY, "Authorization": `Bearer ${AUTH_TOKEN || localStorage.getItem("mcs_token")}` },
                           });
                           if (!resp.ok) { alert("Download failed"); return; }

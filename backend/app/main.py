@@ -301,29 +301,6 @@ async def ping():
     return {"ok": True, "gemini_ready": bool(settings.gemini_api_key)}
 
 
-@app.get("/api/download-attachment/{action_id}/{attachment_id}")
-async def download_action_attachment(action_id: str, attachment_id: str):
-    import base64
-    from fastapi.responses import Response
-    from sqlalchemy import select
-    from app.database import async_session
-    from app.models.models import Action
-    async with async_session() as db:
-        result = await db.execute(select(Action).where(Action.id == action_id))
-        action = result.scalar_one_or_none()
-        if not action:
-            return JSONResponse(status_code=404, content={"detail": "Action not found"})
-        att = next((a for a in (action.attachments or []) if a.get("id") == attachment_id), None)
-        if not att:
-            return JSONResponse(status_code=404, content={"detail": "Attachment not found"})
-        file_bytes = base64.b64decode(att["data"])
-        return Response(
-            content=file_bytes,
-            media_type=att.get("mimetype", "application/octet-stream"),
-            headers={"Content-Disposition": f"attachment; filename=\"{att['filename']}\""}
-        )
-
-
 app.include_router(auth.router)
 app.include_router(plants.router)
 app.include_router(departments.router)
@@ -340,3 +317,34 @@ app.include_router(meetings_ai.router)
 app.include_router(translate.router)
 app.include_router(email_share.router)
 app.include_router(sessions.router)
+
+
+# Public download endpoint — no auth required for browser file downloads
+from fastapi import APIRouter as _APIRouter
+from fastapi.responses import Response as _Response
+import base64 as _b64
+
+_dl_router = _APIRouter(tags=["Attachments"])
+
+@_dl_router.get("/api/download-attachment/{action_id}/{attachment_id}")
+@_dl_router.get("/api/actions/{action_id}/attachments/{attachment_id}")
+async def download_action_attachment(action_id: str, attachment_id: str):
+    from sqlalchemy import select as _select
+    from app.database import async_session as _as
+    from app.models.models import Action as _Action
+    async with _as() as db:
+        result = await db.execute(_select(_Action).where(_Action.id == action_id))
+        action = result.scalar_one_or_none()
+        if not action:
+            return JSONResponse(status_code=404, content={"detail": "Action not found"})
+        att = next((a for a in (action.attachments or []) if a.get("id") == attachment_id), None)
+        if not att:
+            return JSONResponse(status_code=404, content={"detail": "Attachment not found"})
+        file_bytes = _b64.b64decode(att["data"])
+        return _Response(
+            content=file_bytes,
+            media_type=att.get("mimetype", "application/octet-stream"),
+            headers={"Content-Disposition": f"attachment; filename=\"{att['filename']}\""}
+        )
+
+app.include_router(_dl_router)
