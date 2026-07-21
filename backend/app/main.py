@@ -1,10 +1,11 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
-from app.database import engine, Base
+from app.database import engine, Base, get_db
 from app.routers import (
     auth, plants, departments, roles, users, machines, reasons,
     actions, projects, meetings, escalation, audit, meetings_ai,
@@ -302,51 +303,46 @@ async def ping():
 
 
 # Public download endpoint — registered BEFORE actions router so it matches first
-# Handles both /api/download-attachment/... and /api/actions/{id}/attachments/{id}
 @app.get("/api/download-attachment/{action_id}/{attachment_id}")
-async def download_action_attachment_v1(action_id: str, attachment_id: str):
-    import base64
-    from fastapi.responses import Response
-    from sqlalchemy import select
-    from app.database import async_session
-    from app.models.models import Action
-    async with async_session() as db:
-        result = await db.execute(select(Action).where(Action.id == action_id))
-        action = result.scalar_one_or_none()
-        if not action:
-            return JSONResponse(status_code=404, content={"detail": "Action not found"})
-        att = next((a for a in (action.attachments or []) if a.get("id") == attachment_id), None)
-        if not att:
-            return JSONResponse(status_code=404, content={"detail": "Attachment not found"})
-        file_bytes = base64.b64decode(att["data"])
-        return Response(
-            content=file_bytes,
-            media_type=att.get("mimetype", "application/octet-stream"),
-            headers={"Content-Disposition": f"attachment; filename=\"{att['filename']}\""}
-        )
+async def download_action_attachment_v1(action_id: str, attachment_id: str, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import select as _sel
+    from app.models.models import Action as _Act
+    from fastapi.responses import Response as _Resp
+    result = await db.execute(_sel(_Act).where(_Act.id == action_id))
+    action = result.scalar_one_or_none()
+    if not action:
+        return JSONResponse(status_code=404, content={"detail": "Action not found"})
+    att = next((a for a in (action.attachments or []) if a.get("id") == attachment_id), None)
+    if not att:
+        return JSONResponse(status_code=404, content={"detail": "Attachment not found"})
+    import base64 as _b64
+    file_bytes = _b64.b64decode(att["data"])
+    return _Resp(
+        content=file_bytes,
+        media_type=att.get("mimetype", "application/octet-stream"),
+        headers={"Content-Disposition": f"attachment; filename=\"{att['filename']}\""}
+    )
 
 
 @app.get("/api/actions/{action_id}/attachments/{attachment_id}")
-async def download_action_attachment_v2(action_id: str, attachment_id: str):
-    import base64
-    from fastapi.responses import Response
-    from sqlalchemy import select
-    from app.database import async_session
-    from app.models.models import Action
-    async with async_session() as db:
-        result = await db.execute(select(Action).where(Action.id == action_id))
-        action = result.scalar_one_or_none()
-        if not action:
-            return JSONResponse(status_code=404, content={"detail": "Action not found"})
-        att = next((a for a in (action.attachments or []) if a.get("id") == attachment_id), None)
-        if not att:
-            return JSONResponse(status_code=404, content={"detail": "Attachment not found"})
-        file_bytes = base64.b64decode(att["data"])
-        return Response(
-            content=file_bytes,
-            media_type=att.get("mimetype", "application/octet-stream"),
-            headers={"Content-Disposition": f"attachment; filename=\"{att['filename']}\""}
-        )
+async def download_action_attachment_v2(action_id: str, attachment_id: str, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import select as _sel
+    from app.models.models import Action as _Act
+    from fastapi.responses import Response as _Resp
+    result = await db.execute(_sel(_Act).where(_Act.id == action_id))
+    action = result.scalar_one_or_none()
+    if not action:
+        return JSONResponse(status_code=404, content={"detail": "Action not found"})
+    att = next((a for a in (action.attachments or []) if a.get("id") == attachment_id), None)
+    if not att:
+        return JSONResponse(status_code=404, content={"detail": "Attachment not found"})
+    import base64 as _b64
+    file_bytes = _b64.b64decode(att["data"])
+    return _Resp(
+        content=file_bytes,
+        media_type=att.get("mimetype", "application/octet-stream"),
+        headers={"Content-Disposition": f"attachment; filename=\"{att['filename']}\""}
+    )
 
 
 app.include_router(auth.router)
