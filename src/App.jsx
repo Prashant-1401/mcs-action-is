@@ -3959,6 +3959,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
 /* ADD ACTION SIDE PANEL */
 function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaultMeeting, defaultProject, projects, meetings, onSave, onClose, currentUser, machines, reasons: reasonsProp, saving }) {
   useEscClose(onClose);
+  const panelRef = React.useRef(null);
   const [f, setF] = useState({ text: "", responsible: "", due: "", section: currentUser?.dept || "General", plant: defaultPlant || (currentUser?.plant && currentUser.plant !== "All" ? currentUser.plant : ""), src: defaultSrc || "", priority: "NORMAL", remarks: "", project: defaultProject || "", meeting: defaultMeeting || "", reasonOfAction: "", machineName: "", actionPointType: "" });
   const [pendingFiles, setPendingFiles] = useState([]);
   const [uploadingFiles, setUploadingFiles] = useState(false);
@@ -3971,7 +3972,7 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaul
   return (
     <>
       <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", zIndex: 340 }} onClick={onClose} />
-      <div className="side-panel" style={{ width: 420, padding: 28 }}>
+      <div className="side-panel" ref={panelRef} style={{ width: 420, padding: 28 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
           <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 16, fontWeight: 800, color: T.navy }}>Log Action Point</h2>
           <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 22, color: T.text2 }}>x</button>
