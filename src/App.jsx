@@ -333,9 +333,10 @@ function meetingAccessNames(m, mtgPresets) {
 function canAccessMeeting(user, m, mtgPresets) {
   if (!m || !user) return false;
   if (isUserAdmin(user)) return true;
-  const myName = (user.name || "").trim().toLowerCase();
-  if (!myName) return false;
-  return meetingAccessNames(m, mtgPresets).includes(myName);
+  const up = user.plant;
+  if (!up || up === "All") return true;
+  if (m.plant && m.plant !== "All" && m.plant !== up) return false;
+  return true;
 }
 
 function ensureArray(val) {
@@ -1077,11 +1078,10 @@ function useNotifications(actions, audit, user, users = []) {
     const myDept = user.dept;
     const userNameLower = (user.name || "").trim().toLowerCase();
 
-    // Scope: my plant/dept actions (admins with "All" plant see everything)
+    // Scope: my plant actions (admins with "All" plant see everything)
     const inScope = (a) => {
       if (myPlant === "All") return true;
       if (a.plant && a.plant !== myPlant) return false;
-      if (myDept && a.dept && a.dept !== myDept) return false;
       return true;
     };
 
@@ -1719,13 +1719,9 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   // Normalize name comparisons — data may have trailing spaces/casing differences
   const userName = (user?.name || "").trim().toLowerCase();
   const subNamesLower = subNames.map(n => n.trim().toLowerCase());
-  const scopedActions = isAdmin
+  const scopedActions = isAdmin || !user?.plant || user?.plant === "All"
     ? actions
-    : actions.filter(a => {
-    // Non-admin: scope by plant first, then show actions where user is responsible OR allocated by user
-    if (user?.plant !== "All" && a.plant && a.plant !== user?.plant) return false;
-    return responsibleMatchesUsers(a.responsible, [...subNamesLower, userName].filter(Boolean)) || (a.allocatedBy || "").trim().toLowerCase() === userName;
-  });
+    : actions.filter(a => !a.plant || a.plant === "All" || a.plant === user?.plant);
 
   const total = scopedActions.length;
   const comp = scopedActions.filter(a => a.status === "COMPLETED").length;
@@ -3964,6 +3960,8 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
 function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaultMeeting, defaultProject, projects, meetings, onSave, onClose, currentUser, machines, reasons: reasonsProp, saving }) {
   useEscClose(onClose);
   const [f, setF] = useState({ text: "", responsible: "", due: "", section: currentUser?.dept || "General", plant: defaultPlant || (currentUser?.plant && currentUser.plant !== "All" ? currentUser.plant : ""), src: defaultSrc || "", priority: "NORMAL", remarks: "", project: defaultProject || "", meeting: defaultMeeting || "", reasonOfAction: "", machineName: "", actionPointType: "" });
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
   // Meetings that the current user can see (admin sees all, others only visible plants)
   const meetingOpts = (meetings || []).filter(m => canAccessMeeting(currentUser, m, null)).map(m => ({ id: m.id, label: `${m.type}${m.plant ? " · " + m.plant : ""}${m.project ? " · " + m.project : ""}` }));
   // Derive reason suggestions from the reasons state passed in (loaded at app boot)
@@ -4008,6 +4006,37 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaul
             <div><Lbl t="Machine Name" /><select value={f.machineName} onChange={e => up("machineName", e.target.value)}><option value="">Select machine…</option>{machineOpts.map(m => <option key={m} value={m}>{m}</option>)}{f.machineName && !machineOpts.includes(f.machineName) && <option value={f.machineName}>{f.machineName}</option>}</select></div>
             <div><Lbl t="Remarks" /><input value={f.remarks} onChange={e => up("remarks", e.target.value)} placeholder="Optional notes…" /></div>
           </div>
+          {/* Attachments */}
+          <div>
+            <Lbl t="Attachments" />
+            {pendingFiles.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+                {pendingFiles.map((pf, idx) => (
+                  <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, background: T.bg, borderRadius: 8, padding: "7px 12px", border: `1px solid ${T.border}` }}>
+                    <span style={{ fontSize: 14 }}>{pf.file.type?.includes("pdf") ? "📄" : pf.file.type?.includes("image") ? "🖼" : pf.file.type?.includes("sheet") || pf.file.type?.includes("excel") ? "📊" : pf.file.type?.includes("word") || pf.file.type?.includes("document") ? "📝" : "📁"}</span>
+                    <span style={{ fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pf.file.name}</span>
+                    {pf.status === "uploading" && <span style={{ fontSize: 11, color: T.amber, display: "flex", alignItems: "center", gap: 4 }}><span className="spin-icon">⟳</span> Uploading…</span>}
+                    {pf.status === "done" && <span style={{ fontSize: 11, color: T.green }}>✓</span>}
+                    {pf.status === "error" && <span style={{ fontSize: 11, color: T.red }}>✗ Failed</span>}
+                    {!pf.status && <button onClick={() => setPendingFiles(p => p.filter((_, i) => i !== idx))} style={{ background: "none", border: "none", cursor: "pointer", color: T.red, fontSize: 14, padding: 2 }}>×</button>}
+                  </div>
+                ))}
+              </div>
+            )}
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 8, border: `1.5px dashed ${T.border}`, cursor: "pointer", fontSize: 12, color: T.text2, background: "#fff", transition: "border-color .15s, background .15s" }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = T.navy; e.currentTarget.style.background = T.bg; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "#fff"; }}
+            >
+              <span style={{ fontSize: 14 }}>+</span> Attach File
+              <input type="file" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.xlsx,.xls,.csv,.doc,.docx" style={{ display: "none" }} onChange={e => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                if (file.size > 5 * 1024 * 1024) { alert("File size exceeds 5 MB limit."); return; }
+                setPendingFiles(p => [...p, { file, status: null }]);
+                e.target.value = "";
+              }} />
+            </label>
+          </div>
         </div>
         <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
           <button className="btn btn-ghost" style={{ flex: 1, justifyContent: "center" }} onClick={onClose}>Cancel</button>
@@ -4016,9 +4045,9 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaul
             const linkedMtg = (meetings || []).find(m => m.id === f.meeting);
             const enriched = { ...f };
             if (linkedMtg) { enriched.srcId = linkedMtg.id; enriched.src = linkedMtg.type; }
-            onSave(enriched);
+            onSave(enriched, pendingFiles);
           }} disabled={saving}>
-            {saving ? <><Spin /> Saving…</> : "Save Action"}
+            {saving ? <><span className="spin-icon">⟳</span> Saving…</> : "Save Action"}
           </button>
         </div>
       </div>
@@ -4584,9 +4613,10 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
   };
   const scopedNames = user ? getSubTree(user.name, users) : [];
   const userNameLower = (user?.name || "").trim().toLowerCase();
-  const scoped = isAdmin
+  const userPlant = user?.plant;
+  const scoped = isAdmin || !userPlant || userPlant === "All"
     ? actions
-    : actions.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower].filter(Boolean)) || (a.allocatedBy || "").trim().toLowerCase() === userNameLower);
+    : actions.filter(a => !a.plant || a.plant === "All" || a.plant === userPlant);
 
   const toggleFilter = (key, val) => {
     setFiltersPersist(f => {
@@ -5164,9 +5194,10 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
   // matches the same scoping already used on the Actions Register page.
   const isDashAdmin = isUserAdmin(user);
   const userNameLower = (user?.name || "").trim().toLowerCase();
-  let fa = isDashAdmin
+  const dashUserPlant = user?.plant;
+  let fa = isDashAdmin || !dashUserPlant || dashUserPlant === "All"
     ? actions
-    : actions.filter(a => responsibleMatchesUsers(a.responsible, [userNameLower].filter(Boolean)) || (a.allocatedBy || "").trim().toLowerCase() === userNameLower);
+    : actions.filter(a => !a.plant || a.plant === "All" || a.plant === dashUserPlant);
   if (plantF !== "All") fa = fa.filter(a => a.plant === plantF);
   if (deptF !== "All") fa = fa.filter(a => String(a.section ?? "").toLowerCase().trim() === String(deptF ?? "").toLowerCase().trim() || String(a.dept ?? "").toLowerCase().trim() === String(deptF ?? "").toLowerCase().trim());
 
@@ -7096,7 +7127,7 @@ export default function App() {
           reasons={reasons}
           currentUser={user}
           saving={quickSaving}
-          onSave={async a => {
+          onSave={async (a, files) => {
             if (committingRef.current) return;
             committingRef.current = true;
             setQuickSaving(true);
@@ -7108,6 +7139,20 @@ export default function App() {
               const saved = await apiCreate("actions", resolved);
               if (saved && saved.id) {
                 setActions(p => p.map(x => x.id === localId ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
+                // Upload pending files
+                if (files && files.length > 0) {
+                  for (const pf of files) {
+                    try {
+                      const formData = new FormData();
+                      formData.append("file", pf.file);
+                      await fetch(`${API_BASE_URL}/api/actions/${saved.id}/attachments`, {
+                        method: "POST",
+                        headers: { "x-api-key": API_KEY, "Authorization": `Bearer ${AUTH_TOKEN || localStorage.getItem("mcs_token")}` },
+                        body: formData,
+                      });
+                    } catch (err) { console.warn("Attachment upload failed:", err); }
+                  }
+                }
               }
               fetchData();
             } catch (e) {
