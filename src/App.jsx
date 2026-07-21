@@ -3979,33 +3979,6 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaul
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div><Lbl t="Action Point Type" req /><select value={f.actionPointType} onChange={e => up("actionPointType", e.target.value)}><option value="">Select type…</option>{["Corrective Action","Preventive Action","Improvement","Safety","Maintenance","Quality","Compliance","Other","Others"].map(t => <option key={t} value={t}>{t}</option>)}{f.actionPointType && !["Corrective Action","Preventive Action","Improvement","Safety","Maintenance","Quality","Compliance","Other","Others"].includes(f.actionPointType) && <option value={f.actionPointType}>{f.actionPointType}</option>}</select></div>
           <div><Lbl t="Action Point" req /><textarea value={f.text} onChange={e => up("text", e.target.value)} style={{ height: 72, resize: "none" }} placeholder="Describe the action…" /></div>
-          <div><Lbl t="Responsible Person(s)" req /><MultiUserSelect value={f.responsible} users={users.filter(u => { if (f.plant && f.plant !== "All") return !u.plant || u.plant === "All" || u.plant === f.plant; if (!isUserAdmin(currentUser) && currentUser?.plant && currentUser.plant !== "All") return !u.plant || u.plant === "All" || u.plant === currentUser.plant; return true; })} onChange={v => { up("responsible", v); const firstName = (v || "").split(",").map(s => s.trim()).filter(Boolean)[0]; if (firstName) { const u = users.find(x => x.name === firstName); if (u) { if (u.plant) up("plant", u.plant); if (u.dept) up("section", u.dept); } } }} /></div>
-          <div><Lbl t="Due Date" req /><input type="date" value={f.due} onChange={e => up("due", e.target.value)} /></div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <div><Lbl t="Department" /><select value={f.section} onChange={e => up("section", e.target.value)}><option value="General">General</option>{scopedDepts(currentUser, depts).filter(d => !f.plant || f.plant === "All" || !d.plant || d.plant === "All Plants" || d.plant === f.plant).map(d => <option key={d.id} value={d.name}>{d.name}</option>)}{SECTIONS.filter(s => s !== "General" && !scopedDepts(currentUser, depts).filter(d => !f.plant || f.plant === "All" || !d.plant || d.plant === "All Plants" || d.plant === f.plant).find(d => d.name === s)).map(s => <option key={s}>{s}</option>)}</select></div>
-            <div><Lbl t="Plant" /><select value={f.plant} onChange={e => { up("plant", e.target.value); up("section", "General"); up("machineName", ""); }}>{scopedPlants(currentUser, plants).map(p => <option key={p.id}>{p.name}</option>)}</select></div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <div><Lbl t="Priority" /><select value={f.priority} onChange={e => up("priority", e.target.value)}>{PRIORITY_LIST.map(p => <option key={p}>{p}</option>)}</select></div>
-            {projects && <div><Lbl t="Link to Project" /><select value={f.project} onChange={e => up("project", e.target.value)}><option value="">None</option>{projects.map(p => <option key={p.id}>{p.name}</option>)}</select></div>}
-          </div>
-          {(projects || meetings) && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              {meetings && <div><Lbl t="Link to Meeting" /><select value={f.meeting} onChange={e => {
-                const mid = e.target.value;
-                up("meeting", mid);
-                const selMtg = (meetings || []).find(m => m.id === mid);
-                if (selMtg && selMtg.project) {
-                  const projMatch = (projects || []).find(p => p.name === selMtg.project);
-                  up("project", projMatch ? projMatch.name : selMtg.project);
-                }
-              }}><option value="">None</option>{meetingOpts.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></div>}
-            </div>
-          )}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <div><Lbl t="Machine Name" /><select value={f.machineName} onChange={e => up("machineName", e.target.value)}><option value="">Select machine…</option>{machineOpts.map(m => <option key={m} value={m}>{m}</option>)}{f.machineName && !machineOpts.includes(f.machineName) && <option value={f.machineName}>{f.machineName}</option>}</select></div>
-            <div><Lbl t="Remarks" /><input value={f.remarks} onChange={e => up("remarks", e.target.value)} placeholder="Optional notes…" /></div>
-          </div>
           {/* Attachments */}
           <div>
             <Lbl t="Attachments" />
@@ -4036,6 +4009,33 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaul
                 e.target.value = "";
               }} />
             </label>
+          </div>
+          <div><Lbl t="Responsible Person(s)" req /><MultiUserSelect value={f.responsible} users={users.filter(u => { if (f.plant && f.plant !== "All") return !u.plant || u.plant === "All" || u.plant === f.plant; if (!isUserAdmin(currentUser) && currentUser?.plant && currentUser.plant !== "All") return !u.plant || u.plant === "All" || u.plant === currentUser.plant; return true; })} onChange={v => { up("responsible", v); const firstName = (v || "").split(",").map(s => s.trim()).filter(Boolean)[0]; if (firstName) { const u = users.find(x => x.name === firstName); if (u) { if (u.plant) up("plant", u.plant); if (u.dept) up("section", u.dept); } } }} /></div>
+          <div><Lbl t="Due Date" req /><input type="date" value={f.due} onChange={e => up("due", e.target.value)} /></div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div><Lbl t="Department" /><select value={f.section} onChange={e => up("section", e.target.value)}><option value="General">General</option>{scopedDepts(currentUser, depts).filter(d => !f.plant || f.plant === "All" || !d.plant || d.plant === "All Plants" || d.plant === f.plant).map(d => <option key={d.id} value={d.name}>{d.name}</option>)}{SECTIONS.filter(s => s !== "General" && !scopedDepts(currentUser, depts).filter(d => !f.plant || f.plant === "All" || !d.plant || d.plant === "All Plants" || d.plant === f.plant).find(d => d.name === s)).map(s => <option key={s}>{s}</option>)}</select></div>
+            <div><Lbl t="Plant" /><select value={f.plant} onChange={e => { up("plant", e.target.value); up("section", "General"); up("machineName", ""); }}>{scopedPlants(currentUser, plants).map(p => <option key={p.id}>{p.name}</option>)}</select></div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div><Lbl t="Priority" /><select value={f.priority} onChange={e => up("priority", e.target.value)}>{PRIORITY_LIST.map(p => <option key={p}>{p}</option>)}</select></div>
+            {projects && <div><Lbl t="Link to Project" /><select value={f.project} onChange={e => up("project", e.target.value)}><option value="">None</option>{projects.map(p => <option key={p.id}>{p.name}</option>)}</select></div>}
+          </div>
+          {(projects || meetings) && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {meetings && <div><Lbl t="Link to Meeting" /><select value={f.meeting} onChange={e => {
+                const mid = e.target.value;
+                up("meeting", mid);
+                const selMtg = (meetings || []).find(m => m.id === mid);
+                if (selMtg && selMtg.project) {
+                  const projMatch = (projects || []).find(p => p.name === selMtg.project);
+                  up("project", projMatch ? projMatch.name : selMtg.project);
+                }
+              }}><option value="">None</option>{meetingOpts.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></div>}
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div><Lbl t="Machine Name" /><select value={f.machineName} onChange={e => up("machineName", e.target.value)}><option value="">Select machine…</option>{machineOpts.map(m => <option key={m} value={m}>{m}</option>)}{f.machineName && !machineOpts.includes(f.machineName) && <option value={f.machineName}>{f.machineName}</option>}</select></div>
+            <div><Lbl t="Remarks" /><input value={f.remarks} onChange={e => up("remarks", e.target.value)} placeholder="Optional notes…" /></div>
           </div>
         </div>
         <div style={{ marginTop: 20, display: "flex", gap: 10 }}>

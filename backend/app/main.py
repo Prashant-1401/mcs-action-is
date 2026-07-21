@@ -302,49 +302,6 @@ async def ping():
     return {"ok": True, "gemini_ready": bool(settings.gemini_api_key)}
 
 
-# Public download endpoint — registered BEFORE actions router so it matches first
-@app.get("/api/download-attachment/{action_id}/{attachment_id}")
-async def download_action_attachment_v1(action_id: str, attachment_id: str, db: AsyncSession = Depends(get_db)):
-    from sqlalchemy import select as _sel
-    from app.models.models import Action as _Act
-    from fastapi.responses import Response as _Resp
-    result = await db.execute(_sel(_Act).where(_Act.id == action_id))
-    action = result.scalar_one_or_none()
-    if not action:
-        return JSONResponse(status_code=404, content={"detail": "Action not found"})
-    att = next((a for a in (action.attachments or []) if a.get("id") == attachment_id), None)
-    if not att:
-        return JSONResponse(status_code=404, content={"detail": "Attachment not found"})
-    import base64 as _b64
-    file_bytes = _b64.b64decode(att["data"])
-    return _Resp(
-        content=file_bytes,
-        media_type=att.get("mimetype", "application/octet-stream"),
-        headers={"Content-Disposition": f"attachment; filename=\"{att['filename']}\""}
-    )
-
-
-@app.get("/api/actions/{action_id}/attachments/{attachment_id}")
-async def download_action_attachment_v2(action_id: str, attachment_id: str, db: AsyncSession = Depends(get_db)):
-    from sqlalchemy import select as _sel
-    from app.models.models import Action as _Act
-    from fastapi.responses import Response as _Resp
-    result = await db.execute(_sel(_Act).where(_Act.id == action_id))
-    action = result.scalar_one_or_none()
-    if not action:
-        return JSONResponse(status_code=404, content={"detail": "Action not found"})
-    att = next((a for a in (action.attachments or []) if a.get("id") == attachment_id), None)
-    if not att:
-        return JSONResponse(status_code=404, content={"detail": "Attachment not found"})
-    import base64 as _b64
-    file_bytes = _b64.b64decode(att["data"])
-    return _Resp(
-        content=file_bytes,
-        media_type=att.get("mimetype", "application/octet-stream"),
-        headers={"Content-Disposition": f"attachment; filename=\"{att['filename']}\""}
-    )
-
-
 app.include_router(auth.router)
 app.include_router(plants.router)
 app.include_router(departments.router)
