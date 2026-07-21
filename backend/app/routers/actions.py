@@ -392,6 +392,18 @@ async def update_action(action_id: str, data: ActionUpdate, bg: BackgroundTasks,
         update_data["revision_history"] = current_history
         update_data["revisions"] = (action.revisions or 0) + 1
 
+    # Preserve base64 data in attachments if frontend sends metadata-only list
+    if "attachments" in update_data:
+        incoming = update_data["attachments"] or []
+        existing = {a["id"]: a for a in (action.attachments or []) if "data" in a}
+        merged = []
+        for att in incoming:
+            if att.get("id") in existing and "data" not in att:
+                merged.append(existing[att["id"]])
+            else:
+                merged.append(att)
+        update_data["attachments"] = merged
+
     for k, v in update_data.items():
         if isinstance(v, str) and k in ("due", "date_of_action", "closed_on", "created"):
             try:
