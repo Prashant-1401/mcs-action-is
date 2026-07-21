@@ -301,7 +301,7 @@ async def ping():
     return {"ok": True, "gemini_ready": bool(settings.gemini_api_key)}
 
 
-@app.get("/api/actions/{action_id}/attachments/{attachment_id}")
+@app.get("/api/download-attachment/{action_id}/{attachment_id}")
 async def download_action_attachment(action_id: str, attachment_id: str):
     import base64
     from fastapi.responses import Response
@@ -320,7 +320,7 @@ async def download_action_attachment(action_id: str, attachment_id: str):
         return Response(
             content=file_bytes,
             media_type=att.get("mimetype", "application/octet-stream"),
-            headers={"Content-Disposition": f'attachment; filename="{att["filename"]}"'}
+            headers={"Content-Disposition": f"attachment; filename=\"{att['filename']}\""}
         )
 
 
