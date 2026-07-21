@@ -1,7 +1,8 @@
 import uuid
 import datetime as _dt
+import base64
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
@@ -12,6 +13,7 @@ from app.middleware.auth import require_api_key, get_current_user
 from app.services.email_service import (
     dispatch_escalation_emails, send_actions_email, dispatch_daily_digests,
     send_completion_request_email, send_completion_confirmed_email, send_completion_rejected_email,
+    send_attachment_email,
 )
 from app.services.google_sheets_service import sync_action_to_sheet, sync_all_actions
 
@@ -437,6 +439,88 @@ async def create_action_message(action_id: str, data: ActionMessageCreate, db: A
     await db.commit()
     await db.refresh(msg)
     return msg
+
+
+@router.post("/{action_id}/attachments")
+async def upload_attachment(action_id: str, file: UploadFile = File(...), bg: BackgroundTasks = None, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Action).where(Action.id == action_id))
+    action = result.scalar_one_or_none()
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+
+    content = await file.read()
+    max_bytes = 5 * 1024 * 1024  # 5 MB limit
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=400, detail="File size exceeds 5 MB limit")
+
+    allowed_mimes = {
+        "application/pdf",
+        "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+        "text/csv",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+    if file.content_type and file.content_type not in allowed_mimes:
+        raise HTTPException(status_code=400, detail=f"File type '{file.content_type}' is not allowed")
+
+    b64_data = base64.b64encode(content).decode("utf-8")
+    attachment = {
+        "id": str(uuid.uuid4()),
+        "filename": file.filename or "unnamed",
+        "mimetype": file.content_type or "application/octet-stream",
+        "size": len(content),
+        "data": b64_data,
+    }
+    current = action.attachments or []
+    current.append(attachment)
+    action.attachments = current
+    action.version = (action.version or 0) + 1
+    await db.commit()
+
+    if bg and action.allocated_by:
+        alloc_q = await db.execute(select(User).where(User.name == action.allocated_by))
+        allocator = alloc_q.scalar_one_or_none()
+        if allocator and allocator.email:
+            bg.add_task(
+                send_attachment_email, allocator.email, action.sn, action.text,
+                action.responsible or "Unknown", file.filename or "unnamed",
+                b64_data, file.content_type or "application/octet-stream",
+            )
+
+    return {"ok": True, "attachment": {"id": attachment["id"], "filename": attachment["filename"], "mimetype": attachment["mimetype"], "size": attachment["size"]}}
+
+
+@router.get("/{action_id}/attachments/{attachment_id}", dependencies=[])
+async def download_attachment(action_id: str, attachment_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Action).where(Action.id == action_id))
+    action = result.scalar_one_or_none()
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+    att = next((a for a in (action.attachments or []) if a.get("id") == attachment_id), None)
+    if not att:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    from fastapi.responses import Response
+    file_bytes = base64.b64decode(att["data"])
+    return Response(
+        content=file_bytes,
+        media_type=att.get("mimetype", "application/octet-stream"),
+        headers={"Content-Disposition": f'attachment; filename="{att["filename"]}"'}
+    )
+
+
+@router.delete("/{action_id}/attachments/{attachment_id}")
+async def delete_attachment(action_id: str, attachment_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Action).where(Action.id == action_id))
+    action = result.scalar_one_or_none()
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+    current = action.attachments or []
+    action.attachments = [a for a in current if a.get("id") != attachment_id]
+    action.version = (action.version or 0) + 1
+    await db.commit()
+    return {"ok": True}
 
 
 @router.post("/bulk")

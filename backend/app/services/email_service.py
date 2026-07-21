@@ -270,3 +270,51 @@ def send_completion_rejected_email(to_email: str, action_sn: str, action_text: s
         f"<p><a href='{settings.frontend_url}' style='display:inline-block;background:#E74C3C;color:#fff;padding:12px 24px;text-decoration:none;border-radius:4px;'>Open MCS</a></p>"
     )
     return send_email([to_email], subject, body)
+
+
+def send_attachment_email(to_email: str, action_sn: str, action_text: str,
+                          uploaded_by: str, filename: str, file_data_b64: str,
+                          mimetype: str) -> bool:
+    """Notify allocator that a document has been attached to an action."""
+    safe_sn = html_escape(str(action_sn))
+    safe_text = html_escape(str(action_text))
+    safe_by = html_escape(str(uploaded_by))
+    safe_fn = html_escape(str(filename))
+    subject = f"MCS — Document Attached to Action {safe_sn}"
+    body = (
+        f"<h2>Document Attached to Action</h2>"
+        f"<p><b>{safe_by}</b> has attached a document to action <b>{safe_sn}</b>.</p>"
+        f"<table style='width:100%;border-collapse:collapse;margin:16px 0;'>"
+        f"<tr><td style='padding:8px;font-weight:700;color:#555;'>Action</td><td style='padding:8px;'>{safe_sn}</td></tr>"
+        f"<tr><td style='padding:8px;font-weight:700;color:#555;'>Description</td><td style='padding:8px;'>{safe_text}</td></tr>"
+        f"<tr><td style='padding:8px;font-weight:700;color:#555;'>Document</td><td style='padding:8px;'>{safe_fn}</td></tr>"
+        f"<tr><td style='padding:8px;font-weight:700;color:#555;'>Attached By</td><td style='padding:8px;'>{safe_by}</td></tr>"
+        f"</table>"
+        f"<p>The document is attached to this email.</p>"
+        f"<p><a href='{settings.frontend_url}' style='display:inline-block;background:#1a237e;color:#fff;padding:12px 24px;text-decoration:none;border-radius:4px;'>Open MCS</a></p>"
+    )
+    if not settings.smtp_user or not settings.smtp_password:
+        print(f"SMTP not configured — attachment email NOT sent. TO: {to_email} SUBJECT: {subject}")
+        return False
+    try:
+        import base64 as _b64
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = settings.smtp_user
+        msg["To"] = to_email
+        msg.set_content("Please enable HTML viewing.")
+        msg.add_alternative(body, subtype="html")
+        file_bytes = _b64.b64decode(file_data_b64)
+        mt_parts = mimetype.split("/")
+        msg.add_attachment(file_bytes, maintype=mt_parts[0], subtype=mt_parts[1] if len(mt_parts) > 1 else "octet-stream", filename=filename)
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as server:
+            server.starttls()
+            server.login(settings.smtp_user, settings.smtp_password)
+            server.send_message(msg)
+        return True
+    except smtplib.SMTPException as e:
+        print(f"Attachment email SMTP error: {e}")
+        return False
+    except Exception as e:
+        print(f"Attachment email send failed: {type(e).__name__}: {e}")
+        return False

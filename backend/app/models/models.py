@@ -213,6 +213,7 @@ class Action(Base):
     revision_history = Column(JSONB, default=list)
     pending_confirmation = Column(Boolean, default=False)
     version = Column(Integer, default=1)
+    attachments = Column(JSONB, default=list)
     plant = relationship("Plant", back_populates="actions")
     dept = relationship("Department", back_populates="actions")
     machine = relationship("Machine", back_populates="actions")

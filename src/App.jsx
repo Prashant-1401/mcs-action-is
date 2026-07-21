@@ -4344,6 +4344,69 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
               <div />
             </div>
             <InlineField label="Remarks" field="remarks" value={action.remarks} type="textarea" />
+            {/* Attachments Section */}
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 10, color: T.text2, fontWeight: 700, textTransform: "uppercase", letterSpacing: .4, marginBottom: 6 }}>📎 Attachments</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {(action.attachments || []).map(att => (
+                  <div key={att.id || att.filename} style={{ display: "flex", alignItems: "center", gap: 8, background: T.bg, borderRadius: 8, padding: "7px 12px", border: `1px solid ${T.border}` }}>
+                    <span style={{ fontSize: 16 }}>{att.mimetype?.includes("pdf") ? "📄" : att.mimetype?.includes("image") ? "🖼" : att.mimetype?.includes("sheet") || att.mimetype?.includes("excel") || att.mimetype?.includes("csv") ? "📊" : att.mimetype?.includes("word") || att.mimetype?.includes("document") ? "📝" : "📁"}</span>
+                    <a
+                      href={`${API_BASE_URL}/api/actions/${action.id}/attachments/${att.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ fontSize: 12, fontWeight: 500, color: T.navy, textDecoration: "none", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    >{att.filename}</a>
+                    <span style={{ fontSize: 10, color: T.text2 }}>{att.size ? `${(att.size / 1024).toFixed(1)} KB` : ""}</span>
+                    {canEdit && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!confirm("Remove this attachment?")) return;
+                          const updated = (action.attachments || []).filter(a => a.id !== att.id);
+                          onUpdate(action.id, { attachments: updated });
+                        }}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: T.red, fontSize: 14, padding: 2 }}
+                      >×</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {canEdit && (
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8, padding: "6px 14px", borderRadius: 8, border: `1.5px dashed ${T.border}`, cursor: "pointer", fontSize: 12, color: T.text2, background: "#fff", transition: "border-color .15s, background .15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = T.navy; e.currentTarget.style.background = T.bg; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "#fff"; }}
+                >
+                  <span style={{ fontSize: 14 }}>+</span> Attach File
+                  <input
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.xlsx,.xls,.csv,.doc,.docx"
+                    style={{ display: "none" }}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      if (file.size > 5 * 1024 * 1024) { alert("File size exceeds 5 MB limit."); return; }
+                      try {
+                        const formData = new FormData();
+                        formData.append("file", file);
+                        const resp = await fetch(`${API_BASE_URL}/api/actions/${action.id}/attachments`, {
+                          method: "POST",
+                          headers: { "x-api-key": API_KEY, "Authorization": `Bearer ${AUTH_TOKEN || localStorage.getItem("mcs_token")}` },
+                          body: formData,
+                        });
+                        if (!resp.ok) { const err = await resp.json().catch(() => ({})); alert(err.detail || "Upload failed"); return; }
+                        const result = await resp.json();
+                        const updatedAttachments = [...(action.attachments || []), result.attachment];
+                        onUpdate(action.id, { attachments: updatedAttachments });
+                      } catch (err) {
+                        alert("Upload failed: " + err.message);
+                      }
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              )}
+            </div>
             {/* Actions */}
             <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
               {!isGuestRole(user?.role) && !isPendingConfirm && action.status !== "COMPLETED" && action.status !== "DROPPED" && (
@@ -4794,7 +4857,7 @@ function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortC
           <thead><tr>
             <TH k="sn" label="SN" minWidth={70} />
             <TH k="src" label="Source" minWidth={150} />
-            <TH k="meeting" label="Meeting" minWidth={160} />
+
             <TH k="section" label="Department" minWidth={100} />
             <TH k="plant" label="Plant" minWidth={90} />
             <TH k="dateOfAction" label="Date" minWidth={100} />
@@ -4809,7 +4872,7 @@ function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortC
               <tr key={a.id || `act-${idx}`} style={{ cursor: "pointer", background: a.pendingConfirmation ? "#FEF9E7" : "" }} onClick={() => setSel(a)}>
                 <td style={{ fontFamily: "monospace", fontSize: 11, color: T.text2 }}>{a.sn}</td>
                 <td style={{ fontSize: 12, maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.src}</td>
-                <td style={{ fontSize: 12, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.srcId ? (meetingMap[a.srcId] ? `${meetingMap[a.srcId].type}${meetingMap[a.srcId].plant ? " · " + meetingMap[a.srcId].plant : ""}` : a.src) : "—"}</td>
+
                 <td style={{ fontSize: 12 }}>{a.section}</td>
                 <td style={{ fontSize: 11 }}>{a.plant}</td>
                 <td style={{ fontSize: 11, color: T.text2, whiteSpace: "nowrap" }}>{fmt(a.dateOfAction)}</td>
@@ -4824,7 +4887,7 @@ function TableView({ fa, upStatus, setSel, canEdit, upAction, sortState, onSortC
                 <td style={{ textAlign: "center" }}>{(a.revisions || 0) > 0 ? <span style={{ fontWeight: 700, color: T.amber, fontSize: 12 }}>{a.revisions}</span> : <span style={{ color: T.text2, fontSize: 12 }}>—</span>}</td>
               </tr>
             ))}
-            {sorted.length === 0 && <tr><td colSpan={11}><Empty icon="📭" title="No actions found" sub="Adjust filters or add actions via Work." /></td></tr>}
+            {sorted.length === 0 && <tr><td colSpan={10}><Empty icon="📭" title="No actions found" sub="Adjust filters or add actions via Work." /></td></tr>}
           </tbody>
         </table>
       </div>

@@ -196,6 +196,10 @@ def migrate_schema(conn):
                 conn.execute(text(
                     "ALTER TABLE actions ADD COLUMN meeting_name TEXT"
                 ))
+            if "attachments" not in action_cols:
+                conn.execute(text(
+                    "ALTER TABLE actions ADD COLUMN attachments JSONB DEFAULT '[]'::jsonb"
+                ))
         except Exception as e:
             print(f"[migrate] actions column migration skipped: {e}")
 
