@@ -504,25 +504,6 @@ async def upload_attachment(action_id: str, file: UploadFile = File(...), bg: Ba
     return {"ok": True, "attachment": {"id": attachment["id"], "filename": attachment["filename"], "mimetype": attachment["mimetype"], "size": attachment["size"]}}
 
 
-@router.get("/{action_id}/attachments/{attachment_id}")
-async def download_attachment(action_id: str, attachment_id: str, db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import Response as _Resp
-    import base64 as _b64
-    result = await db.execute(select(Action).where(Action.id == action_id))
-    action = result.scalar_one_or_none()
-    if not action:
-        raise HTTPException(status_code=404, detail="Action not found")
-    att = next((a for a in (action.attachments or []) if a.get("id") == attachment_id), None)
-    if not att:
-        raise HTTPException(status_code=404, detail="Attachment not found")
-    file_bytes = _b64.b64decode(att["data"])
-    return _Resp(
-        content=file_bytes,
-        media_type=att.get("mimetype", "application/octet-stream"),
-        headers={"Content-Disposition": f"attachment; filename=\"{att['filename']}\""}
-    )
-
-
 @router.delete("/{action_id}/attachments/{attachment_id}")
 async def delete_attachment(action_id: str, attachment_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Action).where(Action.id == action_id))

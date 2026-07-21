@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
@@ -300,6 +300,27 @@ async def health():
 @app.get("/api/ping")
 async def ping():
     return {"ok": True, "gemini_ready": bool(settings.gemini_api_key)}
+
+
+@app.get("/api/actions/{action_id}/attachments/{attachment_id}")
+async def download_attachment(action_id: str, attachment_id: str, db: AsyncSession = Depends(get_db)):
+    import base64 as _b64
+    from sqlalchemy import select as _sel
+    from app.models.models import Action as _Act
+    from fastapi.responses import Response as _Resp
+    result = await db.execute(_sel(_Act).where(_Act.id == action_id))
+    action = result.scalar_one_or_none()
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+    att = next((a for a in (action.attachments or []) if a.get("id") == attachment_id), None)
+    if not att:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    file_bytes = _b64.b64decode(att["data"])
+    return _Resp(
+        content=file_bytes,
+        media_type=att.get("mimetype", "application/octet-stream"),
+        headers={"Content-Disposition": f"attachment; filename=\"{att['filename']}\""}
+    )
 
 
 app.include_router(auth.router)
