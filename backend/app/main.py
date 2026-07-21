@@ -301,6 +301,29 @@ async def ping():
     return {"ok": True, "gemini_ready": bool(settings.gemini_api_key)}
 
 
+@app.get("/api/actions/{action_id}/attachments/{attachment_id}")
+async def download_action_attachment(action_id: str, attachment_id: str):
+    import base64
+    from fastapi.responses import Response
+    from sqlalchemy import select
+    from app.database import async_session
+    from app.models.models import Action
+    async with async_session() as db:
+        result = await db.execute(select(Action).where(Action.id == action_id))
+        action = result.scalar_one_or_none()
+        if not action:
+            return JSONResponse(status_code=404, content={"detail": "Action not found"})
+        att = next((a for a in (action.attachments or []) if a.get("id") == attachment_id), None)
+        if not att:
+            return JSONResponse(status_code=404, content={"detail": "Attachment not found"})
+        file_bytes = base64.b64decode(att["data"])
+        return Response(
+            content=file_bytes,
+            media_type=att.get("mimetype", "application/octet-stream"),
+            headers={"Content-Disposition": f'attachment; filename="{att["filename"]}"'}
+        )
+
+
 app.include_router(auth.router)
 app.include_router(plants.router)
 app.include_router(departments.router)
