@@ -492,7 +492,7 @@ async def upload_attachment(action_id: str, file: UploadFile = File(...), bg: Ba
     return {"ok": True, "attachment": {"id": attachment["id"], "filename": attachment["filename"], "mimetype": attachment["mimetype"], "size": attachment["size"]}}
 
 
-@router.get("/{action_id}/attachments/{attachment_id}", dependencies=[])
+@router.get("/{action_id}/attachments/{attachment_id}")
 async def download_attachment(action_id: str, attachment_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Action).where(Action.id == action_id))
     action = result.scalar_one_or_none()

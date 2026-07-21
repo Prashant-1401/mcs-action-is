@@ -4351,12 +4351,25 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
                 {(action.attachments || []).map(att => (
                   <div key={att.id || att.filename} style={{ display: "flex", alignItems: "center", gap: 8, background: T.bg, borderRadius: 8, padding: "7px 12px", border: `1px solid ${T.border}` }}>
                     <span style={{ fontSize: 16 }}>{att.mimetype?.includes("pdf") ? "📄" : att.mimetype?.includes("image") ? "🖼" : att.mimetype?.includes("sheet") || att.mimetype?.includes("excel") || att.mimetype?.includes("csv") ? "📊" : att.mimetype?.includes("word") || att.mimetype?.includes("document") ? "📝" : "📁"}</span>
-                    <a
-                      href={`${API_BASE_URL}/api/actions/${action.id}/attachments/${att.id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ fontSize: 12, fontWeight: 500, color: T.navy, textDecoration: "none", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                    >{att.filename}</a>
+                    <span
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          const resp = await fetch(`${API_BASE_URL}/api/actions/${action.id}/attachments/${att.id}`, {
+                            headers: { "x-api-key": API_KEY, "Authorization": `Bearer ${AUTH_TOKEN || localStorage.getItem("mcs_token")}` },
+                          });
+                          if (!resp.ok) { alert("Download failed"); return; }
+                          const blob = await resp.blob();
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url; a.download = att.filename;
+                          document.body.appendChild(a); a.click();
+                          document.body.removeChild(a);
+                          URL.revokeObjectURL(url);
+                        } catch (err) { alert("Download failed: " + err.message); }
+                      }}
+                      style={{ fontSize: 12, fontWeight: 500, color: T.navy, textDecoration: "underline", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }}
+                    >{att.filename}</span>
                     <span style={{ fontSize: 10, color: T.text2 }}>{att.size ? `${(att.size / 1024).toFixed(1)} KB` : ""}</span>
                     {canEdit && (
                       <button

@@ -41,9 +41,13 @@ async def optional_auth(credentials: Optional[HTTPAuthorizationCredentials] = De
 
 
 async def require_api_key(
+    request,
     x_api_key: Optional[str] = Header(None),
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ):
+    # Skip auth for attachment downloads (browser can't send custom headers)
+    if request.url.path.startswith("/api/actions/") and "/attachments/" in request.url.path and request.method == "GET":
+        return None
     # If API key is configured, validate it
     if settings.api_key:
         if x_api_key == settings.api_key:
