@@ -673,7 +673,7 @@ const scopedPlants = (user, plants) => {
 const scopedDepts = (user, depts) => {
   if (isUserAdmin(user) || !user?.plant || user.plant === "All") return depts;
   const up = user.plant;
-  return (depts || []).filter(d => !d.plant || d.plant === "All Plants" || d.plant === up || d.plant_id === up);
+  return (depts || []).filter(d => !d.plant || d.plant === "All Plants" || d.plant === up || d.plantId === up);
 };
 const scopedUsers = (user, users) => {
   if (isUserAdmin(user) || !user?.plant || user.plant === "All") return users;
