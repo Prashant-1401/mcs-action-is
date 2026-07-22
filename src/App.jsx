@@ -4101,27 +4101,58 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaul
                   <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, background: T.bg, borderRadius: 8, padding: "7px 12px", border: `1px solid ${T.border}` }}>
                     <span style={{ fontSize: 14 }}>{pf.file.type?.includes("pdf") ? "📄" : pf.file.type?.includes("image") ? "🖼" : pf.file.type?.includes("sheet") || pf.file.type?.includes("excel") ? "📊" : pf.file.type?.includes("word") || pf.file.type?.includes("document") ? "📝" : "📁"}</span>
                     <span style={{ fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pf.file.name}</span>
-                    {pf.status === "uploading" && <span style={{ fontSize: 11, color: T.amber, display: "flex", alignItems: "center", gap: 4 }}><span className="spin-icon">⟳</span> Uploading…</span>}
-                    {pf.status === "done" && <span style={{ fontSize: 11, color: T.green }}>✓</span>}
-                    {pf.status === "error" && <span style={{ fontSize: 11, color: T.red }}>✗ Failed</span>}
+                    {pf.status === "uploading" && <span style={{ fontSize: 11, color: T.amber, display: "flex", alignItems: "center", gap: 4 }}><Spin /> Uploading…</span>}
+                    {pf.status === "done" && <span style={{ fontSize: 11, color: T.green, display: "flex", alignItems: "center", gap: 4 }}><span>✓</span> Done</span>}
+                    {pf.status === "error" && <span style={{ fontSize: 11, color: T.red, display: "flex", alignItems: "center", gap: 4 }}><span>✗</span> Failed</span>}
                     {!pf.status && <button onClick={() => setPendingFiles(p => p.filter((_, i) => i !== idx))} style={{ background: "none", border: "none", cursor: "pointer", color: T.red, fontSize: 14, padding: 2 }}>×</button>}
+                    {(pf.status === "done" || pf.status === "error") && <button onClick={() => setPendingFiles(p => p.filter((_, i) => i !== idx))} style={{ background: "none", border: "none", cursor: "pointer", color: T.text2, fontSize: 14, padding: 2 }}>×</button>}
                   </div>
                 ))}
               </div>
             )}
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 8, border: `1.5px dashed ${T.border}`, cursor: "pointer", fontSize: 12, color: T.text2, background: "#fff", transition: "border-color .15s, background .15s" }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = T.navy; e.currentTarget.style.background = T.bg; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "#fff"; }}
-            >
-              <span style={{ fontSize: 14 }}>+</span> Attach File
-              <input type="file" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.xlsx,.xls,.csv,.doc,.docx" style={{ display: "none" }} onChange={e => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                if (file.size > 5 * 1024 * 1024) { alert("File size exceeds 5 MB limit."); return; }
-                setPendingFiles(p => [...p, { file, status: null }]);
-                e.target.value = "";
-              }} />
-            </label>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 8, border: `1.5px dashed ${T.border}`, cursor: "pointer", fontSize: 12, color: T.text2, background: "#fff", transition: "border-color .15s, background .15s" }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = T.navy; e.currentTarget.style.background = T.bg; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "#fff"; }}
+              >
+                <span style={{ fontSize: 14 }}>+</span> Attach File
+                <input type="file" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.xlsx,.xls,.csv,.doc,.docx" style={{ display: "none" }} onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  if (file.size > 5 * 1024 * 1024) { alert("File size exceeds 5 MB limit."); return; }
+                  setPendingFiles(p => [...p, { file, status: null }]);
+                  e.target.value = "";
+                }} />
+              </label>
+              {pendingFiles.filter(pf => !pf.status || pf.status === "error").length > 0 && (
+                <button className="btn btn-navy btn-sm" onClick={async () => {
+                  setUploadingFiles(true);
+                  for (const pf of pendingFiles) {
+                    if (pf.status === "done") continue;
+                    setPendingFiles(p => p.map((x, i) => i === pendingFiles.indexOf(pf) ? { ...x, status: "uploading" } : x));
+                    try {
+                      const formData = new FormData();
+                      formData.append("file", pf.file);
+                      const res = await fetch(`${API_BASE_URL}/api/upload`, {
+                        method: "POST",
+                        headers: { "x-api-key": API_KEY, "Authorization": `Bearer ${getAuthToken() || localStorage.getItem("mcs_token") || ""}` },
+                        body: formData,
+                      });
+                      if (res.ok) {
+                        setPendingFiles(p => p.map((x, i) => i === pendingFiles.indexOf(pf) ? { ...x, status: "done" } : x));
+                      } else {
+                        setPendingFiles(p => p.map((x, i) => i === pendingFiles.indexOf(pf) ? { ...x, status: "error" } : x));
+                      }
+                    } catch {
+                      setPendingFiles(p => p.map((x, i) => i === pendingFiles.indexOf(pf) ? { ...x, status: "error" } : x));
+                    }
+                  }
+                  setUploadingFiles(false);
+                }} disabled={uploadingFiles}>
+                  {uploadingFiles ? <><Spin /> Uploading…</> : "⬆ Upload Files"}
+                </button>
+              )}
+            </div>
           </div>
           <div><Lbl t="Responsible Person(s)" req /><MultiUserSelect value={f.responsible} users={users.filter(u => { if (f.plant && f.plant !== "All") return !u.plant || u.plant === "All" || u.plant === f.plant; if (!isUserAdmin(currentUser) && currentUser?.plant && currentUser.plant !== "All") return !u.plant || u.plant === "All" || u.plant === currentUser.plant; return true; })} onChange={v => { up("responsible", v); const firstName = (v || "").split(",").map(s => s.trim()).filter(Boolean)[0]; if (firstName) { const u = users.find(x => x.name === firstName); if (u) { if (u.plant) up("plant", u.plant); if (u.dept) up("section", u.dept); } } }} /></div>
           <div><Lbl t="Due Date" req /><input type="date" value={f.due} onChange={e => up("due", e.target.value)} /></div>
@@ -4158,9 +4189,10 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaul
             const linkedMtg = (meetings || []).find(m => m.id === f.meeting);
             const enriched = { ...f };
             if (linkedMtg) { enriched.srcId = linkedMtg.id; enriched.src = linkedMtg.type; }
+            setPendingFiles(p => p.map(x => x.status === "done" ? x : { ...x, status: "uploading" }));
             onSave(enriched, pendingFiles);
           }} disabled={saving}>
-            {saving ? <><span className="spin-icon">⟳</span> Saving…</> : "Save Action"}
+            {saving ? <><Spin /> Saving…</> : "Save Action"}
           </button>
         </div>
       </div>
@@ -4339,6 +4371,8 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
   const [editingField, setEditingField] = useState(null);
   const [fieldVal, setFieldVal] = useState("");
   const [markCompleteStatus, setMarkCompleteStatus] = useState("COMPLETED");
+  const [downloadingAtt, setDownloadingAtt] = useState(null);
+  const [uploadingFile, setUploadingFile] = useState(false);
   const textareaRef = useRef(null);
 
   // Determine who can interact/confirm
@@ -4494,11 +4528,12 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
                     <span
                       onClick={async (e) => {
                         e.stopPropagation();
+                        setDownloadingAtt(att.id);
                         try {
                         const resp = await fetch(`${API_BASE_URL}/api/actions/${action.id}/attachments/${att.id}`, {
                           headers: { "x-api-key": API_KEY, "Authorization": `Bearer ${AUTH_TOKEN || localStorage.getItem("mcs_token")}` },
                           });
-                          if (!resp.ok) { alert("Download failed"); return; }
+                          if (!resp.ok) { alert("Download failed"); setDownloadingAtt(null); return; }
                           const blob = await resp.blob();
                           const url = URL.createObjectURL(blob);
                           const a = document.createElement("a");
@@ -4507,9 +4542,10 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
                           document.body.removeChild(a);
                           URL.revokeObjectURL(url);
                         } catch (err) { alert("Download failed: " + err.message); }
+                        setDownloadingAtt(null);
                       }}
                       style={{ fontSize: 12, fontWeight: 500, color: T.navy, textDecoration: "underline", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }}
-                    >{att.filename}</span>
+                    >{att.filename}{downloadingAtt === att.id && <span style={{ marginLeft: 6 }}><Spin /></span>}</span>
                     <span style={{ fontSize: 10, color: T.text2 }}>{att.size ? `${(att.size / 1024).toFixed(1)} KB` : ""}</span>
                     {canEdit && (
                       <button
@@ -4526,19 +4562,21 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
                 ))}
               </div>
               {canEdit && (
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8, padding: "6px 14px", borderRadius: 8, border: `1.5px dashed ${T.border}`, cursor: "pointer", fontSize: 12, color: T.text2, background: "#fff", transition: "border-color .15s, background .15s" }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = T.navy; e.currentTarget.style.background = T.bg; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "#fff"; }}
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8, padding: "6px 14px", borderRadius: 8, border: `1.5px dashed ${T.border}`, cursor: uploadingFile ? "not-allowed" : "pointer", fontSize: 12, color: uploadingFile ? T.text2 : T.navy, background: uploadingFile ? T.bg : "#fff", transition: "border-color .15s, background .15s", opacity: uploadingFile ? .6 : 1 }}
+                  onMouseEnter={e => { if (!uploadingFile) { e.currentTarget.style.borderColor = T.navy; e.currentTarget.style.background = T.bg; } }}
+                  onMouseLeave={e => { if (!uploadingFile) { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "#fff"; } }}
                 >
-                  <span style={{ fontSize: 14 }}>+</span> Attach File
+                  {uploadingFile ? <><Spin /> Uploading…</> : <><span style={{ fontSize: 14 }}>+</span> Attach File</>}
                   <input
                     type="file"
                     accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.xlsx,.xls,.csv,.doc,.docx"
                     style={{ display: "none" }}
+                    disabled={uploadingFile}
                     onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (!file) return;
                       if (file.size > 5 * 1024 * 1024) { alert("File size exceeds 5 MB limit."); return; }
+                      setUploadingFile(true);
                       try {
                         const formData = new FormData();
                         formData.append("file", file);
@@ -4547,13 +4585,14 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
                           headers: { "x-api-key": API_KEY, "Authorization": `Bearer ${AUTH_TOKEN || localStorage.getItem("mcs_token")}` },
                           body: formData,
                         });
-                        if (!resp.ok) { const err = await resp.json().catch(() => ({})); alert(err.detail || "Upload failed"); return; }
+                        if (!resp.ok) { const err = await resp.json().catch(() => ({})); alert(err.detail || "Upload failed"); setUploadingFile(false); return; }
                         const result = await resp.json();
                         const updatedAttachments = [...(action.attachments || []), result.attachment];
                         onUpdate(action.id, { attachments: updatedAttachments });
                       } catch (err) {
                         alert("Upload failed: " + err.message);
                       }
+                      setUploadingFile(false);
                       e.target.value = "";
                     }}
                   />
