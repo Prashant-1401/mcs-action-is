@@ -2962,7 +2962,12 @@ function WeeklyMeetingAccountability({ meetings, actions, users, user, plants, s
   };
 
   const dayName = selectedDay ? getDayName(selectedDay) : null;
-  const dayMeetings = dayName ? accessibleMeetings.filter(m => ensureArray(m.scheduledDays).includes(dayName)) : [];
+  const dayMeetings = dayName
+    ? accessibleMeetings.filter(m => {
+        const sd = ensureArray(m.scheduledDays);
+        return sd.length === 0 || sd.includes(dayName);
+      })
+    : accessibleMeetings;
 
   const getActionsFor = (m) => (actions || []).filter(a => {
     if (m.id && a.srcId === m.id) return true;
