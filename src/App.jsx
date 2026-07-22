@@ -4189,8 +4189,9 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaul
             const linkedMtg = (meetings || []).find(m => m.id === f.meeting);
             const enriched = { ...f };
             if (linkedMtg) { enriched.srcId = linkedMtg.id; enriched.src = linkedMtg.type; }
-            setPendingFiles(p => p.map(x => x.status === "done" ? x : { ...x, status: "uploading" }));
-            onSave(enriched, pendingFiles);
+            const finalFiles = pendingFiles.map(x => x.status === "done" ? x : { ...x, status: "uploading" });
+            setPendingFiles(finalFiles);
+            onSave(enriched, finalFiles);
           }} disabled={saving}>
             {saving ? <><Spin /> Saving…</> : "Save Action"}
           </button>
@@ -7264,6 +7265,11 @@ export default function App() {
         {page === 4 && <EscalationsPage actions={actions} setActions={setActions} audit={audit} users={users} escMatrix={escMatrix} plants={plants} depts={depts} user={user} />}
         {page === 99 && canAccessMasterSetup(user) && <MasterPage user={user} plants={plants} setPlants={setPlants} depts={depts} setDepts={setDepts} users={users} setUsers={setUsers} escMatrix={escMatrix} setEscMatrix={setEscMatrix} mtgPresets={mtgPresets} setMtgPresets={setMtgPresets} machines={machines} setMachines={setMachines} refreshMaster={fetchData} roles={roles} setRoles={setRoles} actions={actions} setActions={setActions} />}
       </Shell>
+      {dbError && (
+        <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", zIndex: 9999, background: "#FEF3CD", border: "1px solid #F5C842", borderRadius: 10, padding: "10px 20px", fontSize: 12, color: "#7D4E00", boxShadow: "0 4px 20px rgba(0,0,0,.15)", maxWidth: "90vw", textAlign: "center" }}>
+          ⚠ {dbError}
+        </div>
+      )}
       {showSupport && <SupportModal user={user} onClose={() => setShowSupport(false)} />}
       {showProfile && <UserProfilePanel user={user} users={users} actions={actions} onClose={() => setShowProfile(false)} />}
       {showSessions && <SessionsManagerModal user={user} onClose={() => setShowSessions(false)} />}
@@ -7291,18 +7297,25 @@ export default function App() {
               const saved = await apiCreate("actions", resolved);
               if (saved && saved.id) {
                 setActions(p => p.map(x => x.id === localId ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
-                // Upload pending files
+                // Upload pending files (skip already pre-uploaded)
                 if (files && files.length > 0) {
+                  const failed = [];
                   for (const pf of files) {
+                    if (pf.status === "done") continue;
                     try {
                       const formData = new FormData();
                       formData.append("file", pf.file);
-                      await fetch(`${API_BASE_URL}/api/actions/${saved.id}/attachments`, {
+                      const resp = await fetch(`${API_BASE_URL}/api/actions/${saved.id}/attachments`, {
                         method: "POST",
                         headers: { "x-api-key": API_KEY, "Authorization": `Bearer ${AUTH_TOKEN || localStorage.getItem("mcs_token")}` },
                         body: formData,
                       });
-                    } catch (err) { console.warn("Attachment upload failed:", err); }
+                      if (!resp.ok) failed.push(pf.file.name);
+                    } catch (err) { failed.push(pf.file.name); }
+                  }
+                  if (failed.length > 0) {
+                    setDbError(`Upload failed for: ${failed.join(", ")}. Action was saved without attachments.`);
+                    setTimeout(() => setDbError(null), 6000);
                   }
                 }
               }
