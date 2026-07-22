@@ -831,9 +831,12 @@ const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Sora:wght@700;800&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 body{background:#F5F5FB;color:#1A1532;font-family:'Inter',sans-serif;font-size:14px;}
-input,select,textarea{font-family:'Inter',sans-serif;font-size:13px;background:#fff;border:1.5px solid #E8E8F0;border-radius:8px;padding:8px 12px;color:#1A1532;outline:none;width:100%;transition:border-color .18s;direction:ltr;unicode-bidi:normal;}
+input,select,textarea{font-family:'Inter',sans-serif;font-size:13px;background:#fff;border:1.5px solid #E8E8F0;border-radius:8px;padding:8px 12px;color:#1A1532;outline:none;width:100%;transition:border-color .18s;direction:ltr;unicode-bidi:normal;color-scheme:light;}
 input:focus,select:focus,textarea:focus{border-color:#272262;box-shadow:0 0 0 3px rgba(39,34,98,.08);}
 input::placeholder,textarea::placeholder{color:#B2BEC3;}
+input[type=date]{min-width:145px;appearance:auto;-moz-appearance:auto;-webkit-appearance:auto;}
+input[type=date]::-webkit-calendar-picker-indicator{opacity:1;cursor:pointer;padding:4px;border-radius:4px;background:#fff;border:1px solid #E8E8F0;}
+input[type=date]::-webkit-calendar-picker-indicator:hover{background:#F5F5FB;}
 ::-webkit-scrollbar{width:5px;height:5px;}::-webkit-scrollbar-thumb{background:#CBD5E0;border-radius:3px;}
 .card{background:#fff;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.06),0 4px 16px rgba(39,34,98,.05);}
 .card-hover{transition:transform .18s,box-shadow .18s;cursor:pointer;}
