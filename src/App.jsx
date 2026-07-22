@@ -1541,7 +1541,6 @@ function Shell({ children, page, setPage, user, onLogout, onQuickAdd, pendingCou
                 <span style={{ fontSize: 16, width: 22, textAlign: "center", flexShrink: 0, opacity: allowed ? 1 : 0.4 }}>{n.icon}</span>
                 <span style={{ flex: 1 }}>{n.label}</span>
                 {!allowed && <span style={{ fontSize: 10, opacity: 0.5 }}>🔒</span>}
-                {allowed && n.id === 2 && pendingCount > 0 && <span style={{ background: T.red, color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{pendingCount}</span>}
                 {active && <span style={{ width: 3, height: 20, borderRadius: 2, background: T.amber, position: "absolute", right: 8 }} />}
               </button>
             );
