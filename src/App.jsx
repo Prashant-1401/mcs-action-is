@@ -2028,9 +2028,9 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <span style={{ fontSize: 11, color: T.text2 }}>{a.responsible}</span>
                         <span style={{ fontSize: 11, color: T.red, fontWeight: 700 }}>{d}d overdue</span>
-                      </div>
                     </div>
                   </div>
+                </div>
                 );
               })}
             </div>
@@ -3031,8 +3031,6 @@ function WeeklyMeetingAccountability({ meetings, actions, users, user, plants })
   const prevTotalSessions = prevWeekSessions.length;
   const sessionTrend = totalSessions - prevTotalSessions;
 
-  if (weekSessions.length === 0) return null;
-
   const kpiCards = [
     { label: "Total Sessions", value: totalSessions, color: T.navy, bg: T.navy + "12", icon: "\uD83D\uDCC5", trend: sessionTrend },
     { label: "Completion Rate", value: overallCompletionRate + "%", color: overallCompletionRate >= 70 ? T.green : overallCompletionRate >= 40 ? T.amber : T.red, bg: (overallCompletionRate >= 70 ? T.green : overallCompletionRate >= 40 ? T.amber : T.red) + "12", icon: "\u2705", trend: null },
@@ -3049,6 +3047,13 @@ function WeeklyMeetingAccountability({ meetings, actions, users, user, plants })
         <span style={{ background: T.navy + "15", color: T.navy, borderRadius: 10, padding: "3px 12px", fontSize: 11, fontWeight: 700 }}>Last 7 days</span>
       </div>
 
+      {weekSessions.length === 0 ? (
+        <div className="card" style={{ padding: "40px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+          <div style={{ fontWeight: 700, color: T.navy, fontSize: 14, marginBottom: 4 }}>No meetings completed this week</div>
+          <div style={{ color: T.text2, fontSize: 12 }}>Complete a meeting session to see accountability metrics here.</div>
+        </div>
+      ) : (<>
       {/* KPI Summary Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
         {kpiCards.map((kpi, i) => (
@@ -3141,6 +3146,7 @@ function WeeklyMeetingAccountability({ meetings, actions, users, user, plants })
           <span>⏱ <b style={{ color: T.navy }}>{overallAvgDuration}m</b> avg duration</span>
         </div>
       </div>
+      </>)}
     </div>
   );
 }
