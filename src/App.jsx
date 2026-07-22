@@ -474,21 +474,19 @@ function usePostgresDB({ defaultUsers, defaultPlants, defaultDepts,
       if (pDenorm.length) setPlantsRaw(pDenorm);
       if (dDenorm.length) setDeptsRaw(dDenorm);
       if (resolvedU.length) setUsersRaw(resolvedU);
-      const activeTag = document.activeElement?.tagName;
-      const userIsEditing = activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT";
       if (resolvedA.length) {
         const hasPendingActions = [...pendingOps.values()].some(op => op.resource === "actions");
-        if (!hasPendingActions && !userIsEditing) setActionsRaw(resolvedA);
+        if (!hasPendingActions) setActionsRaw(resolvedA);
         reconcilePendingWithServer("actions", resolvedA);
       }
       if (resolvedM.length) {
         const hasPendingMeetings = [...pendingOps.values()].some(op => op.resource === "meetings");
-        if (!hasPendingMeetings && !userIsEditing) setMeetingsRaw(resolvedM);
+        if (!hasPendingMeetings) setMeetingsRaw(resolvedM);
         reconcilePendingWithServer("meetings", resolvedM);
       }
       if (resolvedPr.length) {
         const hasPendingProjects = [...pendingOps.values()].some(op => op.resource === "projects");
-        if (!hasPendingProjects && !userIsEditing) setProjectsRaw(resolvedPr);
+        if (!hasPendingProjects) setProjectsRaw(resolvedPr);
       }
       if (emDenorm.length) setEscRaw(emDenorm);
       if (rsDenorm.length) setReasonsRaw(rsDenorm);
@@ -558,6 +556,8 @@ function useRealtimeSync({ fetchData, user, enabled = true, intervalMs = 15000 }
 
   const sync = useCallback(async () => {
     if (inFlight.current || !enabled) return;
+    const activeTag = document.activeElement?.tagName;
+    if (activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT") return;
     inFlight.current = true;
     setSyncing(true);
     try {
