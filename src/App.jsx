@@ -1702,8 +1702,6 @@ function ActionSidePanel({ action, onClose, onUpdate, users, plants, depts, curr
 function HomePage({ actions, setActions, user, setPage, users, meetings, plants, depts, setGlobalActiveMtg, machines, projects }) {
   const now = new Date();
   const isAdmin = isUserAdmin(user);
-  // Scope: my plant OR all
-  const myPlantActions = user?.plant === "All" ? actions : actions.filter(a => !a.plant || a.plant === user?.plant);
 
   // Fix 3: Dashboard scope — actions assigned to me, or assigned to my subordinates, or in my department
   const getSubordinates = (name, allUsers, visited = new Set()) => {
@@ -1724,12 +1722,18 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
     ? actions
     : actions.filter(a => !a.plant || a.plant === "All" || a.plant === user?.plant);
 
-  const total = scopedActions.length;
-  const comp = scopedActions.filter(a => a.status === "COMPLETED").length;
-  const inProc = scopedActions.filter(a => a.status === "IN PROCESS").length;
-  const notStarted = scopedActions.filter(a => a.status === "NOT STARTED").length;
-  const over = scopedActions.filter(isOverdue).length;
-  const crit = scopedActions.filter(a => a.priority === "CRITICAL" && a.status !== "COMPLETED" && a.status !== "DROPPED").length;
+  // My personal actions: where I am the responsible person or the allocator
+  const myActions = actions.filter(a => {
+    if (!userName) return false;
+    return responsibleMatchesUsers(a.responsible, [userName]) || (a.allocatedBy || "").trim().toLowerCase() === userName;
+  });
+
+  const total = myActions.length;
+  const comp = myActions.filter(a => a.status === "COMPLETED").length;
+  const inProc = myActions.filter(a => a.status === "IN PROCESS").length;
+  const notStarted = myActions.filter(a => a.status === "NOT STARTED").length;
+  const over = myActions.filter(isOverdue).length;
+  const crit = myActions.filter(a => a.priority === "CRITICAL" && a.status !== "COMPLETED" && a.status !== "DROPPED").length;
 
   // Fix 2 & 4: My open actions as Responsible or Allocator — clickable, opens side panel
   const myOwn = actions.filter(a => (responsibleMatchesUsers(a.responsible, [userName].filter(Boolean)) || (a.allocatedBy || "").trim().toLowerCase() === userName) && userName && a.status !== "COMPLETED" && a.status !== "DROPPED")
@@ -1739,8 +1743,8 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
       if (!b.due) return -1;
       return new Date(a.due) - new Date(b.due);
     });
-  // Fix 2 extra: Unassigned actions
-  const unassigned = myPlantActions.filter(a => (!a.responsible || a.responsible.trim() === "") && a.status !== "COMPLETED" && a.status !== "DROPPED");
+  // Fix 2 extra: Unassigned actions from my allocations
+  const unassigned = myActions.filter(a => (!a.responsible || a.responsible.trim() === "") && a.status !== "COMPLETED" && a.status !== "DROPPED");
   const todayStr2 = now.toISOString().split("T")[0]; // "YYYY-MM-DD"
 
   // ── Compute truly upcoming meetings ────────────────────────────────────────
@@ -1829,11 +1833,11 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
   const greeting = now.getHours() < 12 ? "Morning" : now.getHours() < 17 ? "Afternoon" : "Evening";
 
   const kpiDrillData = {
-    total: { title: "All Scoped Actions", rows: scopedActions },
-    running: { title: "In Process Actions", rows: scopedActions.filter(a => a.status === "IN PROCESS") },
-    critical: { title: "Critical Open Actions", rows: scopedActions.filter(a => a.priority === "CRITICAL" && a.status !== "COMPLETED" && a.status !== "DROPPED") },
-    completed: { title: "Completed Actions", rows: scopedActions.filter(a => a.status === "COMPLETED") },
-    overdue: { title: "Overdue Actions", rows: scopedActions.filter(isOverdue) },
+    total: { title: "My Actions", rows: myActions },
+    running: { title: "My In Process Actions", rows: myActions.filter(a => a.status === "IN PROCESS") },
+    critical: { title: "My Critical Open Actions", rows: myActions.filter(a => a.priority === "CRITICAL" && a.status !== "COMPLETED" && a.status !== "DROPPED") },
+    completed: { title: "My Completed Actions", rows: myActions.filter(a => a.status === "COMPLETED") },
+    overdue: { title: "My Overdue Actions", rows: myActions.filter(isOverdue) },
   };
 
   // Fix 4: Meeting popup modal
@@ -2014,10 +2018,10 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
             <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, fontSize: 14, color: T.navy }}>🚨 Escalated Actions</div>
             <button onClick={() => setPage(4)} style={{ fontSize: 11, color: T.red, border: `1px solid ${T.red}`, background: "transparent", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontWeight: 700 }}>View All →</button>
           </div>
-          {scopedActions.filter(isOverdue).length === 0
-            ? <Empty icon="✅" title="No escalations!" sub="All actions within threshold." />
+          {myActions.filter(isOverdue).length === 0
+            ? <Empty icon="✅" title="No escalations!" sub="All your actions are within threshold." />
             : <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 280, overflowY: "auto" }}>
-              {scopedActions.filter(isOverdue).sort((a, b) => daysOver(b) - daysOver(a)).slice(0, 5).map((a, idx) => {
+              {myActions.filter(isOverdue).sort((a, b) => daysOver(b) - daysOver(a)).slice(0, 5).map((a, idx) => {
                 const d = daysOver(a);
                 const lvl = d >= 7 ? "L4" : d >= 3 ? "L3" : d >= 1 ? "L2" : "L1";
                 const lvlColor = d >= 7 ? T.red : d >= 3 ? "#C0392B" : d >= 1 ? "#E67E22" : T.amber;
