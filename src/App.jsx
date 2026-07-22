@@ -6,10 +6,12 @@ const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, "");
 const API_KEY = import.meta.env.VITE_API_KEY || "";
 let AUTH_TOKEN = null;
 let CURRENT_ROLES = [];
+let _onAuthExpired = null;
 function setAuthToken(token) { AUTH_TOKEN = token; }
 function getAuthToken() { return AUTH_TOKEN; }
 function setCurrentRoles(roles) { CURRENT_ROLES = roles || []; }
 function getCurrentRoles() { return CURRENT_ROLES; }
+function setOnAuthExpired(fn) { _onAuthExpired = fn; }
 
 async function apiFetch(path, options = {}) {
   const url = `${API_BASE_URL}${path}`;
@@ -19,6 +21,12 @@ async function apiFetch(path, options = {}) {
   if (token) headers["Authorization"] = `Bearer ${token}`;
   console.debug("API", options.method || "GET", url);
   const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) {
+    const p = new URL(url).pathname;
+    if (p !== "/api/ping" && !p.startsWith("/api/sessions/")) {
+      _onAuthExpired?.();
+    }
+  }
   if (!res.ok) {
     let detail;
     try { const err = await res.json(); detail = err.detail || res.statusText; } catch { detail = res.statusText; }
@@ -4074,7 +4082,6 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaul
   const panelRef = React.useRef(null);
   const [f, setF] = useState({ text: "", responsible: "", due: "", section: currentUser?.dept || "General", plant: defaultPlant || (currentUser?.plant && currentUser.plant !== "All" ? currentUser.plant : ""), src: defaultSrc || "", priority: "NORMAL", remarks: "", project: defaultProject || "", meeting: defaultMeeting || "", reasonOfAction: "", machineName: "", actionPointType: "" });
   const [pendingFiles, setPendingFiles] = useState([]);
-  const [uploadingFiles, setUploadingFiles] = useState(false);
   // Meetings that the current user can see (admin sees all, others only visible plants)
   const meetingOpts = (meetings || []).filter(m => canAccessMeeting(currentUser, m, null)).map(m => ({ id: m.id, label: `${m.type}${m.plant ? " · " + m.plant : ""}${m.project ? " · " + m.project : ""}` }));
   // Derive reason suggestions from the reasons state passed in (loaded at app boot)
@@ -4092,7 +4099,7 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaul
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div><Lbl t="Action Point Type" req /><select value={f.actionPointType} onChange={e => up("actionPointType", e.target.value)}><option value="">Select type…</option>{["Corrective Action","Preventive Action","Improvement","Safety","Maintenance","Quality","Compliance","Other","Others"].map(t => <option key={t} value={t}>{t}</option>)}{f.actionPointType && !["Corrective Action","Preventive Action","Improvement","Safety","Maintenance","Quality","Compliance","Other","Others"].includes(f.actionPointType) && <option value={f.actionPointType}>{f.actionPointType}</option>}</select></div>
           <div><Lbl t="Action Point" req /><textarea value={f.text} onChange={e => up("text", e.target.value)} style={{ height: 72, resize: "none" }} placeholder="Describe the action…" /></div>
-          {/* Attachments */}
+          {/* Attachments — uploaded on save */}
           <div>
             <Lbl t="Attachments" />
             {pendingFiles.length > 0 && (
@@ -4101,58 +4108,24 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaul
                   <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, background: T.bg, borderRadius: 8, padding: "7px 12px", border: `1px solid ${T.border}` }}>
                     <span style={{ fontSize: 14 }}>{pf.file.type?.includes("pdf") ? "📄" : pf.file.type?.includes("image") ? "🖼" : pf.file.type?.includes("sheet") || pf.file.type?.includes("excel") ? "📊" : pf.file.type?.includes("word") || pf.file.type?.includes("document") ? "📝" : "📁"}</span>
                     <span style={{ fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pf.file.name}</span>
-                    {pf.status === "uploading" && <span style={{ fontSize: 11, color: T.amber, display: "flex", alignItems: "center", gap: 4 }}><Spin /> Uploading…</span>}
-                    {pf.status === "done" && <span style={{ fontSize: 11, color: T.green, display: "flex", alignItems: "center", gap: 4 }}><span>✓</span> Done</span>}
-                    {pf.status === "error" && <span style={{ fontSize: 11, color: T.red, display: "flex", alignItems: "center", gap: 4 }}><span>✗</span> Failed</span>}
-                    {!pf.status && <button onClick={() => setPendingFiles(p => p.filter((_, i) => i !== idx))} style={{ background: "none", border: "none", cursor: "pointer", color: T.red, fontSize: 14, padding: 2 }}>×</button>}
-                    {(pf.status === "done" || pf.status === "error") && <button onClick={() => setPendingFiles(p => p.filter((_, i) => i !== idx))} style={{ background: "none", border: "none", cursor: "pointer", color: T.text2, fontSize: 14, padding: 2 }}>×</button>}
+                    <button onClick={() => setPendingFiles(p => p.filter((_, i) => i !== idx))} style={{ background: "none", border: "none", cursor: "pointer", color: T.text2, fontSize: 14, padding: 2 }}>×</button>
                   </div>
                 ))}
               </div>
             )}
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 8, border: `1.5px dashed ${T.border}`, cursor: "pointer", fontSize: 12, color: T.text2, background: "#fff", transition: "border-color .15s, background .15s" }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = T.navy; e.currentTarget.style.background = T.bg; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "#fff"; }}
-              >
-                <span style={{ fontSize: 14 }}>+</span> Attach File
-                <input type="file" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.xlsx,.xls,.csv,.doc,.docx" style={{ display: "none" }} onChange={e => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  if (file.size > 5 * 1024 * 1024) { alert("File size exceeds 5 MB limit."); return; }
-                  setPendingFiles(p => [...p, { file, status: null }]);
-                  e.target.value = "";
-                }} />
-              </label>
-              {pendingFiles.filter(pf => !pf.status || pf.status === "error").length > 0 && (
-                <button className="btn btn-navy btn-sm" onClick={async () => {
-                  setUploadingFiles(true);
-                  for (const pf of pendingFiles) {
-                    if (pf.status === "done") continue;
-                    setPendingFiles(p => p.map((x, i) => i === pendingFiles.indexOf(pf) ? { ...x, status: "uploading" } : x));
-                    try {
-                      const formData = new FormData();
-                      formData.append("file", pf.file);
-                      const res = await fetch(`${API_BASE_URL}/api/upload`, {
-                        method: "POST",
-                        headers: { "x-api-key": API_KEY, "Authorization": `Bearer ${getAuthToken() || localStorage.getItem("mcs_token") || ""}` },
-                        body: formData,
-                      });
-                      if (res.ok) {
-                        setPendingFiles(p => p.map((x, i) => i === pendingFiles.indexOf(pf) ? { ...x, status: "done" } : x));
-                      } else {
-                        setPendingFiles(p => p.map((x, i) => i === pendingFiles.indexOf(pf) ? { ...x, status: "error" } : x));
-                      }
-                    } catch {
-                      setPendingFiles(p => p.map((x, i) => i === pendingFiles.indexOf(pf) ? { ...x, status: "error" } : x));
-                    }
-                  }
-                  setUploadingFiles(false);
-                }} disabled={uploadingFiles}>
-                  {uploadingFiles ? <><Spin /> Uploading…</> : "⬆ Upload Files"}
-                </button>
-              )}
-            </div>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 8, border: `1.5px dashed ${T.border}`, cursor: "pointer", fontSize: 12, color: T.text2, background: "#fff", transition: "border-color .15s, background .15s" }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = T.navy; e.currentTarget.style.background = T.bg; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "#fff"; }}
+            >
+              <span style={{ fontSize: 14 }}>+</span> Attach File
+              <input type="file" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.xlsx,.xls,.csv,.doc,.docx" style={{ display: "none" }} onChange={e => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                if (file.size > 5 * 1024 * 1024) { alert("File size exceeds 5 MB limit."); return; }
+                setPendingFiles(p => [...p, { file }]);
+                e.target.value = "";
+              }} />
+            </label>
           </div>
           <div><Lbl t="Responsible Person(s)" req /><MultiUserSelect value={f.responsible} users={users.filter(u => { if (f.plant && f.plant !== "All") return !u.plant || u.plant === "All" || u.plant === f.plant; if (!isUserAdmin(currentUser) && currentUser?.plant && currentUser.plant !== "All") return !u.plant || u.plant === "All" || u.plant === currentUser.plant; return true; })} onChange={v => { up("responsible", v); const firstName = (v || "").split(",").map(s => s.trim()).filter(Boolean)[0]; if (firstName) { const u = users.find(x => x.name === firstName); if (u) { if (u.plant) up("plant", u.plant); if (u.dept) up("section", u.dept); } } }} /></div>
           <div><Lbl t="Due Date" req /><input type="date" value={f.due} onChange={e => up("due", e.target.value)} /></div>
@@ -4189,9 +4162,7 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaul
             const linkedMtg = (meetings || []).find(m => m.id === f.meeting);
             const enriched = { ...f };
             if (linkedMtg) { enriched.srcId = linkedMtg.id; enriched.src = linkedMtg.type; }
-            const finalFiles = pendingFiles.map(x => x.status === "done" ? x : { ...x, status: "uploading" });
-            setPendingFiles(finalFiles);
-            onSave(enriched, finalFiles);
+            onSave(enriched, pendingFiles);
           }} disabled={saving}>
             {saving ? <><Spin /> Saving…</> : "Save Action"}
           </button>
@@ -7022,6 +6993,16 @@ export default function App() {
   const mtgTimerRef = useRef(null);
   const mtgTxRef = useRef(null);
 
+  // Global 401 → force logout
+  useEffect(() => {
+    setOnAuthExpired(() => {
+      localStorage.removeItem("mcs_token");
+      setUser(null);
+      setPage(0);
+    });
+    return () => setOnAuthExpired(null);
+  }, []);
+
   // Persist session
   useEffect(() => {
     if (user) localStorage.setItem("mcs_session_user", JSON.stringify(user));
@@ -7297,11 +7278,10 @@ export default function App() {
               const saved = await apiCreate("actions", resolved);
               if (saved && saved.id) {
                 setActions(p => p.map(x => x.id === localId ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
-                // Upload pending files (skip already pre-uploaded)
+                // Upload pending files to the saved action
                 if (files && files.length > 0) {
                   const failed = [];
                   for (const pf of files) {
-                    if (pf.status === "done") continue;
                     try {
                       const formData = new FormData();
                       formData.append("file", pf.file);
