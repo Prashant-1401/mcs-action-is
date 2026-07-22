@@ -1944,7 +1944,7 @@ function HomePage({ actions, setActions, user, setPage, users, meetings, plants,
 
                       {/* Meeting title */}
                       <span style={{ fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {m.type}
+                        {m.name || m.type}
                       </span>
 
                       {/* Plant */}
@@ -2361,7 +2361,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
   return (
     <div className="fade-in">
       <PageHeader title="Work" sub="Projects, meetings and active sessions" />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 24 }}>
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
             <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, fontSize: 15, color: T.navy, display: "flex", alignItems: "center", gap: 8 }}>
@@ -2396,7 +2396,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       {/* Feature 4: meeting title clickable to open plan */}
-                      <div style={{ fontWeight: 700, fontSize: 14, color: T.navy, marginBottom: 3, cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted" }} onClick={() => setMtgPlan(m)}>{m.type}</div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: T.navy, marginBottom: 3, cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted" }} onClick={() => setMtgPlan(m)}>{m.name || m.type}</div>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
                         <Chip label={m.plant} color={T.navy} />
                         {m.recurring && <Chip label="Recurring" color={T.slate} />}
@@ -2552,7 +2552,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
                       <div key={m.id || `dm-${i}`} style={{ border: `1px solid ${T.border}`, borderRadius: 10, padding: 14 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
                           <div>
-                            <div style={{ fontWeight: 700, fontSize: 13, color: T.navy, cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted" }} onClick={() => setMtgPlan(m)}>{m.type}</div>
+                            <div style={{ fontWeight: 700, fontSize: 13, color: T.navy, cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted" }} onClick={() => setMtgPlan(m)}>{m.name || m.type}</div>
                             <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{m.time} · {m.plant} · Facilitated by <b style={{ color: T.text }}>{m.facilitator}</b></div>
                           </div>
                           <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -2653,6 +2653,7 @@ function MeetingPlanPanel({ mtg, canEdit, projects, users, plants, onSave, onClo
   const defaultAttendees = ensureArray(mtgPresets?.attendeeMap?.[mtg.type]);
   const [draft, setDraft] = useState({
     ...mtg,
+    name: mtg.name || mtg.type || "",
     guidelines: ensureArray(mtg.guidelines || defaultInstructions),
     attendees: ensureArray(mtg.attendees || defaultAttendees),
   });
@@ -2668,7 +2669,7 @@ function MeetingPlanPanel({ mtg, canEdit, projects, users, plants, onSave, onClo
             <div>
               <div style={{ fontSize: 10, opacity: .6, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>Meeting Plan</div>
               {editMode
-                ? <input value={draft.name || draft.type || ""} onChange={e => { up("name", e.target.value); up("type", e.target.value); }} placeholder="Meeting name" style={{ fontFamily: "'Sora',sans-serif", fontSize: 17, fontWeight: 800, color: "#fff", background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.4)", borderRadius: 8, padding: "4px 10px", width: "100%", marginBottom: 4 }} />
+                ? <input value={draft.name || draft.type || ""} onChange={e => up("name", e.target.value)} placeholder="Meeting name" style={{ fontFamily: "'Sora',sans-serif", fontSize: 17, fontWeight: 800, color: "#fff", background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.4)", borderRadius: 8, padding: "4px 10px", width: "100%", marginBottom: 4 }} />
                 : <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 17, fontWeight: 800, marginBottom: 4 }}>{mtg.name || mtg.type}</h2>}
               <div style={{ fontSize: 12, opacity: .8 }}>{mtg.plant} · {mtg.time} · {mtg.dur}min</div>
             </div>
@@ -4098,7 +4099,7 @@ function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaul
       <div className="side-panel" ref={panelRef} style={{ width: 420, padding: 28 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
           <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 16, fontWeight: 800, color: T.navy }}>Log Action Point</h2>
-          <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 22, color: T.text2 }}>x</button>
+          <button onClick={onClose} style={{ background: T.navy, border: "none", cursor: "pointer", fontSize: 16, color: "#fff", borderRadius: 8, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div><Lbl t="Action Point Type" req /><select value={f.actionPointType} onChange={e => up("actionPointType", e.target.value)}><option value="">Select type…</option>{["Corrective Action","Preventive Action","Improvement","Safety","Maintenance","Quality","Compliance","Other","Others"].map(t => <option key={t} value={t}>{t}</option>)}{f.actionPointType && !["Corrective Action","Preventive Action","Improvement","Safety","Maintenance","Quality","Compliance","Other","Others"].includes(f.actionPointType) && <option value={f.actionPointType}>{f.actionPointType}</option>}</select></div>
@@ -4438,7 +4439,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
         <div style={{ padding: "20px 24px", borderBottom: `1.5px solid ${T.border}`, flexShrink: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
             <div style={{ fontFamily: "monospace", fontSize: 11, color: T.text2 }}>{action.sn}</div>
-            <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 22, color: T.text2, lineHeight: 1 }}>×</button>
+            <button onClick={onClose} style={{ background: T.navy, border: "none", cursor: "pointer", fontSize: 16, color: "#fff", borderRadius: 8, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
           </div>
           <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 15, fontWeight: 800, color: T.navy, lineHeight: 1.3, marginBottom: 10 }}>{action.text}</h2>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -5625,7 +5626,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
               return (
                 <div key={m.id} style={{ padding: "12px 0", borderBottom: `1px solid ${T.border}` }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <div><div style={{ fontWeight: 600, fontSize: 13 }}>{m.type}</div><div style={{ fontSize: 11, color: T.text2 }}>{m.plant} · {m.project && <span style={{ color: T.amber }}>📎 {m.project}</span>}</div></div>
+                    <div><div style={{ fontWeight: 600, fontSize: 13 }}>{m.name || m.type}</div><div style={{ fontSize: 11, color: T.text2 }}>{m.plant} · {m.project && <span style={{ color: T.amber }}>📎 {m.project}</span>}</div></div>
                     <div style={{ textAlign: "right" }}><div style={{ fontFamily: "'Sora',sans-serif", fontSize: 18, fontWeight: 700, color: T.navy }}>{totalMin}min</div><div style={{ fontSize: 10, color: T.text2 }}>{sessions.length} session{sessions.length !== 1 ? "s" : ""}</div></div>
                   </div>
                   {sessions.length > 0 && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{sessions.map((s, i) => <div key={i} style={{ background: T.bg, borderRadius: 6, padding: "4px 10px", fontSize: 11 }}>{fmt(s.date)} — <b>{s.duration}min</b></div>)}</div>}
