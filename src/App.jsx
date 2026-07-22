@@ -2374,7 +2374,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
   return (
     <div className="fade-in">
       <PageHeader title="Work" sub="Projects, meetings and active sessions" />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
             <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 700, fontSize: 15, color: T.navy, display: "flex", alignItems: "center", gap: 8 }}>
