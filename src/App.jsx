@@ -2604,7 +2604,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
       <CompletedMeetingDashboard meetings={visibleMeetings} actions={actions} users={users} user={user} plants={plants} />
 
       {/* ── Weekly Meeting Accountability ── */}
-      <WeeklyMeetingAccountability meetings={visibleMeetings} actions={actions} users={users} user={user} plants={plants} selectedDay={selectedBeltDay} />
+      <WeeklyMeetingAccountability meetings={visibleMeetings} actions={actions} users={users} user={user} plants={plants} machines={machines} selectedDay={selectedBeltDay} onActionUpdate={(id, patch) => { setActions(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); apiUpdate("actions", id, patch); }} />
 
       {charter && <ProjectCharterModal pr={charter} onClose={() => { setCharter(null); setCharterActionSel(null); }} actions={actions} meetings={meetings} user={user} users={users} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); if (charter && charter.id === updated.id) setCharter(updated); onProjectUpdate(updated); }} onActionSelect={a => setCharterActionSel(a)} />}
       {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={(id, patch) => { setActions(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); apiUpdate("actions", id, patch); setCharterActionSel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} machines={machines} meetings={meetings} />}
@@ -2953,7 +2953,7 @@ function CompletedMeetingDashboard({ meetings, actions, users, user, plants }) {
 }
 
 /* ===================== WEEKLY MEETING ACCOUNTABILITY ===================== */
-function WeeklyMeetingAccountability({ meetings, actions, users, user, plants, selectedDay }) {
+function WeeklyMeetingAccountability({ meetings, actions, users, user, plants, machines, selectedDay, onActionUpdate }) {
   const accessibleMeetings = (meetings || []).filter(m => canAccessMeeting(user, m, null));
 
   const sessions = accessibleMeetings
@@ -2967,6 +2967,9 @@ function WeeklyMeetingAccountability({ meetings, actions, users, user, plants, s
     const matchDate = a.dateOfAction === session.date || a.created === session.date;
     return matchMtg && matchDate;
   });
+
+  const [sessionPopup, setSessionPopup] = useState(null);
+  const [actionDetail, setActionDetail] = useState(null);
 
   const thStyle = { padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5, whiteSpace: "nowrap", textAlign: "left" };
 
@@ -2999,7 +3002,12 @@ function WeeklyMeetingAccountability({ meetings, actions, users, user, plants, s
                 const mtgActions = getActionsFor(s, m);
                 const attendees = ensureArray(s.attendees || []);
                 return (
-                  <tr key={m.id + s.date || `wma-${i}`} style={{ borderTop: `1px solid ${T.border}`, background: i % 2 === 0 ? "#fff" : T.bg + "60" }}>
+                  <tr key={m.id + s.date || `wma-${i}`}
+                    onClick={() => setSessionPopup({ session: s, meeting: m, actions: mtgActions })}
+                    style={{ borderTop: `1px solid ${T.border}`, background: i % 2 === 0 ? "#fff" : T.bg + "60", cursor: "pointer", transition: "background .15s" }}
+                    onMouseEnter={e => e.currentTarget.style.background = T.navy + "08"}
+                    onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#fff" : T.bg + "60"}
+                  >
                     <td style={{ padding: "10px 14px", fontFamily: "monospace", fontSize: 11, color: T.text2 }}>{m.id || "—"}</td>
                     <td style={{ padding: "10px 14px", fontWeight: 600, color: T.navy }}>{m.name || m.type}</td>
                     <td style={{ padding: "10px 14px" }}>
@@ -3021,6 +3029,71 @@ function WeeklyMeetingAccountability({ meetings, actions, users, user, plants, s
           </table>
         </div>
       </div>
+
+      {/* ── Session Actions Popup ── */}
+      {sessionPopup && (
+        <div className="overlay" onClick={() => setSessionPopup(null)}>
+          <div className="card" style={{ width: 560, maxHeight: "80vh", overflowY: "auto", padding: 28 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div>
+                <div style={{ fontFamily: "'Sora',sans-serif", fontSize: 16, fontWeight: 800, color: T.navy }}>{sessionPopup.meeting.name || sessionPopup.meeting.type}</div>
+                <div style={{ fontSize: 12, color: T.text2, marginTop: 4 }}>{sessionPopup.meeting.id} · {sessionPopup.session.date} · {sessionPopup.actions.length} action{sessionPopup.actions.length !== 1 ? "s" : ""}</div>
+              </div>
+              <button onClick={() => setSessionPopup(null)} style={{ background: T.navy, border: "none", cursor: "pointer", color: "#fff", borderRadius: 8, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
+            </div>
+            {sessionPopup.actions.length === 0 ? (
+              <div style={{ padding: "32px 20px", textAlign: "center", color: T.text2, fontSize: 13 }}>
+                No actions were generated in this meeting session.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {sessionPopup.actions.map((a, idx) => (
+                  <div key={a.id || idx}
+                    onClick={() => { setActionDetail(a); setSessionPopup(null); }}
+                    style={{ background: T.bg, borderRadius: 10, padding: "12px 16px", cursor: "pointer", border: `1px solid ${T.border}`, transition: "border-color .15s" }}
+                    onMouseEnter={e => e.currentTarget.style.borderColor = T.navy}
+                    onMouseLeave={e => e.currentTarget.style.borderColor = T.border}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                          <span style={{ fontFamily: "monospace", fontSize: 10, color: T.text2 }}>{a.sn || a.id}</span>
+                          <span style={{ fontSize: 11, padding: "1px 8px", borderRadius: 4, background: a.status === "COMPLETED" ? T.green + "18" : a.status === "IN PROCESS" ? T.amber + "18" : a.status === "DROPPED" ? T.red + "18" : T.bg, color: a.status === "COMPLETED" ? T.green : a.status === "IN PROCESS" ? T.amber : a.status === "DROPPED" ? T.red : T.text2, fontWeight: 600 }}>{a.status}</span>
+                        </div>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: T.navy, marginBottom: 4 }}>{a.text}</div>
+                        <div style={{ display: "flex", gap: 12, fontSize: 11, color: T.text2 }}>
+                          <span>👤 {a.responsible || "—"}</span>
+                          <span>📅 {a.due || "—"}</span>
+                          {a.priority && <span style={{ color: a.priority === "CRITICAL" ? T.red : a.priority === "HIGH" ? T.amber : T.text2 }}>⚡ {a.priority}</span>}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 16, color: T.text2, flexShrink: 0 }}>→</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Action Detail Panel ── */}
+      {actionDetail && (
+        <ActionDetailPanel
+          action={actionDetail}
+          onClose={() => setActionDetail(null)}
+          onUpdate={(id, patch) => {
+            setActionDetail(p => p ? { ...p, ...patch } : p);
+            if (onActionUpdate) onActionUpdate(id, patch);
+          }}
+          user={user}
+          users={users}
+          allUsers={users}
+          plants={plants}
+          machines={machines || []}
+          meetings={meetings}
+        />
+      )}
     </div>
   );
 }
