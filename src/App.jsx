@@ -2604,7 +2604,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
       <CompletedMeetingDashboard meetings={visibleMeetings} actions={actions} users={users} user={user} plants={plants} />
 
       {/* ── Weekly Meeting Accountability ── */}
-      <WeeklyMeetingAccountability meetings={visibleMeetings} actions={actions} users={users} user={user} plants={plants} />
+      <WeeklyMeetingAccountability meetings={visibleMeetings} actions={actions} users={users} user={user} plants={plants} selectedDay={selectedBeltDay} />
 
       {charter && <ProjectCharterModal pr={charter} onClose={() => { setCharter(null); setCharterActionSel(null); }} actions={actions} meetings={meetings} user={user} users={users} onProjectUpdate={updated => { setProjects(p => p.map(x => x.id === updated.id ? updated : x)); if (charter && charter.id === updated.id) setCharter(updated); onProjectUpdate(updated); }} onActionSelect={a => setCharterActionSel(a)} />}
       {charterActionSel && <ActionDetailPanel action={charterActionSel} onClose={() => setCharterActionSel(null)} onUpdate={(id, patch) => { setActions(p => p.map(a => a.id !== id ? a : { ...a, ...patch })); apiUpdate("actions", id, patch); setCharterActionSel(p => p ? { ...p, ...patch } : p); }} user={user} users={users} allUsers={users} plants={plants} machines={machines} meetings={meetings} />}
@@ -2953,214 +2953,75 @@ function CompletedMeetingDashboard({ meetings, actions, users, user, plants }) {
 }
 
 /* ===================== WEEKLY MEETING ACCOUNTABILITY ===================== */
-function WeeklyMeetingAccountability({ meetings, actions, users, user, plants }) {
-  const isAdmin = isUserAdmin(user);
-  const now = new Date();
-  const weekAgo = new Date();
-  weekAgo.setDate(now.getDate() - 7);
-  const twoWeeksAgo = new Date();
-  twoWeeksAgo.setDate(now.getDate() - 14);
-  const today = todayStr();
-
+function WeeklyMeetingAccountability({ meetings, actions, users, user, plants, selectedDay }) {
   const accessibleMeetings = (meetings || []).filter(m => canAccessMeeting(user, m, null));
 
-  // Flatten all completed sessions within the last 7 days
-  const weekSessions = accessibleMeetings
-    .flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : [])
-      .filter(s => s.date && new Date(s.date) >= weekAgo)
-      .map(s => ({ ...s, type: m.type, plant: m.plant, project: m.project, meetingObj: m }))
-    );
+  const getDayName = (dateStr) => {
+    const d = new Date(dateStr + "T12:00:00");
+    return WEEKDAY_NAMES[d.getDay() === 0 ? 6 : d.getDay() - 1];
+  };
 
-  // Flatten last-week sessions (8-14 days ago) for trend comparison
-  const prevWeekSessions = accessibleMeetings
-    .flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : [])
-      .filter(s => s.date && new Date(s.date) >= twoWeeksAgo && new Date(s.date) < weekAgo)
-      .map(s => ({ ...s, type: m.type, plant: m.plant, project: m.project }))
-    );
+  const dayName = selectedDay ? getDayName(selectedDay) : null;
+  const dayMeetings = dayName ? accessibleMeetings.filter(m => ensureArray(m.scheduledDays).includes(dayName)) : [];
 
-  // Get actions matching a session
-  const getActionsFor = (session) => (actions || []).filter(a => {
-    const matchType = session.id ? (a.srcId === session.id || (!a.srcId && a.src === session.type)) : a.src === session.type;
-    const matchDate = session.date ? (a.dateOfAction === session.date || a.created === session.date) : true;
-    return matchType && matchDate;
+  const getActionsFor = (m) => (actions || []).filter(a => {
+    if (m.id && a.srcId === m.id) return true;
+    if (!a.srcId && a.src === m.type) return true;
+    return false;
   });
 
-  const countActionsFor = (session) => getActionsFor(session).length;
-
-  // Build this-week rows grouped by meeting type
-  const byType = {};
-  weekSessions.forEach(s => {
-    if (!byType[s.type]) byType[s.type] = { type: s.type, sessions: [], attendees: new Set(), totalMins: 0, expectedAttendees: [] };
-    byType[s.type].sessions.push(s);
-    byType[s.type].totalMins += (s.duration || 0);
-    ensureArray(s.attendees).forEach(a => byType[s.type].attendees.add(a));
-    if (s.meetingObj && s.meetingObj.attendees && s.meetingObj.attendees.length && !byType[s.type].expectedAttendees.length) {
-      byType[s.type].expectedAttendees = s.meetingObj.attendees;
-    }
-  });
-
-  // Build previous-week counts per type for trend
-  const prevByType = {};
-  prevWeekSessions.forEach(s => {
-    if (!prevByType[s.type]) prevByType[s.type] = 0;
-    prevByType[s.type]++;
-  });
-
-  const rows = Object.values(byType)
-    .map(g => {
-      const sessionActions = g.sessions.flatMap(s => getActionsFor(s));
-      const totalActions = sessionActions.length;
-      const completedActions = sessionActions.filter(a => a.status === "COMPLETED").length;
-      const overdueActions = sessionActions.filter(a => a.status !== "COMPLETED" && a.status !== "DROPPED" && a.due && a.due < today).length;
-      const avgDuration = g.sessions.length ? Math.round(g.totalMins / g.sessions.length) : 0;
-      const actionsPerSession = g.sessions.length ? (totalActions / g.sessions.length).toFixed(1) : "0";
-      const completionRate = totalActions ? Math.round((completedActions / totalActions) * 100) : 0;
-      const prevCount = prevByType[g.type] || 0;
-      const currentCount = g.sessions.length;
-      const trend = currentCount - prevCount;
-      return {
-        type: g.type,
-        count: currentCount,
-        actions: totalActions,
-        attendees: [...g.attendees],
-        expectedAttendees: g.expectedAttendees,
-        totalMins: g.totalMins,
-        completedActions,
-        overdueActions,
-        avgDuration,
-        actionsPerSession,
-        completionRate,
-        trend,
-        prevCount,
-      };
-    })
-    .sort((a, b) => b.count - a.count);
-
-  const totalSessions = rows.reduce((s, r) => s + r.count, 0);
-  const totalActions = rows.reduce((s, r) => s + r.actions, 0);
-  const totalCompleted = rows.reduce((s, r) => s + r.completedActions, 0);
-  const totalOverdue = rows.reduce((s, r) => s + r.overdueActions, 0);
-  const overallCompletionRate = totalActions ? Math.round((totalCompleted / totalActions) * 100) : 0;
-  const overallAvgDuration = totalSessions ? Math.round(rows.reduce((s, r) => s + r.totalMins, 0) / totalSessions) : 0;
-  const prevTotalSessions = prevWeekSessions.length;
-  const sessionTrend = totalSessions - prevTotalSessions;
-
-  const kpiCards = [
-    { label: "Total Sessions", value: totalSessions, color: T.navy, bg: T.navy + "12", icon: "\uD83D\uDCC5", trend: sessionTrend },
-    { label: "Completion Rate", value: overallCompletionRate + "%", color: overallCompletionRate >= 70 ? T.green : overallCompletionRate >= 40 ? T.amber : T.red, bg: (overallCompletionRate >= 70 ? T.green : overallCompletionRate >= 40 ? T.amber : T.red) + "12", icon: "\u2705", trend: null },
-    { label: "Overdue Actions", value: totalOverdue, color: totalOverdue === 0 ? T.green : T.red, bg: (totalOverdue === 0 ? T.green : T.red) + "12", icon: "\u23F0", trend: null },
-    { label: "Avg Duration", value: overallAvgDuration + "m", color: T.navy, bg: T.navy + "12", icon: "\u23F1", trend: null },
-  ];
-
-  const thStyle = { textAlign: "center", padding: "10px 12px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5, whiteSpace: "nowrap" };
+  const thStyle = { padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5, whiteSpace: "nowrap", textAlign: "left" };
 
   return (
     <div style={{ marginTop: 28 }}>
-      <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 16, color: T.navy, display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+      <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 15, color: T.navy, display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
         📊 Weekly Meeting Accountability
-        <span style={{ background: T.navy + "15", color: T.navy, borderRadius: 10, padding: "3px 12px", fontSize: 11, fontWeight: 700 }}>Last 7 days</span>
+        {dayName && <span style={{ background: T.navy + "15", color: T.navy, borderRadius: 10, padding: "3px 12px", fontSize: 11, fontWeight: 700 }}>{dayName} · {selectedDay}</span>}
       </div>
-
-      {weekSessions.length === 0 ? (
-        <div className="card" style={{ padding: "40px 20px", textAlign: "center" }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
-          <div style={{ fontWeight: 700, color: T.navy, fontSize: 14, marginBottom: 4 }}>No meetings completed this week</div>
-          <div style={{ color: T.text2, fontSize: 12 }}>Complete a meeting session to see accountability metrics here.</div>
-        </div>
-      ) : (<>
-      {/* KPI Summary Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
-        {kpiCards.map((kpi, i) => (
-          <div key={i} className="card" style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 10, background: kpi.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{kpi.icon}</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 10, fontWeight: 600, color: T.text2, textTransform: "uppercase", letterSpacing: .5 }}>{kpi.label}</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
-                <span style={{ fontSize: 20, fontWeight: 800, color: kpi.color, lineHeight: 1 }}>{kpi.value}</span>
-                {kpi.trend !== null && kpi.trend !== 0 && (
-                  <span style={{ fontSize: 10, fontWeight: 700, color: kpi.trend > 0 ? T.green : T.red, display: "flex", alignItems: "center", gap: 1 }}>
-                    {kpi.trend > 0 ? "▲" : "▼"} {Math.abs(kpi.trend)}
-                  </span>
-                )}
-                {kpi.trend === 0 && kpi.label === "Total Sessions" && (
-                  <span style={{ fontSize: 10, fontWeight: 600, color: T.text2 }}>—</span>
-                )}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ background: T.bg }}>
-                <th style={{ ...thStyle, textAlign: "left" }}>Meeting</th>
-                <th style={thStyle}>Sessions</th>
-                <th style={thStyle}>Trend</th>
-                <th style={thStyle}>Actions</th>
-                <th style={thStyle}>Completed</th>
-                <th style={thStyle}>Overdue</th>
-                <th style={thStyle}>Completion</th>
-                <th style={thStyle}>Avg Mins</th>
-                <th style={thStyle}>Acts/Sess</th>
-                <th style={{ ...thStyle, textAlign: "left" }}>Attendees</th>
+                <th style={thStyle}>Meeting ID</th>
+                <th style={thStyle}>Meeting Name</th>
+                <th style={thStyle}>Meeting Attendees</th>
+                <th style={thStyle}>Actions Generated</th>
+                <th style={thStyle}>Facilitator Name</th>
+                <th style={thStyle}>Meeting Type</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
-                <tr key={r.type} style={{ borderTop: `1px solid ${T.border}`, background: i % 2 === 0 ? "#fff" : T.bg + "60" }}>
-                  <td style={{ padding: "10px 12px", fontWeight: 700, color: T.navy, maxWidth: 180 }}>{r.type}</td>
-                  <td style={{ padding: "10px 12px", textAlign: "center" }}>
-                    <span style={{ background: T.navy + "15", color: T.navy, borderRadius: 8, padding: "2px 10px", fontWeight: 700, fontSize: 11 }}>{r.count}</span>
-                  </td>
-                  <td style={{ padding: "10px 12px", textAlign: "center" }}>
-                    {r.trend > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: T.green }}>+{r.trend}</span>}
-                    {r.trend < 0 && <span style={{ fontSize: 11, fontWeight: 700, color: T.red }}>{r.trend}</span>}
-                    {r.trend === 0 && <span style={{ fontSize: 11, color: T.text2 }}>—</span>}
-                  </td>
-                  <td style={{ padding: "10px 12px", textAlign: "center" }}>
-                    <span style={{ background: T.green + "18", color: T.green, borderRadius: 8, padding: "2px 10px", fontWeight: 700, fontSize: 11 }}>{r.actions}</span>
-                  </td>
-                  <td style={{ padding: "10px 12px", textAlign: "center" }}>
-                    <span style={{ fontWeight: 600, fontSize: 11, color: T.green }}>{r.completedActions}</span>
-                  </td>
-                  <td style={{ padding: "10px 12px", textAlign: "center" }}>
-                    {r.overdueActions > 0
-                      ? <span style={{ background: T.red + "18", color: T.red, borderRadius: 8, padding: "2px 10px", fontWeight: 700, fontSize: 11 }}>{r.overdueActions}</span>
-                      : <span style={{ fontSize: 11, color: T.text2 }}>0</span>}
-                  </td>
-                  <td style={{ padding: "10px 12px", textAlign: "center" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                      <div style={{ width: 40, height: 6, borderRadius: 3, background: T.border, overflow: "hidden" }}>
-                        <div style={{ width: r.completionRate + "%", height: "100%", borderRadius: 3, background: r.completionRate >= 70 ? T.green : r.completionRate >= 40 ? T.amber : T.red, transition: "width .3s" }} />
+              {dayMeetings.length === 0 ? (
+                <tr><td colSpan={6} style={{ padding: "32px 20px", textAlign: "center", color: T.text2, fontSize: 12 }}>
+                  {dayName ? `No meetings scheduled on ${dayName}.` : "Select a day from the Weekly Schedule above."}
+                </td></tr>
+              ) : dayMeetings.map((m, i) => {
+                const mtgActions = getActionsFor(m);
+                const attendees = ensureArray(m.attendees || []);
+                return (
+                  <tr key={m.id || `wma-${i}`} style={{ borderTop: `1px solid ${T.border}`, background: i % 2 === 0 ? "#fff" : T.bg + "60" }}>
+                    <td style={{ padding: "10px 14px", fontFamily: "monospace", fontSize: 11, color: T.text2 }}>{m.id || "—"}</td>
+                    <td style={{ padding: "10px 14px", fontWeight: 600, color: T.navy }}>{m.name || m.type}</td>
+                    <td style={{ padding: "10px 14px" }}>
+                      <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+                        {attendees.slice(0, 5).map((name, j) => <Avatar key={j} name={name} size={22} users={users} />)}
+                        {attendees.length > 5 && <span style={{ fontSize: 10, color: T.text2, alignSelf: "center" }}>+{attendees.length - 5}</span>}
+                        {attendees.length === 0 && <span style={{ fontSize: 11, color: T.text2 }}>—</span>}
                       </div>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: r.completionRate >= 70 ? T.green : r.completionRate >= 40 ? T.amber : T.red }}>{r.completionRate}%</span>
-                    </div>
-                  </td>
-                  <td style={{ padding: "10px 12px", textAlign: "center", fontWeight: 600, fontSize: 11 }}>{r.avgDuration}m</td>
-                  <td style={{ padding: "10px 12px", textAlign: "center", fontSize: 11, fontWeight: 600 }}>{r.actionsPerSession}</td>
-                  <td style={{ padding: "10px 12px" }}>
-                    <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-                      {r.attendees.slice(0, 4).map((name, j) => <Avatar key={j} name={name} size={20} users={users} />)}
-                      {r.attendees.length > 4 && <span style={{ fontSize: 10, color: T.text2 }}>+{r.attendees.length - 4}</span>}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td style={{ padding: "10px 14px" }}>
+                      <span style={{ background: T.green + "18", color: T.green, borderRadius: 8, padding: "2px 10px", fontWeight: 700, fontSize: 11 }}>{mtgActions.length}</span>
+                    </td>
+                    <td style={{ padding: "10px 14px", fontWeight: 600, fontSize: 12 }}>{m.facilitator || "—"}</td>
+                    <td style={{ padding: "10px 14px", color: T.text2, fontSize: 11 }}>{m.type}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
-        <div style={{ display: "flex", gap: 20, padding: "12px 16px", borderTop: `1px solid ${T.border}`, fontSize: 12, color: T.text2, flexWrap: "wrap" }}>
-          <span>📅 <b style={{ color: T.navy }}>{totalSessions}</b> sessions</span>
-          <span>⚡ <b style={{ color: T.green }}>{totalActions}</b> actions generated</span>
-          <span>✅ <b style={{ color: T.green }}>{totalCompleted}</b> completed</span>
-          {totalOverdue > 0 && <span>⏰ <b style={{ color: T.red }}>{totalOverdue}</b> overdue</span>}
-          <span>⏱ <b style={{ color: T.navy }}>{overallAvgDuration}m</b> avg duration</span>
-        </div>
       </div>
-      </>)}
     </div>
   );
 }
