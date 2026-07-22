@@ -210,6 +210,7 @@ const SNAKE_TO_CAMEL = {
   from_user: "fromUser", target_user: "targetUser",
   applicable_to: "applicableTo",
   scheduled_days: "scheduledDays", guidelines: "guidelines",
+  src_id: "srcId", src: "src", meetingid: "meetingId", meeting_name: "meetingName",
 };
 const CAMEL_TO_SNAKE = Object.fromEntries(
   Object.entries(SNAKE_TO_CAMEL).map(([s, c]) => [c, s])
@@ -7135,23 +7136,23 @@ export default function App() {
       return resolveRecordIds(base, plants, depts, machines, projects, meetings);
     });
     setActions(p => [...p, ...resolvedRows]);
-    resolvedRows.forEach(async (r, i) => {
-      try {
-        const saved = await apiCreate("actions", r);
-        if (saved && saved.id) {
-          setActions(p => p.map(x => x.id === localIds[i] ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
+    Promise.all(
+      resolvedRows.map(async (r, i) => {
+        try {
+          const saved = await apiCreate("actions", r);
+          if (saved && saved.id) {
+            setActions(p => p.map(x => x.id === localIds[i] ? { ...x, id: saved.id, sn: saved.sn || x.sn } : x));
+          }
+        } catch (e) {
+          setActions(p => p.filter(x => x.id !== localIds[i]));
+          setDbError("Failed to save action: " + e.message);
+          setTimeout(() => setDbError(null), 5000);
         }
-      } catch (e) {
-        setActions(p => p.filter(x => x.id !== localIds[i]));
-        setDbError("Failed to save action: " + e.message);
-        setTimeout(() => setDbError(null), 5000);
-      } finally {
-        if (i === resolvedRows.length - 1) {
-          committingRef.current = false;
-          setCommitting(false);
-          fetchData();
-        }
-      }
+      })
+    ).finally(() => {
+      committingRef.current = false;
+      setCommitting(false);
+      fetchData();
     });
     if (globalActiveMtg && globalActiveMtg.id) {
       const sessionEntry = { date: todayStr(), duration: mtgElapsed || 0, actionCount: rows.length, attendees: ensureArray(globalActiveMtg.attendees || []), facilitator: globalActiveMtg.facilitator || "" };
