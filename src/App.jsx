@@ -545,8 +545,6 @@ function useRealtimeSync({ fetchData, user, enabled = true, intervalMs = 15000 }
 
   const sync = useCallback(async () => {
     if (inFlight.current || !enabled) return;
-    const activeTag = document.activeElement?.tagName;
-    if (activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT") return;
     inFlight.current = true;
     setSyncing(true);
     try {
