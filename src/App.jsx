@@ -474,20 +474,9 @@ function usePostgresDB({ defaultUsers, defaultPlants, defaultDepts,
       if (pDenorm.length) setPlantsRaw(pDenorm);
       if (dDenorm.length) setDeptsRaw(dDenorm);
       if (resolvedU.length) setUsersRaw(resolvedU);
-      if (resolvedA.length) {
-        const hasPendingActions = [...pendingOps.values()].some(op => op.resource === "actions");
-        if (!hasPendingActions) setActionsRaw(resolvedA);
-        reconcilePendingWithServer("actions", resolvedA);
-      }
-      if (resolvedM.length) {
-        const hasPendingMeetings = [...pendingOps.values()].some(op => op.resource === "meetings");
-        if (!hasPendingMeetings) setMeetingsRaw(resolvedM);
-        reconcilePendingWithServer("meetings", resolvedM);
-      }
-      if (resolvedPr.length) {
-        const hasPendingProjects = [...pendingOps.values()].some(op => op.resource === "projects");
-        if (!hasPendingProjects) setProjectsRaw(resolvedPr);
-      }
+      if (resolvedA.length) { setActionsRaw(resolvedA); reconcilePendingWithServer("actions", resolvedA); }
+      if (resolvedM.length) { setMeetingsRaw(resolvedM); reconcilePendingWithServer("meetings", resolvedM); }
+      if (resolvedPr.length) setProjectsRaw(resolvedPr);
       if (emDenorm.length) setEscRaw(emDenorm);
       if (rsDenorm.length) setReasonsRaw(rsDenorm);
       if (auDenorm.length) setPersistedAuditRaw(auDenorm);
