@@ -2956,23 +2956,16 @@ function CompletedMeetingDashboard({ meetings, actions, users, user, plants }) {
 function WeeklyMeetingAccountability({ meetings, actions, users, user, plants, selectedDay }) {
   const accessibleMeetings = (meetings || []).filter(m => canAccessMeeting(user, m, null));
 
-  const getDayName = (dateStr) => {
-    const d = new Date(dateStr + "T12:00:00");
-    return WEEKDAY_NAMES[d.getDay() === 0 ? 6 : d.getDay() - 1];
-  };
+  const sessions = accessibleMeetings
+    .flatMap(m => (Array.isArray(m.completedSessions) ? m.completedSessions : [])
+      .filter(s => selectedDay ? s.date === selectedDay : true)
+      .map(s => ({ ...s, meeting: m }))
+    );
 
-  const dayName = selectedDay ? getDayName(selectedDay) : null;
-  const dayMeetings = dayName
-    ? accessibleMeetings.filter(m => {
-        const sd = ensureArray(m.scheduledDays);
-        return sd.length === 0 || sd.includes(dayName);
-      })
-    : accessibleMeetings;
-
-  const getActionsFor = (m) => (actions || []).filter(a => {
-    if (m.id && a.srcId === m.id) return true;
-    if (!a.srcId && a.src === m.type) return true;
-    return false;
+  const getActionsFor = (session, meeting) => (actions || []).filter(a => {
+    const matchMtg = meeting.id ? a.srcId === meeting.id : (!a.srcId && a.src === meeting.type);
+    const matchDate = a.dateOfAction === session.date || a.created === session.date;
+    return matchMtg && matchDate;
   });
 
   const thStyle = { padding: "10px 14px", fontWeight: 700, color: T.text2, fontSize: 10, textTransform: "uppercase", letterSpacing: .5, whiteSpace: "nowrap", textAlign: "left" };
@@ -2981,7 +2974,7 @@ function WeeklyMeetingAccountability({ meetings, actions, users, user, plants, s
     <div style={{ marginTop: 28 }}>
       <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 15, color: T.navy, display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
         📊 Weekly Meeting Accountability
-        {dayName && <span style={{ background: T.navy + "15", color: T.navy, borderRadius: 10, padding: "3px 12px", fontSize: 11, fontWeight: 700 }}>{dayName} · {selectedDay}</span>}
+        {selectedDay && <span style={{ background: T.navy + "15", color: T.navy, borderRadius: 10, padding: "3px 12px", fontSize: 11, fontWeight: 700 }}>{selectedDay}</span>}
       </div>
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
@@ -2997,15 +2990,16 @@ function WeeklyMeetingAccountability({ meetings, actions, users, user, plants, s
               </tr>
             </thead>
             <tbody>
-              {dayMeetings.length === 0 ? (
+              {sessions.length === 0 ? (
                 <tr><td colSpan={6} style={{ padding: "32px 20px", textAlign: "center", color: T.text2, fontSize: 12 }}>
-                  {dayName ? `No meetings scheduled on ${dayName}.` : "Select a day from the Weekly Schedule above."}
+                  {selectedDay ? `No meeting sessions found on ${selectedDay}.` : "Select a day from the Weekly Schedule above."}
                 </td></tr>
-              ) : dayMeetings.map((m, i) => {
-                const mtgActions = getActionsFor(m);
-                const attendees = ensureArray(m.attendees || []);
+              ) : sessions.map((s, i) => {
+                const m = s.meeting;
+                const mtgActions = getActionsFor(s, m);
+                const attendees = ensureArray(s.attendees || []);
                 return (
-                  <tr key={m.id || `wma-${i}`} style={{ borderTop: `1px solid ${T.border}`, background: i % 2 === 0 ? "#fff" : T.bg + "60" }}>
+                  <tr key={m.id + s.date || `wma-${i}`} style={{ borderTop: `1px solid ${T.border}`, background: i % 2 === 0 ? "#fff" : T.bg + "60" }}>
                     <td style={{ padding: "10px 14px", fontFamily: "monospace", fontSize: 11, color: T.text2 }}>{m.id || "—"}</td>
                     <td style={{ padding: "10px 14px", fontWeight: 600, color: T.navy }}>{m.name || m.type}</td>
                     <td style={{ padding: "10px 14px" }}>
@@ -3018,7 +3012,7 @@ function WeeklyMeetingAccountability({ meetings, actions, users, user, plants, s
                     <td style={{ padding: "10px 14px" }}>
                       <span style={{ background: T.green + "18", color: T.green, borderRadius: 8, padding: "2px 10px", fontWeight: 700, fontSize: 11 }}>{mtgActions.length}</span>
                     </td>
-                    <td style={{ padding: "10px 14px", fontWeight: 600, fontSize: 12 }}>{m.facilitator || "—"}</td>
+                    <td style={{ padding: "10px 14px", fontWeight: 600, fontSize: 12 }}>{s.facilitator || m.facilitator || "—"}</td>
                     <td style={{ padding: "10px 14px", color: T.text2, fontSize: 11 }}>{m.type}</td>
                   </tr>
                 );
@@ -3946,7 +3940,8 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
 function AddActionPanel({ users, plants, depts, defaultPlant, defaultSrc, defaultMeeting, defaultProject, projects, meetings, onSave, onClose, currentUser, machines, reasons: reasonsProp, saving }) {
   useEscClose(onClose);
   const panelRef = React.useRef(null);
-  const [f, setF] = useState({ text: "", responsible: "", due: "", section: currentUser?.dept || "General", plant: defaultPlant || (currentUser?.plant && currentUser.plant !== "All" ? currentUser.plant : ""), src: defaultSrc || "", priority: "NORMAL", remarks: "", project: defaultProject || "", meeting: defaultMeeting || "", reasonOfAction: "", machineName: "", actionPointType: "" });
+  const todayDate = todayStr();
+  const [f, setF] = useState({ text: "", responsible: "", due: todayDate, section: currentUser?.dept || "General", plant: defaultPlant || (currentUser?.plant && currentUser.plant !== "All" ? currentUser.plant : ""), src: defaultSrc || "", priority: "NORMAL", remarks: "", project: defaultProject || "", meeting: defaultMeeting || "", reasonOfAction: "", machineName: "", actionPointType: "" });
   const [pendingFiles, setPendingFiles] = useState([]);
   // Meetings that the current user can see (admin sees all, others only visible plants)
   const meetingOpts = (meetings || []).filter(m => canAccessMeeting(currentUser, m, null)).map(m => ({ id: m.id, label: `${m.type}${m.plant ? " · " + m.plant : ""}${m.project ? " · " + m.project : ""}` }));
