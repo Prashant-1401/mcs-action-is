@@ -3750,7 +3750,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
           {[
             { label: "STATUS", key: "mtgStatus", opts: STATUS_LIST },
             { label: "PRIORITY", key: "mtgPriority", opts: PRIORITY_LIST },
-            { label: "DEPT", key: "mtgSection", opts: SECTIONS.slice(0, 8) },
+            { label: "DEPT", key: "mtgSection", opts: scopedDepts(currentUser, depts).map(d => d.name) },
           ].map(({ label, key, opts }) => (
             <div key={key} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
               <span style={{ fontSize: 10, fontWeight: 700, color: T.text2, textTransform: "uppercase", letterSpacing: .4 }}>{label}</span>
