@@ -3266,10 +3266,10 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   const [phase, setPhase] = useState("live");
   const [showSidePanel, setShowSidePanel] = useState(false);
   const [selAction, setSelAction] = useState(null);
-  const [mtgShowMine, setMtgShowMine] = useState(false);
-  const [mtgPendingSearch, setMtgPendingSearch] = useState("");
-  const [mtgFilters, setMtgFilters] = useState({});
-  const [mtgActionView, setMtgActionView] = useState("table");
+  const [mtgShowMine, setMtgShowMine] = useState(() => { try { return localStorage.getItem("mcs_mtg_showMine") === "true"; } catch { return false; } });
+  const [mtgPendingSearch, setMtgPendingSearch] = useState(() => { try { return localStorage.getItem("mcs_mtg_pendingSearch") || ""; } catch { return ""; } });
+  const [mtgFilters, setMtgFilters] = useState(() => { try { const s = localStorage.getItem("mcs_mtg_filters"); return s ? JSON.parse(s) : {}; } catch { return {}; } });
+  const [mtgActionView, setMtgActionView] = useState(() => { try { return localStorage.getItem("mcs_mtg_actionView") || "table"; } catch { return "table"; } });
   const [exitConfirm, setExitConfirm] = useState(false);
   const [sttStatus, setSttStatus] = useState("idle"); // idle | listening | error | unsupported
   const [sttInterim, setSttInterim] = useState("");
@@ -3283,6 +3283,10 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   // Increased from 3 to 5 — Render cold-start can eat 2-3 timeouts before warming up
   const API_FAIL_LIMIT = 5;
   const apiFailCountRef = analyzeFailRef; // alias kept for any other usages
+  useEffect(() => { try { localStorage.setItem("mcs_mtg_showMine", String(mtgShowMine)); } catch {} }, [mtgShowMine]);
+  useEffect(() => { try { if (mtgPendingSearch) localStorage.setItem("mcs_mtg_pendingSearch", mtgPendingSearch); else localStorage.removeItem("mcs_mtg_pendingSearch"); } catch {} }, [mtgPendingSearch]);
+  useEffect(() => { try { localStorage.setItem("mcs_mtg_filters", JSON.stringify(mtgFilters)); } catch {} }, [mtgFilters]);
+  useEffect(() => { try { localStorage.setItem("mcs_mtg_actionView", mtgActionView); } catch {} }, [mtgActionView]);
 
   const txRef = useRef(null);
   const insightsRef = useRef(null);
@@ -4361,8 +4365,6 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
   const canConfirm = isAllocator || isAllocatorSuperior || isAdmin;
   const canMsg = _hasEditPerm || isAssignee || isAllocator;
   const canEdit = _hasEditPerm && !isPendingConfirm && action.status !== "COMPLETED" && action.status !== "DROPPED";
-
-  useEffect(() => { if (messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
   const sendMsg = () => {
     if (!msgText.trim() || !canMsg) return;
@@ -6302,15 +6304,18 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
   const mMachines = isMasterOnly ? (machines || []).filter(m => m.plant === myPlant) : machines;
   const mEscMatrix = isMasterOnly ? (escMatrix || []).filter(e => !e.plant || e.plant === myPlant) : escMatrix;
   const [tab, setTab] = useState("users");
-  const [userFilterPlant, setUserFilterPlant] = useState("All");
-  const [userFilterRole, setUserFilterRole] = useState("All");
-  const [userFilterDept, setUserFilterDept] = useState("All");
+  const [userFilterPlant, setUserFilterPlant] = useState(() => { try { return localStorage.getItem("mcs_master_userFilterPlant") || "All"; } catch { return "All"; } });
+  const [userFilterRole, setUserFilterRole] = useState(() => { try { return localStorage.getItem("mcs_master_userFilterRole") || "All"; } catch { return "All"; } });
+  const [userFilterDept, setUserFilterDept] = useState(() => { try { return localStorage.getItem("mcs_master_userFilterDept") || "All"; } catch { return "All"; } });
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
   const [mcSaveStatus, setMcSaveStatus] = useState(null);
   const [plantSaveStatus, setPlantSaveStatus] = useState(null);
   const [deptSaveStatus, setDeptSaveStatus] = useState(null);
   const COLORS = ["#272262", "#5B56A6", "#E69903", "#7C80B0", "#1E8449", "#C0392B"];
+  useEffect(() => { try { localStorage.setItem("mcs_master_userFilterPlant", userFilterPlant); } catch {} }, [userFilterPlant]);
+  useEffect(() => { try { localStorage.setItem("mcs_master_userFilterRole", userFilterRole); } catch {} }, [userFilterRole]);
+  useEffect(() => { try { localStorage.setItem("mcs_master_userFilterDept", userFilterDept); } catch {} }, [userFilterDept]);
   
   const initialIds = useRef(null);
   if (!initialIds.current && users.length > 0) {
