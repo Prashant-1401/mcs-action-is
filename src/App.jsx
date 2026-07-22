@@ -2357,7 +2357,7 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
             : a.src === activeMtg.type;
           const matchesProject = activeMtg.project && (a.projectName || a.project) === activeMtg.project;
           return matchesMeeting || matchesProject;
-        })} running={mtgRunning} setRunning={setMtgRunning} elapsed={mtgElapsed} txLines={mtgTxLines} setTxLines={setMtgTxLines} fastActions={mtgFastActions} setFastActions={setMtgFastActions} insights={mtgInsights} setInsights={setMtgInsights} currentUser={user} mtgPresets={mtgPresets} setActions={setActions} machines={machines} reasons={reasons} />;
+        })} running={mtgRunning} setRunning={setMtgRunning} elapsed={mtgElapsed} txLines={mtgTxLines} setTxLines={setMtgTxLines} insights={mtgInsights} setInsights={setMtgInsights} currentUser={user} mtgPresets={mtgPresets} setActions={setActions} machines={machines} reasons={reasons} />;
 
   return (
     <div className="fade-in">
@@ -3249,11 +3249,10 @@ function AddMeetingModal({ plants, users, projects, onSave, onClose, currentUser
 }
 
 /* ===================== MEETING ROOM ===================== */
-function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBack, prevActions, relatedActions, running, setRunning, elapsed, txLines, setTxLines, fastActions, setFastActions, insights, setInsights, currentUser, mtgPresets, setActions, machines, reasons }) {
+function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBack, prevActions, relatedActions, running, setRunning, elapsed, txLines, setTxLines, insights, setInsights, currentUser, mtgPresets, setActions, machines, reasons }) {
   // ── Defensive: default all array props to [] to prevent "Cannot read properties of undefined (reading 'filter')" ──
   const _rel = Array.isArray(relatedActions) ? relatedActions : [];
   const _tx = Array.isArray(txLines) ? txLines : [];
-  const _fast = Array.isArray(fastActions) ? fastActions : [];
   const _ins = Array.isArray(insights) ? insights : [];
   const _usr = Array.isArray(users) ? users : [];
   const _plt = Array.isArray(plants) ? plants : [];
@@ -3261,12 +3260,11 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   const _rsn = Array.isArray(reasons) ? reasons : [];
   const _mch = Array.isArray(machines) ? machines : [];
   // Use safe aliases throughout; if the prop was undefined, log once for debugging
-  relatedActions = _rel; txLines = _tx; fastActions = _fast; insights = _ins;
+  relatedActions = _rel; txLines = _tx; insights = _ins;
   users = _usr; plants = _plt; depts = _dep; reasons = _rsn; machines = _mch;
   if (!mtg) { console.error("[MeetingRoom] mtg prop is null/undefined — aborting render"); return null; }
 
   const [phase, setPhase] = useState("live");
-  const [showSidePanel, setShowSidePanel] = useState(false);
   const [selAction, setSelAction] = useState(null);
   const [mtgShowMine, setMtgShowMine] = useState(() => { try { return localStorage.getItem("mcs_mtg_showMine") === "true"; } catch { return false; } });
   const [mtgPendingSearch, setMtgPendingSearch] = useState(() => { try { return localStorage.getItem("mcs_mtg_pendingSearch") || ""; } catch { return ""; } });
@@ -3609,15 +3607,8 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
         messages: [], pendingConfirmation: false,
         due: ""
       }))
-    );
-    // Also include manually fast-logged actions
-    const fromFast = (Array.isArray(fastActions) ? fastActions : []).filter(a => a.text?.trim()).map((a, i) => ({
-      ...a, id: Date.now() + 1000 + i, src: mtg.type, srcId: mtg.id || null, plant: mtg.plant,
-      section: a.section || "General", status: "IN PROCESS", priority: a.priority || "NORMAL",
-      revisions: 0, revisionHistory: [], created: todayStr(), closedOn: null,
-      dateOfAction: todayStr(), project: mtg.project || null, messages: [], pendingConfirmation: false
-    }));
-    setPhase({ fromFast, txActions: aiActions });
+     );
+    setPhase({ fromFast: [], txActions: aiActions });
   };
 
   // ── Stage action from insight card ───────────────────────────────────────
@@ -3636,10 +3627,10 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
   /* ── Paused Meeting Prompt ─────────────────────────────────────── */
   /* When meeting was stopped (running=false) but session data exists, 
      show Resume/Exit choice instead of jumping into live view */
-  const hasSessionData = (elapsed || 0) > 0 || (Array.isArray(txLines) && txLines.filter(l => l.trim()).length > 0) || (Array.isArray(fastActions) && fastActions.length > 0) || (Array.isArray(insights) && insights.length > 0);
+  const hasSessionData = (elapsed || 0) > 0 || (Array.isArray(txLines) && txLines.filter(l => l.trim()).length > 0) || (Array.isArray(insights) && insights.length > 0);
   if (!running && hasSessionData && !exitConfirm) {
     const wordCount = txLines.join(" ").split(" ").filter(Boolean).length;
-    const actionCount = (Array.isArray(insights) ? insights : []).reduce((n, ins) => n + ensureArray(ins.actions).length, 0) + (Array.isArray(fastActions) ? fastActions.length : 0);
+    const actionCount = (Array.isArray(insights) ? insights : []).reduce((n, ins) => n + ensureArray(ins.actions).length, 0);
     return (
       <div className="fade-in" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "70vh" }}>
         <div style={{ width: 520, textAlign: "center" }}>
@@ -3755,7 +3746,6 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
             <button onClick={() => { if (!running) setSttLang("hi-IN"); }} style={{ padding: "5px 12px", borderRadius: 6, border: "none", cursor: running ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 700, background: sttLang === "hi-IN" ? T.navy : "transparent", color: sttLang === "hi-IN" ? "#fff" : T.text2, transition: "all .15s", opacity: running ? .6 : 1 }} title={running ? "Stop meeting to switch language" : "Hinglish: Hindi+English mix, Indian accent"}>🇮🇳 HI/EN</button>
           </div>
           {translating && <span style={{ fontSize: 10, color: T.amber, fontWeight: 600, animation: "blink 1s infinite" }}>🔄 Translating…</span>}
-          <button className="btn btn-amber" style={{ fontWeight: 700, fontSize: 13 }} onClick={() => setShowSidePanel(true)}>⚡ + Fast Log</button>
           <div style={{ background: running ? T.red : "#636E72", color: "#fff", borderRadius: 10, padding: "8px 16px", display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#fff", flexShrink: 0, animation: running ? "blink 1s infinite" : "none" }} />
             <span style={{ fontFamily: "monospace", fontSize: 18, fontWeight: 800, letterSpacing: 2 }}>{hms(elapsed || 0)}</span>
@@ -3927,7 +3917,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
           </div>
           <div ref={txRef} style={{ background: T.bg, borderRadius: 8, padding: 12, flex: 1, minHeight: 240, maxHeight: 360, overflowY: "auto", fontSize: 12, lineHeight: 2, color: "#444" }}>
             {txLines.length === 0 && !sttInterim
-              ? <span style={{ color: "#B2BEC3" }}>{sttStatus === "unsupported" ? "Chrome STT not supported. Use Fast Log to capture actions manually." : "Microphone ready. Start speaking — transcript appears here in real time."}</span>
+              ? <span style={{ color: "#B2BEC3" }}>{sttStatus === "unsupported" ? "Chrome STT not supported. Actions will be captured via AI insights." : "Microphone ready. Start speaking — transcript appears here in real time."}</span>
               : <>
                 {txLines.filter(l => l.trim()).map((l, i) => (
                   <div key={i} style={{ padding: "3px 0", borderBottom: i < txLines.length - 1 ? `1px solid ${T.border}` : "", display: "flex", gap: 8 }}>
@@ -4060,12 +4050,6 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
               </div>
             </div>
           </>}
-          {fastActions.length > 0 && <>
-            <div style={{ borderTop: `1px solid ${T.border}`, marginTop: 10, paddingTop: 10 }}>
-              <div style={{ fontWeight: 700, fontSize: 11, color: T.amber, marginBottom: 5 }}>⚡ Fast Logged ({fastActions.length})</div>
-              {fastActions.map((a, i) => <div key={i} style={{ fontSize: 11, color: T.text, padding: "3px 0", borderBottom: `1px solid ${T.border}` }}>{a.text}</div>)}
-            </div>
-          </>}
           {/* ── Exit Meeting Section ── */}
           <div style={{ borderTop: `1.5px solid ${T.red}30`, marginTop: 16, paddingTop: 14 }}>
             <div style={{ fontWeight: 700, fontSize: 11, color: T.red, marginBottom: 8, textTransform: "uppercase", letterSpacing: .5 }}>🚪 Exit Meeting</div>
@@ -4075,7 +4059,6 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
         </div>
       </div>
 
-      {showSidePanel && <AddActionPanel users={users} plants={plants} depts={depts} defaultPlant={mtg.plant} defaultSrc={mtg.type} defaultMeeting={mtg.id} defaultProject={mtg.project} machines={machines} meetings={[mtg]} reasons={reasons} currentUser={currentUser} onSave={a => { setFastActions(p => Array.isArray(p) ? [...p, { ...a, id: Date.now() }] : [{ ...a, id: Date.now() }]); setShowSidePanel(false); }} onClose={() => setShowSidePanel(false)} />}
       {selAction && <ActionDetailPanel action={selAction} onClose={() => setSelAction(null)} onUpdate={() => { }} user={currentUser} users={users} allUsers={users} plants={plants} machines={machines} />}
     </div>
   );
