@@ -6395,29 +6395,29 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
           );
           return (
             <>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
                 <input
                   type="text"
                   placeholder="Search users..."
                   value={userSearch}
                   onChange={e => setUserSearch(e.target.value)}
-                  style={{ fontSize: 12, padding: "6px 10px", flex: 1, minWidth: 200 }}
+                  style={{ fontSize: 12, padding: "6px 10px", flex: 1, minWidth: 180 }}
                 />
-                <select value={userFilterPlant} onChange={e => setUserFilterPlant(e.target.value)} style={{ fontSize: 12, padding: "6px 10px" }}>
+                <select value={userFilterPlant} onChange={e => setUserFilterPlant(e.target.value)} style={{ fontSize: 12, padding: "6px 10px", minWidth: 140 }}>
                   <option value="All">All Plants</option>
                   {uPlants.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
-                <select value={userFilterRole} onChange={e => setUserFilterRole(e.target.value)} style={{ fontSize: 12, padding: "6px 10px" }}>
+                <select value={userFilterRole} onChange={e => setUserFilterRole(e.target.value)} style={{ fontSize: 12, padding: "6px 10px", minWidth: 140 }}>
                   <option value="All">All Roles</option>
                   {uRoles.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
-                <select value={userFilterDept} onChange={e => setUserFilterDept(e.target.value)} style={{ fontSize: 12, padding: "6px 10px" }}>
+                <select value={userFilterDept} onChange={e => setUserFilterDept(e.target.value)} style={{ fontSize: 12, padding: "6px 10px", minWidth: 140 }}>
                   <option value="All">All Depts</option>
                   {uDepts.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
                 {(userFilterPlant !== "All" || userFilterRole !== "All" || userFilterDept !== "All" || userSearch) &&
-                  <button className="btn btn-ghost btn-sm" onClick={() => { setUserFilterPlant("All"); setUserFilterRole("All"); setUserFilterDept("All"); setUserSearch(""); }}>Clear filters</button>}
-                <span style={{ fontSize: 11, color: T.text2, alignSelf: "center" }}>{filteredUsers.length} of {users.length} users</span>
+                  <button className="btn btn-ghost btn-sm" onClick={() => { setUserFilterPlant("All"); setUserFilterRole("All"); setUserFilterDept("All"); setUserSearch(""); }}>Clear</button>}
+                <span style={{ fontSize: 11, color: T.text2, marginLeft: "auto" }}>{filteredUsers.length} of {users.length} users</span>
               </div>
               {/* Mobile card list */}
               <div style={{ display: "none" }} className="master-mobile-cards">
