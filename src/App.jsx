@@ -907,7 +907,7 @@ function MultiUserSelect({ value, users, onChange, placeholder = "Select persons
   const filtered = (users || []).filter(u => !search || (u.name || "").toLowerCase().includes(search.toLowerCase()) || (u.role || "").toLowerCase().includes(search.toLowerCase()));
   return (
     <div ref={ref} style={{ position: "relative" }}>
-      <div onClick={() => setOpen(!open)} style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "5px 8px", minHeight: 34, borderRadius: 8, border: `1.5px solid ${open ? T.navy : T.border}`, background: "#fff", cursor: "pointer", alignItems: "center" }}>
+      <div onClick={() => setOpen(!open)} style={{ display: "flex", flexWrap: "nowrap", overflowX: "auto", gap: 4, padding: "5px 8px", minHeight: 34, borderRadius: 8, border: `1.5px solid ${open ? T.navy : T.border}`, background: "#fff", cursor: "pointer", alignItems: "center" }}>
         {selected.length === 0 && <span style={{ fontSize: 12, color: T.text2 }}>{placeholder}</span>}
         {selected.map(name => (
           <span key={name} style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 7px", borderRadius: 14, background: T.navy + "12", color: T.navy, fontSize: 11, fontWeight: 600 }}>
@@ -1672,7 +1672,7 @@ function ActionSidePanel({ action, onClose, onUpdate, users, plants, depts, curr
             </div>
             <button onClick={onClose} style={{ background: "rgba(255,255,255,.15)", border: "none", color: "#fff", borderRadius: 8, width: 30, height: 30, cursor: "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginLeft: 10 }}>×</button>
           </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "nowrap", overflowX: "auto" }}>
             <SBadge s={action.status} /><PBadge p={action.priority} />
             {isOverdue(action) && <span style={{ background: T.red, color: "#fff", borderRadius: 6, padding: "2px 8px", fontSize: 10, fontWeight: 700 }}>{daysOver(action)}d overdue</span>}
           </div>
@@ -2180,7 +2180,7 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
               {editMode
                 ? <input value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} style={{ fontFamily: "'Sora',sans-serif", fontSize: 22, fontWeight: 800, color: "#fff", background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.4)", borderRadius: 8, padding: "4px 10px", width: "100%", marginBottom: 6 }} />
                 : <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 22, fontWeight: 800, marginBottom: 6 }}>{pr.name}</h2>}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "nowrap", overflowX: "auto" }}>
                 <span style={{ padding: "3px 10px", borderRadius: 20, background: "rgba(255,255,255,.15)", fontSize: 11, fontWeight: 600 }}>{pr.plant}</span>
                 <span style={{ padding: "3px 10px", borderRadius: 20, background: pr.priority === "CRITICAL" ? T.red + "80" : pr.priority === "WARNING" ? T.amber + "80" : "rgba(255,255,255,.15)", fontSize: 11, fontWeight: 600 }}>{pr.priority}</span>
                 <span style={{ padding: "3px 10px", borderRadius: 20, background: "rgba(255,255,255,.15)", fontSize: 11, fontWeight: 600 }}>{pr.status}</span>
@@ -2233,7 +2233,7 @@ function ProjectCharterModal({ pr, onClose, actions, meetings, user, onProjectUp
                 {(allUsers || []).filter(u => !draft.team.includes(u.name)).map(u => <option key={u.id} value={u.name}>{u.name} ({u.role})</option>)}
               </select>}
             </div>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "nowrap", overflowX: "auto" }}>
               {(() => {
                 const rawTeam = (editMode ? draft : pr).team;
                 const safeTeam = Array.isArray(rawTeam) ? rawTeam : (typeof rawTeam === "string" && rawTeam ? [rawTeam] : []);
@@ -2413,14 +2413,14 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
                     <div style={{ flex: 1, minWidth: 0 }}>
                       {/* Feature 4: meeting title clickable to open plan */}
                       <div style={{ fontWeight: 700, fontSize: 14, color: T.navy, marginBottom: 3, cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted" }} onClick={() => setMtgPlan(m)}>{m.name || m.type}</div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+                      <div style={{ display: "flex", flexWrap: "nowrap", overflowX: "auto", gap: 6, marginBottom: 6 }}>
                         <Chip label={m.plant} color={T.navy} />
                         {m.recurring && <Chip label="Recurring" color={T.slate} />}
                         {m.scheduledDays && m.scheduledDays.length > 0 && <Chip label={m.scheduledDays.join(", ")} color={T.amber} />}
                       </div>
                       <div style={{ fontSize: 11, color: T.text2, marginBottom: 6 }}>Facilitated by <b style={{ color: T.text }}>{m.facilitator}</b></div>
                       {attendees.length > 0 && (
-                        <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "nowrap", overflowX: "auto" }}>
                           <span style={{ fontSize: 10, color: T.text2 }}>Attendees:</span>
                           {attendees.slice(0, 5).map((name, i) => <Avatar key={i} name={name} size={20} users={users} />)}
                           {attendees.length > 5 && <span style={{ fontSize: 10, color: T.text2 }}>+{attendees.length - 5}</span>}
@@ -2566,12 +2566,12 @@ function WorkPage({ plants, depts, users, onCommitFinal, actions, setActions, us
                     const doneCount = mtgActions.filter(a => a.status === "COMPLETED" || a.status === "DROPPED").length;
                     return (
                       <div key={m.id || `dm-${i}`} style={{ border: `1px solid ${T.border}`, borderRadius: 10, padding: 14 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "nowrap", overflowX: "auto" }}>
                           <div>
                             <div style={{ fontWeight: 700, fontSize: 13, color: T.navy, cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted" }} onClick={() => setMtgPlan(m)}>{m.name || m.type}</div>
                             <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{m.time} · {m.plant} · Facilitated by <b style={{ color: T.text }}>{m.facilitator}</b></div>
                           </div>
-                          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                          <div style={{ display: "flex", gap: 4, flexWrap: "nowrap", overflowX: "auto" }}>
                             {ensureArray(m.scheduledDays).map(d => <span key={d} style={{ padding: "2px 8px", borderRadius: 6, background: d === selDay.dayName ? T.navy : T.navy + "15", color: d === selDay.dayName ? "#fff" : T.navy, fontSize: 10, fontWeight: 700 }}>{d}</span>)}
                           </div>
                         </div>
@@ -2720,14 +2720,14 @@ function MeetingPlanPanel({ mtg, canEdit, projects, users, plants, onSave, onClo
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: T.text2, textTransform: "uppercase", letterSpacing: .4, marginBottom: 4 }}>Scheduled Days</div>
               {editMode
-                ? <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                ? <div style={{ display: "flex", gap: 5, flexWrap: "nowrap", overflowX: "auto" }}>
                   {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => {
                     const days = ensureArray(draft.scheduledDays || []);
                     const active = days.includes(d);
                     return <button key={d} onClick={() => up("scheduledDays", active ? days.filter(x => x !== d) : [...days, d])} style={{ padding: "4px 10px", borderRadius: 6, border: `1.5px solid ${active ? T.navy : T.border}`, background: active ? T.navy : "transparent", color: active ? "#fff" : T.text, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{d}</button>;
                   })}
                 </div>
-                : <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{ensureArray(mtg.scheduledDays || []).map(d => <span key={d} style={{ padding: "3px 10px", borderRadius: 6, background: T.navy + "15", color: T.navy, fontSize: 11, fontWeight: 600 }}>{d}</span>)}</div>
+                : <div style={{ display: "flex", gap: 5, flexWrap: "nowrap", overflowX: "auto" }}>{ensureArray(mtg.scheduledDays || []).map(d => <span key={d} style={{ padding: "3px 10px", borderRadius: 6, background: T.navy + "15", color: T.navy, fontSize: 11, fontWeight: 600 }}>{d}</span>)}</div>
               }
             </div>
           ) : null}
@@ -2761,7 +2761,7 @@ function MeetingPlanPanel({ mtg, canEdit, projects, users, plants, onSave, onClo
                 {scopedUsers(currentUser, users).filter(u => !attendees.includes(u.name)).map(u => <option key={u.id} value={u.name}>{u.name} ({u.role})</option>)}
               </select>}
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <div style={{ display: "flex", flexWrap: "nowrap", overflowX: "auto", gap: 8 }}>
               {attendees.map((name, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, background: T.bg, borderRadius: 8, padding: "5px 10px" }}>
                   <Avatar name={name} size={22} users={users || []} /><span style={{ fontSize: 12 }}>{name}</span>
@@ -2879,7 +2879,7 @@ function CompletedMeetingDashboard({ meetings, actions, users, user, plants }) {
       </div>
 
       {/* Filters & Search */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "nowrap", overflowX: "auto" }}>
         <input value={dashSearch} onChange={e => setDashSearch(e.target.value)} placeholder="🔍 Search meetings…" style={{ width: 220, fontSize: 12, padding: "6px 12px", border: `1px solid ${T.border}`, borderRadius: 8, outline: "none" }} />
         {[
           { v: "all", l: "All Time" },
@@ -2895,7 +2895,7 @@ function CompletedMeetingDashboard({ meetings, actions, users, user, plants }) {
 
       {/* Type Breakdown Cards */}
       {Object.keys(typeBreakdown).length > 0 && (
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 20 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "nowrap", overflowX: "auto", marginBottom: 20 }}>
           {Object.entries(typeBreakdown).sort((a, b) => b[1].count - a[1].count).map(([type, data]) => (
             <div key={type} className="card" style={{ padding: "10px 16px", minWidth: 160, borderLeft: `4px solid ${T.navy}` }}>
               <div style={{ fontWeight: 700, fontSize: 12, color: T.navy, marginBottom: 4 }}>{type}</div>
@@ -2935,7 +2935,7 @@ function CompletedMeetingDashboard({ meetings, actions, users, user, plants }) {
                       <span style={{ background: T.green + "18", color: T.green, borderRadius: 8, padding: "2px 10px", fontWeight: 700, fontSize: 11 }}>{s.liveActionCount || s.sessionActionCount || 0}</span>
                     </td>
                     <td style={{ padding: "10px 14px" }}>
-                      <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", gap: 2, flexWrap: "nowrap", overflowX: "auto" }}>
                         {attendees.slice(0, 3).map((name, j) => <Avatar key={j} name={name} size={18} users={users} />)}
                         {attendees.length > 3 && <span style={{ fontSize: 10, color: T.text2 }}>+{attendees.length - 3}</span>}
                       </div>
@@ -3014,7 +3014,7 @@ function WeeklyMeetingAccountability({ meetings, actions, users, user, plants, m
                     <td style={{ padding: "10px 14px", fontFamily: "monospace", fontSize: 11, color: T.text2 }}>{m.id || "—"}</td>
                     <td style={{ padding: "10px 14px", fontWeight: 600, color: T.navy }}>{m.name || m.type}</td>
                     <td style={{ padding: "10px 14px" }}>
-                      <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", gap: 3, flexWrap: "nowrap", overflowX: "auto" }}>
                         {attendees.slice(0, 5).map((name, j) => <Avatar key={j} name={name} size={22} users={users} />)}
                         {attendees.length > 5 && <span style={{ fontSize: 10, color: T.text2, alignSelf: "center" }}>+{attendees.length - 5}</span>}
                         {attendees.length === 0 && <span style={{ fontSize: 11, color: T.text2 }}>—</span>}
@@ -3173,7 +3173,7 @@ function AddMeetingModal({ plants, users, projects, onSave, onClose, currentUser
             {freqMode === "selective" && (
               <div style={{ marginTop: 10, padding: "8px 10px", background: "#fff", borderRadius: 8, border: `1px solid ${T.border}` }}>
                 <div style={{ fontSize: 11, fontWeight: 600, color: T.text2, marginBottom: 6 }}>Select days (Mon – Sat)</div>
-                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 5, flexWrap: "nowrap", overflowX: "auto" }}>
                   {DAY_OPTS.map(d => {
                     const active = f.scheduledDays.includes(d);
                     return (
@@ -3667,7 +3667,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
           </div>
         </div>
       )}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "nowrap", overflowX: "auto", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button className="btn btn-ghost btn-sm" onClick={onBack}>← Back</button>
           <div>
@@ -3707,7 +3707,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
       {/* Pending Actions table — clean Actions Register style ribbon */}
       <div className="card" style={{ padding: 0, overflow: "hidden", marginBottom: 16 }}>
         {/* Header bar */}
-        <div style={{ padding: "12px 16px", borderBottom: `1.5px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fff", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ padding: "12px 16px", borderBottom: `1.5px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fff", flexWrap: "nowrap", overflowX: "auto", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontWeight: 700, fontSize: 13, color: T.navy }}>📋 {mtg.type} — Action Points</span>
             {insights.flatMap(i => ensureArray(i.actions)).length > 0 && (
@@ -3716,7 +3716,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
               </span>
             )}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "nowrap", overflowX: "auto" }}>
             <span style={{ fontSize: 11, color: T.text2 }}>{mtgShowMine ? myPending.length : pendingRelated.length} existing</span>
             {/* All / Mine toggle */}
             <div style={{ display: "flex", background: T.bg, borderRadius: 8, padding: 3, border: `1.5px solid ${T.border}` }}>
@@ -3741,7 +3741,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
         </div>
 
         {/* Filter ribbon — matches Actions Register style */}
-        <div style={{ padding: "10px 16px", background: "#fff", borderBottom: `1px solid ${T.border}`, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ padding: "10px 16px", background: "#fff", borderBottom: `1px solid ${T.border}`, display: "flex", gap: 10, flexWrap: "nowrap", overflowX: "auto", alignItems: "flex-end" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             <input
               value={mtgPendingSearch || ""}
@@ -3989,7 +3989,7 @@ function MeetingRoom({ mtg, plants, depts, users, onCommit, onCloseMeeting, onBa
           {attendees.length > 0 && <>
             <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 10 }}>
               <div style={{ fontWeight: 700, fontSize: 11, color: T.navy, marginBottom: 5 }}>Expected Attendees</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+              <div style={{ display: "flex", flexWrap: "nowrap", overflowX: "auto", gap: 5 }}>
                 {attendees.map((name, i) => (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, background: T.bg, borderRadius: 6, padding: "2px 7px" }}>
                     <Avatar name={name} size={16} users={users} /><span style={{ fontSize: 11 }}>{name}</span>
@@ -4186,7 +4186,7 @@ function StagingArea({ staged, mtg, plants, depts, users, txLines, onCommit, onC
   };
   return (
     <div className="fade-in">
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, flexWrap: "nowrap", overflowX: "auto" }}>
         <button className="btn btn-ghost btn-sm" onClick={onBack}>← Back to Meeting</button>
         <div>
           <h1 style={{ fontFamily: "'Sora',sans-serif", fontSize: 20, fontWeight: 800, color: T.navy }}>Review & Commit Actions</h1>
@@ -4373,7 +4373,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
             <button onClick={onClose} style={{ background: T.navy, border: "none", cursor: "pointer", fontSize: 16, color: "#fff", borderRadius: 8, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
           </div>
           <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 15, fontWeight: 800, color: T.navy, lineHeight: 1.3, marginBottom: 10 }}>{action.text}</h2>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "nowrap", overflowX: "auto" }}>
             <SBadge s={displayStatus(action)} /><PBadge p={action.priority} />
             {(action.projectName || action.project) && <Chip label={"🔗 " + (action.projectName || action.project)} color={T.amber} />}
             {action.srcId && (() => { const m = (panelMeetings || []).find(x => x.id === action.srcId); if (!m) return null; return <Chip label={"📅 " + m.type + (m.plant ? " · " + m.plant : "")} color={T.navy} />; })()}
@@ -4509,7 +4509,7 @@ function ActionDetailPanel({ action, onClose, onUpdate, user, users, allUsers, p
               )}
             </div>
             {/* Actions */}
-            <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "nowrap", overflowX: "auto" }}>
               {!isGuestRole(user?.role) && !isPendingConfirm && action.status !== "COMPLETED" && action.status !== "DROPPED" && (
                 <>
                   {isAssignee && (
@@ -4789,7 +4789,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
       </PageHeader>
 
       <div className="card" style={{ padding: "14px 16px", marginBottom: 14 }}>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 10 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "nowrap", overflowX: "auto", alignItems: "flex-end", marginBottom: 10 }}>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 Search actions…" style={{ width: 200 }} />
           {[
             { label: "Plant", key: "plant", opts: scopedPlants(user, plants).map(p => p.name).filter(n => n !== "All") },
@@ -4834,7 +4834,7 @@ function ActionsPage({ actions, setActions, plants, depts, users, user, projects
         </div>
         {/* Active filter chips */}
         {Object.entries(filters).some(([, v]) => v.length > 0) && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+          <div style={{ display: "flex", flexWrap: "nowrap", overflowX: "auto", gap: 6, marginBottom: 10 }}>
             {Object.entries(filters).flatMap(([key, vals]) => vals.map(v => (
               <span key={key + v} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: T.navy + "15", color: T.navy, border: `1px solid ${T.navy}30`, borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 600 }}>
                 <span style={{ opacity: .6, fontSize: 10 }}>{key}:</span> {v}
@@ -5295,7 +5295,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
   return (
     <div className="fade-in">
       <PageHeader title="Dashboard" sub="Live accountability snapshot">
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "nowrap", overflowX: "auto", alignItems: "flex-end" }}>
           {refreshData && (
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <span style={{ fontSize: 10, fontWeight: 700, color: T.text2, textTransform: "uppercase", letterSpacing: .4 }}>&nbsp;</span>
@@ -5565,7 +5565,7 @@ function DashboardPage({ actions, plants, depts, users, audit, user, meetings, o
                     <div><div style={{ fontWeight: 600, fontSize: 13 }}>{m.name || m.type}</div><div style={{ fontSize: 11, color: T.text2 }}>{m.plant} · {m.project && <span style={{ color: T.amber }}>📎 {m.project}</span>}</div></div>
                     <div style={{ textAlign: "right" }}><div style={{ fontFamily: "'Sora',sans-serif", fontSize: 18, fontWeight: 700, color: T.navy }}>{totalMin}min</div><div style={{ fontSize: 10, color: T.text2 }}>{sessions.length} session{sessions.length !== 1 ? "s" : ""}</div></div>
                   </div>
-                  {sessions.length > 0 && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{sessions.map((s, i) => <div key={i} style={{ background: T.bg, borderRadius: 6, padding: "4px 10px", fontSize: 11 }}>{fmt(s.date)} — <b>{s.duration}min</b></div>)}</div>}
+                  {sessions.length > 0 && <div style={{ display: "flex", gap: 8, flexWrap: "nowrap", overflowX: "auto" }}>{sessions.map((s, i) => <div key={i} style={{ background: T.bg, borderRadius: 6, padding: "4px 10px", fontSize: 11 }}>{fmt(s.date)} — <b>{s.duration}min</b></div>)}</div>}
                   {sessions.length === 0 && <div style={{ fontSize: 11, color: T.text2, fontStyle: "italic" }}>No sessions recorded yet</div>}
                 </div>
               );
@@ -5695,7 +5695,7 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
             <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 16, marginBottom: 4 }}>🚨 User-Wise Escalation Matrix</div>
             <div style={{ fontSize: 12, opacity: .8 }}>When an action goes overdue, alerts are sent to the specific user configured in each tier.</div>
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "nowrap", overflowX: "auto" }}>
             {onSave && <SectionSaveButton onSave={onSave} />}
             <button
               onClick={async () => {
@@ -5738,7 +5738,7 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
         })}
       </div>
 
-      <div className="card" style={{ padding: 12, marginBottom: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+      <div className="card" style={{ padding: 12, marginBottom: 14, display: "flex", gap: 10, flexWrap: "nowrap", overflowX: "auto", alignItems: "center" }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: T.text2, textTransform: "uppercase", letterSpacing: .4 }}>Filter:</span>
         <select value={userFilter} onChange={e => setUserFilter(e.target.value)} style={{ width: 180, padding: "6px 10px" }}>
           <option value="">All Responsible Users</option>
@@ -5784,13 +5784,13 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
                 </div>
               </div>
               {!isEditing && (
-                <div style={{ display: "flex", gap: 10, padding: "10px 18px", flexWrap: "wrap", alignItems: "center" }}>
+                <div style={{ display: "flex", gap: 10, padding: "10px 18px", flexWrap: "nowrap", overflowX: "auto", alignItems: "center" }}>
                   <span style={{ fontSize: 11, background: T.bg, borderRadius: 6, padding: "4px 10px", color: T.text }}><b>Responsible:</b> {tier.fromUser || "—"}</span>
                   <span style={{ fontSize: 14, color: T.text2 }}>→</span>
                   <span style={{ fontSize: 11, background: T.bg, borderRadius: 6, padding: "4px 10px", color: T.text }}><b>Notify:</b> {tier.targetUser || "—"}</span>
                   <span style={{ fontSize: 11, background: T.bg, borderRadius: 6, padding: "4px 10px", color: T.text }}><b>Trigger:</b> {tier.overdueDays === 0 ? "On due date" : `${tier.overdueDays} day${tier.overdueDays !== 1 ? "s" : ""} overdue`}</span>
                   <span style={{ fontSize: 11, background: T.bg, borderRadius: 6, padding: "4px 10px", color: T.text }}><b>Notify via:</b> {tier.notifyMethod}</span>
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "nowrap", overflowX: "auto" }}>
                     {tier.priorities.map(p => <span key={p} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 10, fontWeight: 700, background: p === "CRITICAL" ? T.redL : p === "WARNING" ? T.amberL : "#E8F4F8", color: p === "CRITICAL" ? T.red : p === "WARNING" ? T.amber : "#1A6B8A" }}>{p}</span>)}
                   </div>
                 </div>
@@ -5830,7 +5830,7 @@ function EscMatrixTab({ escMatrix, setEscMatrix, onSave, isAdmin, canModify, use
                   </div>
                   <div>
                     <Lbl t="Badge Color" />
-                    <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "nowrap", overflowX: "auto" }}>
                       {["#E69903", "#E67E22", "#D35400", "#C0392B", "#7B241C", "#1E8449", "#272262", "#7F8C8D"].map(c => (
                         <button key={c} onClick={() => upDraft("color", c)} style={{ width: 24, height: 24, borderRadius: "50%", background: c, border: editDraft.color === c ? "3px solid #000" : "3px solid transparent", cursor: "pointer", padding: 0, outline: "none" }} />
                       ))}
@@ -5942,7 +5942,7 @@ function TeamPage({ users, actions, escMatrix, plants, depts, user, isAdmin, set
         <KPICard icon="⚠️" value={membersWithEsc} label="Members With Escalations" sub="Team mates who need attention" color={T.amber} />
       </div>
 
-      <div className="card" style={{ padding: 12, marginBottom: 16, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+      <div className="card" style={{ padding: 12, marginBottom: 16, display: "flex", gap: 10, flexWrap: "nowrap", overflowX: "auto", alignItems: "center" }}>
         <input type="text" placeholder="Search by name, role, dept…" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 200, padding: "8px 12px" }} />
         <select value={plantFilter} onChange={e => setPlantFilter(e.target.value)} style={{ width: 170 }}>
           <option value="">All Plants</option>
@@ -5974,7 +5974,7 @@ function TeamPage({ users, actions, escMatrix, plants, depts, user, isAdmin, set
                   {mine.sort((a, b) => b.tier.level - a.tier.level).map(item => {
                     const a = item.action, canClose = canCloseEscalation(m, item);
                     return (
-                      <div key={a.id} style={{ padding: "12px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                      <div key={a.id} style={{ padding: "12px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", flexWrap: "nowrap", overflowX: "auto", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
                         <div style={{ flex: 1, minWidth: 220 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                             <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 11, background: "#fff", padding: "2px 6px", borderRadius: 4 }}>{a.sn}</span>
@@ -6070,7 +6070,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
         <KPICard icon="📋" value={scopedAudit.length} label="Total Escalation Triggers" sub="Logged history of escalation events" color={T.slate} />
       </div>
 
-      <div className="card" style={{ padding: 16, marginBottom: 20, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", background: "#fff" }}>
+      <div className="card" style={{ padding: 16, marginBottom: 20, display: "flex", gap: 12, flexWrap: "nowrap", overflowX: "auto", alignItems: "center", background: "#fff" }}>
         <div style={{ flex: 1, minWidth: 200 }}>
           <input type="text" placeholder="Search by SN, text, owner, reason..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", padding: "8px 12px" }} />
         </div>
@@ -6096,7 +6096,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
           <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(""); setPlantFilter(""); setDeptFilter(""); setTierFilter(""); setShowOnlyMine(true); }} style={{ padding: "8px 12px" }}>Reset</button>
         )}
         {isEscAdmin && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto", flexWrap: "nowrap", overflowX: "auto" }}>
             <button onClick={() => setShowOnlyMine(false)}
               style={{
                 padding: "6px 12px",
@@ -6144,7 +6144,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
             const a = item.action;
             const tColor = item.tier.color || T.red;
             return (
-              <div key={a.id} className="card card-hover" onClick={() => setSelectedAction(a)} style={{ padding: "16px 20px", display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 16, borderLeft: `5px solid ${tColor}` }}>
+              <div key={a.id} className="card card-hover" onClick={() => setSelectedAction(a)} style={{ padding: "16px 20px", display: "flex", flexWrap: "nowrap", overflowX: "auto", justifyContent: "space-between", alignItems: "center", gap: 16, borderLeft: `5px solid ${tColor}` }}>
                 <div style={{ flex: 1, minWidth: 260 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                     <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 12, background: T.bg, padding: "2px 6px", borderRadius: 4, color: T.text }}>{a.sn}</span>
@@ -6152,7 +6152,7 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
                     <span style={{ fontSize: 11, color: T.red, fontWeight: 600 }}>⚠️ {item.daysOverdue}d Overdue</span>
                   </div>
                   <div style={{ fontWeight: 600, fontSize: 14, color: T.text, marginBottom: 8 }}>{a.text}</div>
-                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11, color: T.text2 }}>
+                  <div style={{ display: "flex", gap: 12, flexWrap: "nowrap", overflowX: "auto", fontSize: 11, color: T.text2 }}>
                     <span>🏭 <b>Plant:</b> {a.plant}</span>
                     <span>🗂 <b>Dept:</b> {a.dept || "—"}</span>
                     {a.machine && <span>⚙ <b>Machine:</b> {a.machine}</span>}
@@ -6193,12 +6193,12 @@ function EscalationsPage({ actions, setActions, audit, users, escMatrix, plants,
                 L{log.level}
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "nowrap", overflowX: "auto", gap: 8, marginBottom: 4 }}>
                   <span style={{ fontWeight: 700, fontSize: 13, color: T.text }}>Escalation Alert for <span style={{ fontFamily: "monospace", color: T.navy }}>{log.sn}</span></span>
                   <span style={{ fontSize: 11, color: T.text2 }}>{new Date(log.ts).toLocaleString("en-IN")}</span>
                 </div>
                 <div style={{ fontSize: 13, color: T.text, marginBottom: 6, lineHeight: 1.4 }}>{log.text}</div>
-                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11, color: T.text2 }}>
+                <div style={{ display: "flex", gap: 12, flexWrap: "nowrap", overflowX: "auto", fontSize: 11, color: T.text2 }}>
                   <span>📢 <b>Target Notified:</b> {log.target}</span>
                   <span>🔍 <b>Reason:</b> {log.reason}</span>
                 </div>
@@ -6344,13 +6344,13 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
 
   /* ── Section header with Save button ── */
   const SectionHeader = ({ title, sub, onSave, addLabel, onAdd }) => (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "nowrap", overflowX: "auto", gap: 10, marginBottom: 16 }}>
 
       <div>
         <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 15, color: T.navy }}>{title}</div>
         {sub && <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>{sub}</div>}
       </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "nowrap", overflowX: "auto" }}>
         {onAdd && <button className="btn btn-amber btn-sm" onClick={onAdd}>{addLabel || "+ Add"}</button>}
         {onSave && <SectionSaveButton onSave={onSave} />}
       </div>
@@ -6395,7 +6395,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
           );
           return (
             <>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "nowrap", overflowX: "auto", marginBottom: 14 }}>
                 <input
                   type="text"
                   placeholder="Search users..."
@@ -6570,7 +6570,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
 
       {/* ── MEETING PRESETS ── */}
       {tab === "presets" && <div className="card" style={{ padding: 20 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "nowrap", overflowX: "auto", gap: 10, marginBottom: 16 }}>
           <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 15, color: T.navy }}>Meeting Presets</div>
           <SectionSaveButton onSave={() => {
             const allTypes = Array.from(new Set([...Object.keys(mtgPresets.attendeeMap || {}), ...Object.keys(mtgPresets.instructions || {})]));
