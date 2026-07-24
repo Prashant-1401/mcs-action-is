@@ -4,23 +4,27 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.models import Department
 from app.schemas.schemas import DepartmentCreate, DepartmentUpdate
-from app.middleware.auth import require_api_key
+from app.middleware.auth import require_api_key, get_current_user
+from app.services.plant_scoping import scope_by_plant
 
 router = APIRouter(prefix="/api/departments", tags=["Departments"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/")
-async def list_departments(plant_id: str = None, db: AsyncSession = Depends(get_db)):
+async def list_departments(plant_id: str = None, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
     q = select(Department)
     if plant_id:
         q = q.where(Department.plant_id == plant_id)
+    q = scope_by_plant(q, current_user, Department.plant_id)
     result = await db.execute(q)
     return result.scalars().all()
 
 
 @router.get("/{dept_id}")
-async def get_department(dept_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Department).where(Department.id == dept_id))
+async def get_department(dept_id: str, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    q = scope_by_plant(select(Department), current_user, Department.plant_id)
+    q = q.where(Department.id == dept_id)
+    result = await db.execute(q)
     dept = result.scalar_one_or_none()
     if not dept:
         raise HTTPException(status_code=404, detail="Department not found")

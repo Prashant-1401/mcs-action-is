@@ -4,14 +4,16 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.models import Plant
 from app.schemas.schemas import PlantCreate, PlantUpdate
-from app.middleware.auth import require_api_key
+from app.middleware.auth import require_api_key, get_current_user
+from app.services.plant_scoping import scope_by_plant
 
 router = APIRouter(prefix="/api/plants", tags=["Plants"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/")
-async def list_plants(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Plant))
+async def list_plants(db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    q = scope_by_plant(select(Plant), current_user, Plant.id)
+    result = await db.execute(q)
     return result.scalars().all()
 
 

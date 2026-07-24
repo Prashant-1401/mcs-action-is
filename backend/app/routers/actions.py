@@ -10,6 +10,7 @@ from app.database import get_db, async_session
 from app.models.models import Action, ActionMessage, EscalationMatrix, User, Plant, Department
 from app.schemas.schemas import ActionCreate, ActionUpdate, ActionMessageCreate, ActionsEmailReq
 from app.middleware.auth import require_api_key, get_current_user
+from app.services.plant_scoping import scope_by_plant
 from app.services.email_service import (
     dispatch_escalation_emails, send_actions_email, dispatch_daily_digests,
     send_completion_request_email, send_completion_confirmed_email, send_completion_rejected_email,
@@ -199,6 +200,7 @@ async def list_actions(
     priority: str = None,
     responsible: str = None,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     q = select(Action)
     if plant_id:
@@ -211,6 +213,7 @@ async def list_actions(
         q = q.where(Action.priority == priority)
     if responsible:
         q = q.where(Action.responsible == responsible)
+    q = scope_by_plant(q, current_user, Action.plant_id)
     q = q.order_by(Action.created.desc())
     result = await db.execute(q)
     return result.scalars().all()
@@ -270,8 +273,10 @@ async def send_actions_to_email(data: ActionsEmailReq, db: AsyncSession = Depend
 
 
 @router.get("/{action_id}")
-async def get_action(action_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Action).where(Action.id == action_id))
+async def get_action(action_id: str, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    q = scope_by_plant(select(Action), current_user, Action.plant_id)
+    q = q.where(Action.id == action_id)
+    result = await db.execute(q)
     action = result.scalar_one_or_none()
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")

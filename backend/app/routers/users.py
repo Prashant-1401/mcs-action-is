@@ -8,7 +8,8 @@ from app.models.models import User
 from app.schemas.schemas import UserCreate, UserUpdate
 from app.services.email_service import send_welcome_email
 from app.services.password import hash_password
-from app.middleware.auth import require_api_key
+from app.middleware.auth import require_api_key, get_current_user
+from app.services.plant_scoping import scope_by_plant
 
 router = APIRouter(prefix="/api/users", tags=["Users"], dependencies=[Depends(require_api_key)])
 
@@ -51,15 +52,18 @@ def _safe_user(user: User) -> UserResponse:
 
 
 @router.get("/")
-async def list_users(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User))
+async def list_users(db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    q = scope_by_plant(select(User), current_user, User.plant_id)
+    result = await db.execute(q)
     users = result.scalars().all()
     return [_safe_user(u) for u in users]
 
 
 @router.get("/{user_id}")
-async def get_user(user_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.id == user_id))
+async def get_user(user_id: str, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    q = scope_by_plant(select(User), current_user, User.plant_id)
+    q = q.where(User.id == user_id)
+    result = await db.execute(q)
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

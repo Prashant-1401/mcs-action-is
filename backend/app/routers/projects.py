@@ -5,7 +5,8 @@ import datetime
 from app.database import get_db
 from app.models.models import Project
 from app.schemas.schemas import ProjectCreate, ProjectUpdate
-from app.middleware.auth import require_api_key
+from app.middleware.auth import require_api_key, get_current_user
+from app.services.plant_scoping import scope_by_plant
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"], dependencies=[Depends(require_api_key)])
 
@@ -13,19 +14,22 @@ DATE_FIELDS = {"start_date", "end_date"}
 
 
 @router.get("/")
-async def list_projects(plant_id: str = None, status: str = None, db: AsyncSession = Depends(get_db)):
+async def list_projects(plant_id: str = None, status: str = None, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
     q = select(Project)
     if plant_id:
         q = q.where(Project.plant_id == plant_id)
     if status:
         q = q.where(Project.status == status)
+    q = scope_by_plant(q, current_user, Project.plant_id)
     result = await db.execute(q)
     return result.scalars().all()
 
 
 @router.get("/{project_id}")
-async def get_project(project_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Project).where(Project.id == project_id))
+async def get_project(project_id: str, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    q = scope_by_plant(select(Project), current_user, Project.plant_id)
+    q = q.where(Project.id == project_id)
+    result = await db.execute(q)
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")

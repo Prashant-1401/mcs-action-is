@@ -5,7 +5,8 @@ import datetime
 from app.database import get_db
 from app.models.models import Meeting, MeetingPreset
 from app.schemas.schemas import MeetingCreate, MeetingUpdate, MeetingPresetCreate, MeetingPresetUpdate
-from app.middleware.auth import require_api_key
+from app.middleware.auth import require_api_key, get_current_user
+from app.services.plant_scoping import scope_by_plant
 
 router = APIRouter(prefix="/api/meetings", tags=["Meetings"], dependencies=[Depends(require_api_key)])
 
@@ -71,18 +72,21 @@ async def delete_meeting_preset(preset_type: str, db: AsyncSession = Depends(get
 # ── Meetings ──
 
 @router.get("/")
-async def list_meetings(plant_id: str = None, db: AsyncSession = Depends(get_db)):
+async def list_meetings(plant_id: str = None, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
     q = select(Meeting)
     if plant_id:
         q = q.where(Meeting.plant_id == plant_id)
+    q = scope_by_plant(q, current_user, Meeting.plant_id)
     q = q.order_by(Meeting.date.desc())
     result = await db.execute(q)
     return result.scalars().all()
 
 
 @router.get("/{meeting_id}")
-async def get_meeting(meeting_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
+async def get_meeting(meeting_id: str, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    q = scope_by_plant(select(Meeting), current_user, Meeting.plant_id)
+    q = q.where(Meeting.id == meeting_id)
+    result = await db.execute(q)
     meeting = result.scalar_one_or_none()
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")

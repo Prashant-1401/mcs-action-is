@@ -4,18 +4,20 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.models import Machine
 from app.schemas.schemas import MachineCreate, MachineUpdate
-from app.middleware.auth import require_api_key
+from app.middleware.auth import require_api_key, get_current_user
+from app.services.plant_scoping import scope_by_plant
 
 router = APIRouter(prefix="/api/machines", tags=["Machines"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/")
-async def list_machines(plant_id: str = None, dept_id: str = None, db: AsyncSession = Depends(get_db)):
+async def list_machines(plant_id: str = None, dept_id: str = None, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
     q = select(Machine)
     if plant_id:
         q = q.where(Machine.plant_id == plant_id)
     if dept_id:
         q = q.where(Machine.dept_id == dept_id)
+    q = scope_by_plant(q, current_user, Machine.plant_id)
     result = await db.execute(q)
     return result.scalars().all()
 

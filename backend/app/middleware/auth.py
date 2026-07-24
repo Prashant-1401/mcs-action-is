@@ -59,14 +59,12 @@ async def get_current_user(
     x_api_key: Optional[str] = Header(None),
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ):
-    """Extract user identity from JWT. Returns user dict with 'sub' (username), 'name', 'role', 'id'."""
+    """Extract user identity from JWT. Returns user dict with id, name, username, role, email, plant_id, is_admin."""
     if settings.api_key and x_api_key == settings.api_key:
-        # API key mode — no user identity available
         return None
     if credentials is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     payload = decode_token(credentials.credentials)
-    # Fetch full user from DB to get name
     from app.database import async_session
     from app.models.models import User
     from sqlalchemy import select
@@ -81,4 +79,6 @@ async def get_current_user(
             "username": user.username,
             "role": user.role,
             "email": user.email,
+            "plant_id": user.plant_id,
+            "is_admin": user.role == "Admin" or getattr(user, "master_access", False),
         }
