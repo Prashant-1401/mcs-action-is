@@ -6244,6 +6244,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
   const [userFilterPlant, setUserFilterPlant] = useState(() => { try { return localStorage.getItem("mcs_master_userFilterPlant") || "All"; } catch { return "All"; } });
   const [userFilterRole, setUserFilterRole] = useState(() => { try { return localStorage.getItem("mcs_master_userFilterRole") || "All"; } catch { return "All"; } });
   const [userFilterDept, setUserFilterDept] = useState(() => { try { return localStorage.getItem("mcs_master_userFilterDept") || "All"; } catch { return "All"; } });
+  const [userSearch, setUserSearch] = useState("");
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
   const [mcSaveStatus, setMcSaveStatus] = useState(null);
@@ -6379,7 +6380,6 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
           onSave={() => saveToAPI("Users", mUsers)}
         />
         {(() => {
-          const [userSearch, setUserSearch] = useState("");
           const uPlants = Array.from(new Set(mUsers.map(u => u.plant).filter(Boolean))).sort();
           const uRoles = Array.from(new Set(mUsers.map(u => u.role).filter(Boolean))).sort();
           const uDepts = Array.from(new Set(mUsers.map(u => u.dept).filter(Boolean))).sort();
