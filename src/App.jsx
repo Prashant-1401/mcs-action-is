@@ -543,8 +543,13 @@ function useRealtimeSync({ fetchData, user, enabled = true, intervalMs = 15000 }
   const [syncing, setSyncing] = useState(false);
   const inFlight = useRef(false);
 
+  const isEditing = () => {
+    const el = document.activeElement;
+    return el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT");
+  };
+
   const sync = useCallback(async () => {
-    if (inFlight.current || !enabled) return;
+    if (inFlight.current || !enabled || isEditing()) return;
     inFlight.current = true;
     setSyncing(true);
     try {
@@ -559,17 +564,13 @@ function useRealtimeSync({ fetchData, user, enabled = true, intervalMs = 15000 }
 
   useEffect(() => {
     if (!enabled || !user) return;
-    // Initial sync shortly after mount
     const kick = setTimeout(sync, 3000);
-    // Periodic polling
     const poll = setInterval(sync, intervalMs);
-    // Session heartbeat (keeps the session "current" / online)
     const beat = setInterval(() => {
       if (API_BASE_URL && (AUTH_TOKEN || localStorage.getItem("mcs_token"))) {
         apiPost("/api/sessions/heartbeat", {}).catch(() => {});
       }
     }, 30000);
-    // Re-sync when tab becomes visible / focused
     const onVisible = () => { if (document.visibilityState === "visible") sync(); };
     const onFocus = () => sync();
     document.addEventListener("visibilitychange", onVisible);
@@ -6378,17 +6379,30 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
           onSave={() => saveToAPI("Users", mUsers)}
         />
         {(() => {
+          const [userSearch, setUserSearch] = useState("");
           const uPlants = Array.from(new Set(mUsers.map(u => u.plant).filter(Boolean))).sort();
           const uRoles = Array.from(new Set(mUsers.map(u => u.role).filter(Boolean))).sort();
           const uDepts = Array.from(new Set(mUsers.map(u => u.dept).filter(Boolean))).sort();
           const filteredUsers = mUsers.filter(u =>
             (userFilterPlant === "All" || u.plant === userFilterPlant) &&
             (userFilterRole === "All" || u.role === userFilterRole) &&
-            (userFilterDept === "All" || u.dept === userFilterDept)
+            (userFilterDept === "All" || u.dept === userFilterDept) &&
+            (!userSearch || (u.name || "").toLowerCase().includes(userSearch.toLowerCase()) ||
+             (u.username || "").toLowerCase().includes(userSearch.toLowerCase()) ||
+             (u.dept || "").toLowerCase().includes(userSearch.toLowerCase()) ||
+             (u.plant || "").toLowerCase().includes(userSearch.toLowerCase()) ||
+             (u.role || "").toLowerCase().includes(userSearch.toLowerCase()))
           );
           return (
             <>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+                <input
+                  type="text"
+                  placeholder="Search users..."
+                  value={userSearch}
+                  onChange={e => setUserSearch(e.target.value)}
+                  style={{ fontSize: 12, padding: "6px 10px", flex: 1, minWidth: 200 }}
+                />
                 <select value={userFilterPlant} onChange={e => setUserFilterPlant(e.target.value)} style={{ fontSize: 12, padding: "6px 10px" }}>
                   <option value="All">All Plants</option>
                   {uPlants.map(p => <option key={p} value={p}>{p}</option>)}
@@ -6401,8 +6415,8 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
                   <option value="All">All Depts</option>
                   {uDepts.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
-                {(userFilterPlant !== "All" || userFilterRole !== "All" || userFilterDept !== "All") &&
-                  <button className="btn btn-ghost btn-sm" onClick={() => { setUserFilterPlant("All"); setUserFilterRole("All"); setUserFilterDept("All"); }}>Clear filters</button>}
+                {(userFilterPlant !== "All" || userFilterRole !== "All" || userFilterDept !== "All" || userSearch) &&
+                  <button className="btn btn-ghost btn-sm" onClick={() => { setUserFilterPlant("All"); setUserFilterRole("All"); setUserFilterDept("All"); setUserSearch(""); }}>Clear filters</button>}
                 <span style={{ fontSize: 11, color: T.text2, alignSelf: "center" }}>{filteredUsers.length} of {users.length} users</span>
               </div>
               {/* Mobile card list */}
@@ -6464,7 +6478,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>🏭</span>{canModify("plants", p.id) && <div><button className="btn btn-ghost btn-sm" onClick={() => openEdit("plants", p)}>Edit</button><button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove plant "${p.name}"?`)) { setPlants(prev => prev.filter(x => x.id !== p.id)); apiRemove("plants", p.id); } }}>✕</button></div>}</div>
             <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: 14, color: T.navy }}>{p.name}</div>
             <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>{p.location}</div>
-            <HR /><div style={{ fontSize: 12 }}>Head: <b>{p.head}</b></div>
+            {p.head && <><HR /><div style={{ fontSize: 12 }}>Head: <b>{p.head}</b></div></>}
           </div>)}
           {mPlants.length === 0 && <Empty icon="🏭" title="No plants" sub="Click + Add to register a plant." />}
         </div>
@@ -6477,7 +6491,7 @@ function MasterPage({ user, plants, setPlants, depts, setDepts, users, setUsers,
           {(mDepts || []).map(d => <div key={d.id} className="card" style={{ padding: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 26 }}>{d.icon || "🗂"}</span>{canModify("depts", d.id) && <div><button className="btn btn-ghost btn-sm" onClick={() => openEdit("depts", d)}>Edit</button><button className="btn btn-ghost btn-sm" style={{ color: T.red, marginLeft: 4 }} onClick={() => { if (window.confirm(`Remove department "${d.name}"?`)) { setDepts(prev => prev.filter(x => x.id !== d.id)); apiRemove("departments", d.id); } }}>✕</button></div>}</div>
             <div style={{ fontWeight: 700, fontSize: 14 }}>{d.name}</div>
-            <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>HOD: {d.head || "—"}</div>
+            {d.head && <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>HOD: {d.head}</div>}
             {d.plant && <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>Plant: {d.plant}</div>}
           </div>)}
           {mDepts.length === 0 && <Empty icon="🗂" title="No departments" sub="Click + Add to create a department." />}
